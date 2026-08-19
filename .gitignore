@@ -17,6 +17,7 @@ web/dist/
 .DS_Store
 .idea/
 .vscode/
+.codegraph/
 
 # Local maintenance scripts and unreleased changelog are not part of the package
 scripts/
