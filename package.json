@@ -57,7 +57,7 @@
     "@radix-ui/react-tabs": "^1.1.21",
     "@tailwindcss/vite": "^4.3.3",
     "@types/cross-spawn": "^6.0.6",
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.2.0",
     "@types/proper-lockfile": "^4.1.4",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/react": "^19.2.18",
