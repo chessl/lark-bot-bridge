@@ -190,9 +190,9 @@ function initializeRequest() {
     id: 1,
     params: {
       clientInfo: {
-        name: 'lark-channel-bridge',
-        title: 'Lark Channel Bridge',
-        version: '0.2.3',
+        name: 'lark-bot-bridge',
+        title: 'Lark Bot Bridge',
+        version: '0.7.0',
       },
       capabilities: null,
     },

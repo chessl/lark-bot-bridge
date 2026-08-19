@@ -1,4 +1,4 @@
-# lark-channel-bridge
+# lark-bot-bridge
 
 把飞书 / Lark 消息和本地 Claude Code、Codex CLI 或 Oh My Pi（OMP）打通的轻量 bot。用一条命令启动，扫码绑定 PersonalAgent 应用，然后在飞书里和本机编程助手对话，让它读图、处理文件、改代码。
 
@@ -29,15 +29,15 @@
 ## 安装
 
 ```bash
-npm i -g lark-channel-bridge
+npm i -g lark-bot-bridge
 # 或
-pnpm add -g lark-channel-bridge
+pnpm add -g lark-bot-bridge
 ```
 
 ## 首次启动
 
 ```bash
-lark-channel-bridge run
+lark-bot-bridge run
 ```
 
 第一次运行会进入扫码向导：
@@ -53,9 +53,9 @@ lark-channel-bridge run
 如果已经有 PersonalAgent app，可以在初始化时传 `--app-id` 跳过创建应用流程；命令会提示输入 App Secret。
 
 ```bash
-lark-channel-bridge run --app-id cli_xxx
+lark-bot-bridge run --app-id cli_xxx
 # 或直接初始化并启动后台服务
-lark-channel-bridge start --app-id cli_xxx
+lark-bot-bridge start --app-id cli_xxx
 ```
 
 Lark 国际版应用可加 `--tenant lark`。
@@ -65,9 +65,9 @@ Lark 国际版应用可加 `--tenant lark`。
 `run` 适合首次配置和前台调试。确认 bot 能正常收发消息后，先用 `Ctrl-C` 停掉前台进程，再用系统服务常驻后台：
 
 ```bash
-lark-channel-bridge start
-lark-channel-bridge status
-lark-channel-bridge stop
+lark-bot-bridge start
+lark-bot-bridge status
+lark-bot-bridge stop
 ```
 
 服务层命令必须先全局安装，不能直接用 `npx`。daemon 的 launchd plist / systemd unit / Windows 任务会记录 bridge CLI 的路径；如果这个路径来自 npm 临时缓存，缓存清掉后 daemon 就起不来。`run` 用 `npx` 单次启动没问题。
@@ -75,17 +75,17 @@ lark-channel-bridge stop
 服务层命令按 profile 注册，每个 profile 有独立服务：
 
 ```bash
-lark-channel-bridge start [--profile <name>]
-lark-channel-bridge stop [--profile <name>]
-lark-channel-bridge restart [--profile <name>]
-lark-channel-bridge status [--profile <name>]
-lark-channel-bridge unregister [--profile <name>]
+lark-bot-bridge start [--profile <name>]
+lark-bot-bridge stop [--profile <name>]
+lark-bot-bridge restart [--profile <name>]
+lark-bot-bridge status [--profile <name>]
+lark-bot-bridge unregister [--profile <name>]
 ```
 
 平台映射：
-- **macOS**：launchd 用户代理 `ai.lark-channel-bridge.bot.<profile>`
-- **Linux**：systemd 用户单元 `lark-channel-bridge.bot.<profile>.service`
-- **Windows**：Task Scheduler 任务 `LarkChannelBridge.Bot.<profile>`，launcher 是 `.cmd`
+- **macOS**：launchd 用户代理 `ai.lark-channel-bridge.bot.<profile>`（为兼容现有安装保留的稳定 service id）
+- **Linux**：systemd 用户单元 `lark-channel-bridge.bot.<profile>.service`（为兼容现有安装保留的稳定 service id）
+- **Windows**：Task Scheduler 任务 `LarkChannelBridge.Bot.<profile>`（为兼容现有安装保留的稳定 service id），launcher 是 `.cmd`
 
 daemon 日志在 `~/.lark-channel/profiles/<profile>/logs/daemon/`。
 
@@ -94,16 +94,16 @@ daemon 日志在 `~/.lark-channel/profiles/<profile>/logs/daemon/`。
 默认情况下，bridge 使用当前激活的 profile；可以通过 `profile use <name>` 切换。每个 profile 会维护独立的应用凭据、会话、工作目录和日志。只有在需要同时连接多个 PersonalAgent 应用，或分别运行不同本地 agent 时，才需要创建多个 profile：
 
 ```bash
-lark-channel-bridge start --profile claude --agent claude
-lark-channel-bridge start --profile codex --agent codex
-lark-channel-bridge start --profile omp --agent omp
+lark-bot-bridge start --profile claude --agent claude
+lark-bot-bridge start --profile codex --agent codex
+lark-bot-bridge start --profile omp --agent omp
 ```
 
 例如只重启 Codex bot：
 
 ```bash
-lark-channel-bridge restart --profile codex
-lark-channel-bridge status --profile codex
+lark-bot-bridge restart --profile codex
+lark-bot-bridge status --profile codex
 ```
 
 ## 命令速查
@@ -111,25 +111,25 @@ lark-channel-bridge status --profile codex
 ### 宿主 CLI
 
 ```text
-lark-channel-bridge run [--profile <name>] [--agent claude|codex|omp] [--workspace <path>] [-c <config>]
-lark-channel-bridge migrate [--profile <name>] [--agent claude|codex|omp]
-lark-channel-bridge ps
-lark-channel-bridge kill <id|#>
-lark-channel-bridge --help
+lark-bot-bridge run [--profile <name>] [--agent claude|codex|omp] [--workspace <path>] [-c <config>]
+lark-bot-bridge migrate [--profile <name>] [--agent claude|codex|omp]
+lark-bot-bridge ps
+lark-bot-bridge kill <id|#>
+lark-bot-bridge --help
 ```
 
 `profile use <name>` 会切换后续默认启动使用的 profile。需要同时跑多个本地 agent bot、连接多套 PersonalAgent 应用，或做脚本化部署时，再使用这些 profile 管理命令：
 
 ```bash
-lark-channel-bridge profile create claude --agent claude
-lark-channel-bridge profile create codex --agent codex
-lark-channel-bridge profile create omp --agent omp
-lark-channel-bridge profile list
-lark-channel-bridge profile use <name>
-lark-channel-bridge profile remove <name>
-lark-channel-bridge profile remove <name> --purge --yes
-lark-channel-bridge profile export <name> [--output ./profile.json] [--force]
-lark-channel-bridge profile export <name> --include-secrets --yes
+lark-bot-bridge profile create claude --agent claude
+lark-bot-bridge profile create codex --agent codex
+lark-bot-bridge profile create omp --agent omp
+lark-bot-bridge profile list
+lark-bot-bridge profile use <name>
+lark-bot-bridge profile remove <name>
+lark-bot-bridge profile remove <name> --purge --yes
+lark-bot-bridge profile export <name> [--output ./profile.json] [--force]
+lark-bot-bridge profile export <name> --include-secrets --yes
 ```
 
 `profile remove` 默认归档本地状态，也可以删除当前激活的 profile。若还剩其他 profile，会自动切到下一个；若这是最后一个 profile，会清空 root config，之后可以用同名重新创建。只有加 `--purge --yes` 才会永久删除。`profile export` 默认脱敏 app secret；只有加 `--include-secrets --yes` 才会导出敏感配置。
@@ -335,13 +335,13 @@ pnpm build
 想接自己的监控时，用环境变量指向一个 default export（或导出 `createAdapter`）`AdapterFactory` 的模块：
 
 ```bash
-LARK_CHANNEL_TELEMETRY_MODULE=your-telemetry-package lark-channel-bridge start
+LARK_CHANNEL_TELEMETRY_MODULE=your-telemetry-package lark-bot-bridge start
 ```
 
 该模块会收到每一条 `log.*` 事件，以及错误 / 指标钩子，转发到任何你想要的地方。接口从包根导出：
 
 ```ts
-import type { AdapterFactory, TelemetryAdapter, TelemetryEvent } from 'lark-channel-bridge';
+import type { AdapterFactory, TelemetryAdapter, TelemetryEvent } from 'lark-bot-bridge';
 
 const createAdapter: AdapterFactory = (meta) => ({
   emit(event) {/* 上报事件 */},

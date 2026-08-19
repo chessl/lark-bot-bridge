@@ -1,4 +1,4 @@
-# lark-channel-bridge
+# lark-bot-bridge
 
 A lightweight bot that bridges Feishu / Lark messenger with your local Claude Code, Codex CLI, or Oh My Pi (OMP). Run one command, scan a QR code to bind a PersonalAgent app, and talk to your local coding agent from chat.
 
@@ -29,15 +29,15 @@ For a product walkthrough, see the [Feishu document](https://larkcommunity.feish
 ## Install
 
 ```bash
-npm i -g lark-channel-bridge
+npm i -g lark-bot-bridge
 # or
-pnpm add -g lark-channel-bridge
+pnpm add -g lark-bot-bridge
 ```
 
 ## First run
 
 ```bash
-lark-channel-bridge run
+lark-bot-bridge run
 ```
 
 The first run opens a QR-code wizard:
@@ -53,9 +53,9 @@ You do not need to choose a project directory up front. The bridge creates a pro
 If you already have a PersonalAgent app, pass `--app-id` during initialization to skip app creation. The command prompts for the App Secret.
 
 ```bash
-lark-channel-bridge run --app-id cli_xxx
+lark-bot-bridge run --app-id cli_xxx
 # or initialize and start the background service directly
-lark-channel-bridge start --app-id cli_xxx
+lark-bot-bridge start --app-id cli_xxx
 ```
 
 For Lark global apps, add `--tenant lark`.
@@ -65,9 +65,9 @@ For Lark global apps, add `--tenant lark`.
 Use `run` for first-run setup and foreground debugging. After the bot can send and receive messages, stop the foreground process with `Ctrl-C`, then use an OS-managed service for background operation:
 
 ```bash
-lark-channel-bridge start
-lark-channel-bridge status
-lark-channel-bridge stop
+lark-bot-bridge start
+lark-bot-bridge status
+lark-bot-bridge stop
 ```
 
 Install globally before using service commands. The daemon's launchd plist / systemd unit / Windows task records the bridge CLI path; if that path comes from an npm temp cache through `npx`, the daemon can break when the cache is cleaned. `run` is fine through `npx` as a one-shot foreground process.
@@ -75,17 +75,17 @@ Install globally before using service commands. The daemon's launchd plist / sys
 Service commands install a per-profile service:
 
 ```bash
-lark-channel-bridge start [--profile <name>]
-lark-channel-bridge stop [--profile <name>]
-lark-channel-bridge restart [--profile <name>]
-lark-channel-bridge status [--profile <name>]
-lark-channel-bridge unregister [--profile <name>]
+lark-bot-bridge start [--profile <name>]
+lark-bot-bridge stop [--profile <name>]
+lark-bot-bridge restart [--profile <name>]
+lark-bot-bridge status [--profile <name>]
+lark-bot-bridge unregister [--profile <name>]
 ```
 
 Platform mapping:
-- **macOS**: launchd user agent `ai.lark-channel-bridge.bot.<profile>`
-- **Linux**: systemd user unit `lark-channel-bridge.bot.<profile>.service`
-- **Windows**: Task Scheduler task `LarkChannelBridge.Bot.<profile>`, launched through a `.cmd` wrapper
+- **macOS**: launchd user agent `ai.lark-channel-bridge.bot.<profile>` (stable legacy service id)
+- **Linux**: systemd user unit `lark-channel-bridge.bot.<profile>.service` (stable legacy service id)
+- **Windows**: Task Scheduler task `LarkChannelBridge.Bot.<profile>` (stable legacy service id), launched through a `.cmd` wrapper
 
 Daemon logs are under `~/.lark-channel/profiles/<profile>/logs/daemon/`.
 
@@ -94,16 +94,16 @@ Daemon logs are under `~/.lark-channel/profiles/<profile>/logs/daemon/`.
 By default, the bridge starts with the currently selected profile. Use `profile use <name>` to change it. Each profile keeps its own app credentials, sessions, working directories, and logs. Create multiple profiles only when you need to connect multiple PersonalAgent apps or run different local agents as separate bots:
 
 ```bash
-lark-channel-bridge start --profile claude --agent claude
-lark-channel-bridge start --profile codex --agent codex
-lark-channel-bridge start --profile omp --agent omp
+lark-bot-bridge start --profile claude --agent claude
+lark-bot-bridge start --profile codex --agent codex
+lark-bot-bridge start --profile omp --agent omp
 ```
 
 For example, to restart only the Codex bot:
 
 ```bash
-lark-channel-bridge restart --profile codex
-lark-channel-bridge status --profile codex
+lark-bot-bridge restart --profile codex
+lark-bot-bridge status --profile codex
 ```
 
 ## Commands
@@ -111,25 +111,25 @@ lark-channel-bridge status --profile codex
 ### Host CLI
 
 ```text
-lark-channel-bridge run [--profile <name>] [--agent claude|codex|omp] [--workspace <path>] [-c <config>]
-lark-channel-bridge migrate [--profile <name>] [--agent claude|codex|omp]
-lark-channel-bridge ps
-lark-channel-bridge kill <id|#>
-lark-channel-bridge --help
+lark-bot-bridge run [--profile <name>] [--agent claude|codex|omp] [--workspace <path>] [-c <config>]
+lark-bot-bridge migrate [--profile <name>] [--agent claude|codex|omp]
+lark-bot-bridge ps
+lark-bot-bridge kill <id|#>
+lark-bot-bridge --help
 ```
 
 `profile use <name>` changes the profile used by later default starts. Use these profile management commands when running separate local-agent bots, connecting multiple PersonalAgent apps, or doing scripted deployment:
 
 ```bash
-lark-channel-bridge profile create claude --agent claude
-lark-channel-bridge profile create codex --agent codex
-lark-channel-bridge profile create omp --agent omp
-lark-channel-bridge profile list
-lark-channel-bridge profile use <name>
-lark-channel-bridge profile remove <name>
-lark-channel-bridge profile remove <name> --purge --yes
-lark-channel-bridge profile export <name> [--output ./profile.json] [--force]
-lark-channel-bridge profile export <name> --include-secrets --yes
+lark-bot-bridge profile create claude --agent claude
+lark-bot-bridge profile create codex --agent codex
+lark-bot-bridge profile create omp --agent omp
+lark-bot-bridge profile list
+lark-bot-bridge profile use <name>
+lark-bot-bridge profile remove <name>
+lark-bot-bridge profile remove <name> --purge --yes
+lark-bot-bridge profile export <name> [--output ./profile.json] [--force]
+lark-bot-bridge profile export <name> --include-secrets --yes
 ```
 
 `profile remove` archives local state by default, including the active profile. If other profiles remain, the bridge switches to the next one; if it was the last profile, the root config is cleared so the same name can be created again. `--purge --yes` permanently deletes local state. `profile export` redacts app secrets by default; `--include-secrets --yes` includes sensitive config.
@@ -335,13 +335,13 @@ By default the bridge reports **nothing**: no metrics, no logs leave your machin
 To wire up your own monitoring, point an environment variable at a module that default-exports (or exports `createAdapter`) an `AdapterFactory`:
 
 ```bash
-LARK_CHANNEL_TELEMETRY_MODULE=your-telemetry-package lark-channel-bridge start
+LARK_CHANNEL_TELEMETRY_MODULE=your-telemetry-package lark-bot-bridge start
 ```
 
 That module receives every `log.*` event plus error/metric hooks and forwards them wherever you like. The interface is exported from the package root:
 
 ```ts
-import type { AdapterFactory, TelemetryAdapter, TelemetryEvent } from 'lark-channel-bridge';
+import type { AdapterFactory, TelemetryAdapter, TelemetryEvent } from 'lark-bot-bridge';
 
 const createAdapter: AdapterFactory = (meta) => ({
   emit(event) {/* ship event */},

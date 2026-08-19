@@ -16,4 +16,21 @@ describe('CLI command registration', () => {
     const appSecretOptions = source.match(/--app-secret <secret>/g) ?? [];
     expect(appSecretOptions.length).toBeGreaterThanOrEqual(3);
   });
+
+  it('registers the lark-bot-bridge executable name', async () => {
+    const [source, packageJson] = await Promise.all([
+      readFile(join(process.cwd(), 'src', 'cli', 'index.ts'), 'utf8'),
+      readFile(join(process.cwd(), 'package.json'), 'utf8'),
+    ]);
+    const pkg = JSON.parse(packageJson) as {
+      name: string;
+      bin: Record<string, string>;
+    };
+
+    expect(source).toContain(".name('lark-bot-bridge')");
+    expect(pkg.name).toBe('lark-bot-bridge');
+    expect(pkg.bin).toEqual({
+      'lark-bot-bridge': './bin/lark-bot-bridge.mjs',
+    });
+  });
 });

@@ -78,7 +78,7 @@ export function systemdUnitPath(profile: string = paths.profile): string {
 /**
  * schtasks task name. Backslashes turn into Task Scheduler "folders" so
  * `LarkChannelBridge\Bot` would create a Bot task under a LarkChannelBridge
- * folder. We keep it flat for now.
+ * folder. This legacy identifier stays stable across CLI/package renames.
  */
 export const WINDOWS_TASK_NAME = windowsTaskName();
 

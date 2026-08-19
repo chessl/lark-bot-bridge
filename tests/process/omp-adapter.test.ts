@@ -78,7 +78,7 @@ describe('OmpAdapter process contract', () => {
       LARK_CHANNEL_CONFIG: join(fake.dir, 'config.json'),
       LARKSUITE_CLI_CONFIG_DIR: join(fake.dir, 'lark-cli'),
     });
-    expect(record.systemPrompt).toContain('lark-channel-bridge 运行约定');
+    expect(record.systemPrompt).toContain('lark-bot-bridge 运行约定');
     expect(record.systemPrompt).toContain('ou_bot');
     expect(record.commands.map((command) => command.type)).toEqual([
       'negotiate_protocol',

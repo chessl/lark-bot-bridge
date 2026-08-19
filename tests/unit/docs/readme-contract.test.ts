@@ -31,6 +31,15 @@ describe('README runtime contract', () => {
     }
   });
 
+  it('documents the lark-bot-bridge package and CLI names', async () => {
+    const docs = await readDocs();
+
+    expect(docs).toContain('# lark-bot-bridge');
+    expect(docs).toContain('npm i -g lark-bot-bridge');
+    expect(docs).toContain('lark-bot-bridge run');
+    expect(docs).not.toContain('npm i -g lark-channel-bridge');
+  });
+
   it('keeps CLI help aligned with profile-aware service and first-run workspace flags', async () => {
     const [cli, help, configCard] = await Promise.all([
       readFile(new URL('../../../src/cli/index.ts', import.meta.url), 'utf8'),

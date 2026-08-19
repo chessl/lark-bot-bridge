@@ -1,5 +1,5 @@
 {
-  "name": "lark-channel-bridge",
+  "name": "lark-bot-bridge",
   "version": "0.7.0",
   "description": "Bridge Feishu/Lark messenger with local CLI coding agents",
   "type": "module",
@@ -10,14 +10,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zarazhangrui/feishu-claude-code-bridge.git"
+    "url": "git+https://github.com/chessl/lark-bot-bridge.git"
   },
   "bugs": {
-    "url": "https://github.com/zarazhangrui/feishu-claude-code-bridge/issues"
+    "url": "https://github.com/chessl/lark-bot-bridge/issues"
   },
-  "homepage": "https://github.com/zarazhangrui/feishu-claude-code-bridge#readme",
+  "homepage": "https://github.com/chessl/lark-bot-bridge#readme",
   "bin": {
-    "lark-channel-bridge": "./bin/lark-channel-bridge.mjs"
+    "lark-bot-bridge": "./bin/lark-bot-bridge.mjs"
   },
   "exports": {
     ".": {
