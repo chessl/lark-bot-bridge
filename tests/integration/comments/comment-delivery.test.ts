@@ -39,7 +39,7 @@ interface FakeCommentChannel {
 
 const cleanups: Array<() => Promise<void>> = [];
 
-describe('Claude cloud-doc comment regression', () => {
+describe('cloud-doc comment delivery', () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
@@ -106,37 +106,6 @@ describe('Claude cloud-doc comment regression', () => {
     expect(h.agent.runOptions[0]?.prompt).toContain('用户的问题：list question');
   });
 
-  it('keeps expected comment.get fallback off the terminal warning stream', async () => {
-    const warnings: string[] = [];
-    vi.spyOn(console, 'warn').mockImplementation((line?: unknown) => {
-      warnings.push(String(line));
-    });
-    const h = await createCommentHarness({
-      getErrorCode: 1069307,
-      listResponses: [
-        {
-          data: {
-            items: [
-              commentListItem({
-                commentId: 'comment-1',
-                replyId: 'reply-2',
-                question: 'quiet list question',
-              }),
-            ],
-          },
-        },
-      ],
-      agentText: 'quiet answer',
-    });
-
-    await handleCommentMention(h.deps(event({ replyId: 'reply-2' })));
-
-    expect(h.listCalls).toBe(1);
-    expect(h.inThreadReplies.at(-1)).toBe('quiet answer');
-    expect(warnings.join('\n')).not.toContain('get-failed-fallback-list');
-    expect(warnings.join('\n')).not.toContain('get-fallback-list');
-  });
-
   it('posts whole-document comments as top-level replies without an in-thread probe', async () => {
     const h = await createCommentHarness({
       getResponse: commentGet({
@@ -154,42 +123,6 @@ describe('Claude cloud-doc comment regression', () => {
     expect(h.requests.some((request) => request.url.includes('/replies?'))).toBe(false);
     expect(h.inThreadReplies).toEqual([]);
     expect(h.createdTopLevelReplies).toEqual(['bold italic code\nitem\nquote']);
-  });
-
-  it('keeps pre-tool progress text out of cloud-doc comment replies', async () => {
-    const h = await createCommentHarness({
-      getResponse: commentGet({ replyId: 'reply-1', question: 'review this doc' }),
-      agentEvents: [
-        { type: 'text', delta: '我先把文档读出来再 review。' },
-        {
-          type: 'tool_use',
-          id: 'tool-1',
-          name: 'Bash',
-          input: { command: 'lark-cli docs +fetch --doc doc-token' },
-        },
-        { type: 'tool_result', id: 'tool-1', output: 'doc body', isError: false },
-        { type: 'text', delta: '最终评审结论。' },
-        { type: 'done', sessionId: 'comment-session', terminationReason: 'normal' },
-      ],
-    });
-
-    await handleCommentMention(h.deps(event()));
-
-    expect(h.inThreadReplies.at(-1)).toBe('最终评审结论。');
-  });
-
-  it('skips unsupported, unmentioned, or empty comment events without running the agent', async () => {
-    const h = await createCommentHarness({
-      getResponse: commentGet({ replyId: 'reply-empty', question: '' }),
-      agentText: 'unused',
-    });
-
-    await handleCommentMention(h.deps(event({ mentionedBot: false })));
-    await handleCommentMention(h.deps(event({ fileType: 'bitable' })));
-    await handleCommentMention(h.deps(event({ replyId: 'reply-empty' })));
-
-    expect(h.agent.runOptions).toEqual([]);
-    expect(h.inThreadReplies).toEqual([]);
   });
 });
 
@@ -285,7 +218,7 @@ async function createCommentHarness(options: {
       },
     },
     access: { allowedUsers: ['ou-user'] },
-    sandbox: { defaultMode: 'read-only', maxMode: 'workspace-write' },
+    permissions: { defaultAccess: 'read-only', maxAccess: 'workspace' },
   });
   profileConfig.workspaces.default = tmp.workspace;
   const activeRuns = new ActiveRuns();

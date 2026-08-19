@@ -83,9 +83,9 @@ lark-bot-bridge unregister [--profile <name>]
 ```
 
 Platform mapping:
-- **macOS**: launchd user agent `ai.lark-channel-bridge.bot.<profile>` (stable legacy service id)
-- **Linux**: systemd user unit `lark-channel-bridge.bot.<profile>.service` (stable legacy service id)
-- **Windows**: Task Scheduler task `LarkChannelBridge.Bot.<profile>` (stable legacy service id), launched through a `.cmd` wrapper
+- **macOS**: launchd user agent `ai.lark-bot-bridge.bot.<profile>`
+- **Linux**: systemd user unit `lark-bot-bridge.bot.<profile>.service`
+- **Windows**: Task Scheduler task `LarkBotBridge.Bot.<profile>`, launched through a `.cmd` wrapper
 
 Daemon logs are under `~/.lark-bot-bridge/profiles/<profile>/logs/daemon/`.
 
@@ -112,7 +112,6 @@ lark-bot-bridge status --profile codex
 
 ```text
 lark-bot-bridge run [--profile <name>] [--agent claude|codex|omp] [--workspace <path>] [-c <config>]
-lark-bot-bridge migrate [--profile <name>] [--agent claude|codex|omp]
 lark-bot-bridge ps
 lark-bot-bridge kill <id|#>
 lark-bot-bridge --help
@@ -219,7 +218,6 @@ Mode mapping:
 | `workspace` | `acceptEdits` | `workspace-write` | unsupported |
 | `read-only` | `plan` | `read-only` | unsupported |
 
-The legacy `sandbox` field is still readable for old configs. After the bridge saves the profile, it migrates that setting to canonical `permissions`.
 
 OMP profiles currently require `defaultAccess: "full"` because OMP RPC does not expose an enforceable workspace sandbox. The bridge rejects restricted OMP runs rather than silently weakening the configured policy.
 

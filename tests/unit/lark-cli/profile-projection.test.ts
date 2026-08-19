@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 describe('writeLarkCliSourceProjection', () => {
-  it('writes a profile-scoped legacy lark-channel source config', async () => {
+  it('writes a profile-scoped lark-channel source config', async () => {
     const root = await tempRoot();
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'codex-dev' });
     const cfg: AppConfig = {

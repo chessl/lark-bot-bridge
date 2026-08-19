@@ -9,7 +9,7 @@ import {
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 
 describe('agent capability contract', () => {
-  it('defines Claude capability with legacy callback marker compatibility', () => {
+  it('defines Claude capability', () => {
     const capability = claudeCapability();
 
     expect(capability).toMatchObject({
@@ -20,7 +20,6 @@ describe('agent capability contract', () => {
       systemPrompt: BRIDGE_SYSTEM_PROMPT,
       callback: {
         marker: '__bridge_cb',
-        legacyMarkers: ['__claude_cb'],
       },
     });
   });

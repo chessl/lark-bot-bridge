@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   preFlightChecks: vi.fn(),
   materializeEnvSecretForService: vi.fn(),
   resolveProfileRuntime: vi.fn(),
-  readAndPrune: vi.fn(),
+  readRegistry: vi.fn(),
   checkRuntimeLock: vi.fn(),
   stopProcessEntry: vi.fn(),
   readActiveProfile: vi.fn(),
@@ -25,7 +25,7 @@ vi.mock('../../../src/runtime/profile-runtime', () => ({
 }));
 
 vi.mock('../../../src/runtime/registry', () => ({
-  readAndPrune: mocks.readAndPrune,
+  readRegistry: mocks.readRegistry,
 }));
 
 vi.mock('../../../src/runtime/locks', () => ({
@@ -124,7 +124,7 @@ describe('profile-aware service commands', () => {
     vi.spyOn(console, 'log').mockImplementation((line: string) => {
       lines.push(line);
     });
-    mocks.readAndPrune.mockReturnValueOnce([]).mockReturnValue([
+    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
       processEntry({
         id: 'p1',
         pid: 12345,
@@ -153,7 +153,6 @@ describe('profile-aware service commands', () => {
         appSecret: undefined,
         tenant: undefined,
         allowBootstrap: true,
-        handleActiveBridgeMigrationConflict: expect.any(Function),
       }),
     );
     expect(mocks.resolveProfileRuntime).toHaveBeenNthCalledWith(2, {
@@ -274,7 +273,7 @@ describe('profile-aware service commands', () => {
         },
         cfg: materializedCfg,
       });
-    mocks.readAndPrune.mockReturnValueOnce([]).mockReturnValue([
+    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
       processEntry({
         id: 'p1',
         pid: 12345,
@@ -330,7 +329,7 @@ describe('profile-aware service commands', () => {
         startedAt: '2026-05-26T10:50:33.082Z',
       },
     });
-    mocks.readAndPrune.mockReturnValueOnce([]).mockReturnValue([
+    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
       processEntry({
         id: 'p1',
         pid: 12345,
@@ -370,7 +369,7 @@ describe('profile-aware service commands', () => {
       .mockResolvedValueOnce({ locked: true, meta: holder })
       .mockResolvedValueOnce({ locked: false })
       .mockResolvedValueOnce({ locked: false });
-    mocks.readAndPrune.mockReturnValueOnce([]).mockReturnValue([
+    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
       processEntry({
         id: 'p1',
         pid: 12345,
@@ -445,7 +444,7 @@ describe('profile-aware service commands', () => {
         agentKind: 'claude',
       },
     });
-    mocks.readAndPrune.mockReturnValueOnce([]).mockReturnValue([
+    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
       processEntry({
         id: 'p2',
         pid: 12346,
@@ -475,7 +474,6 @@ describe('profile-aware service commands', () => {
         appSecret: 'manual-secret',
         tenant: 'feishu',
         allowBootstrap: true,
-        handleActiveBridgeMigrationConflict: expect.any(Function),
       }),
     );
     expect(mocks.resolveProfileRuntime).toHaveBeenNthCalledWith(2, {
@@ -515,7 +513,7 @@ describe('profile-aware service commands', () => {
         ? supervisor
         : { ...mocks.adapter, fileExists: vi.fn(() => false) },
     );
-    mocks.readAndPrune.mockReturnValue([]);
+    mocks.readRegistry.mockReturnValue([]);
 
     await runServiceStop();
 

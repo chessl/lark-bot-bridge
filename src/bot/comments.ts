@@ -4,26 +4,26 @@ import { dirname } from 'node:path';
 import type { CommentEvent, LarkChannel } from '@larksuite/channel';
 import { capabilityForProfile } from '../agent/capability';
 import type { AgentAdapter, AgentEvent } from '../agent/types';
-import { getAgentStopGraceMs } from '../config/schema';
 import type { Controls } from '../commands';
 import { resolveAppPaths } from '../config/app-paths';
+import { getAgentStopGraceMs } from '../config/schema';
 import { log } from '../core/logger';
 import { evaluateRunPolicy } from '../policy/run-policy';
 import { resolveWorkingDirectory } from '../policy/workspace';
 import { RunRejected } from '../runtime/errors';
-import type { ActiveRuns } from './active-runs';
-import { recordRunSessionEvent } from './run-flow';
 import type { RunExecutor } from '../runtime/run-executor';
 import type { SessionCatalog } from '../session/catalog';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
+import type { ActiveRuns } from './active-runs';
 import {
   commentDocumentScopeId,
   commentScopeId,
   commentTokenDigest,
-  resolveCommentTarget,
   type ResolvedCommentTarget,
+  resolveCommentTarget,
 } from './comment-resource';
+import { recordRunSessionEvent } from './run-flow';
 
 export { commentDocumentScopeId, commentScopeId } from './comment-resource';
 
@@ -128,7 +128,6 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
   const commentThreadScopeId = eventCommentScopeId;
   const runScopeId = commentExecutionScopeId(commentThreadScopeId);
   const docSessionScopeId = commentDocumentSessionScopeId(target.fileToken);
-  const legacyDocSessionScopeId = legacyCommentDocumentSessionScopeId(target.fileToken);
   const agentSessionScopeId = docSessionScopeId;
 
   const ctx = await fetchCommentContext(channel, target, evt).catch((err) => {
@@ -152,7 +151,7 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
   });
   const prompt = buildCommentPrompt(target, ctx);
   const workspace = await resolveCommentWorkingDirectory(
-    workspaces.cwdFor(docSessionScopeId) ?? workspaces.cwdFor(legacyDocSessionScopeId),
+    workspaces.cwdFor(docSessionScopeId),
     controls.profileConfig.workspaces.default,
     managedDefaultWorkspaceForComments(controls),
   );
@@ -232,24 +231,16 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
     try {
       const canResumeAgentSession = !agentSessionRun.wasActive;
       const catalogEntry = canResumeAgentSession
-        ? (sessionCatalog?.activeFor({
+        ? sessionCatalog?.activeFor({
             scopeId: agentSessionScopeId,
             agentId: capability.agentId,
             cwdRealpath,
             policyFingerprint: policy.policyFingerprint,
-          }) ??
-          sessionCatalog?.activeFor({
-            scopeId: legacyDocSessionScopeId,
-            agentId: capability.agentId,
-            cwdRealpath,
-            policyFingerprint: policy.policyFingerprint,
-          }))
+          })
         : undefined;
       const sessionId =
         canResumeAgentSession && capability.sessionKind !== 'codex-thread'
-          ? (catalogEntry?.sessionId ??
-            sessions.resumeFor(docSessionScopeId, cwdRealpath) ??
-            sessions.resumeFor(legacyDocSessionScopeId, cwdRealpath))
+          ? catalogEntry?.sessionId
           : undefined;
       const threadId =
         capability.sessionKind === 'codex-thread' ? catalogEntry?.threadId : undefined;
@@ -331,15 +322,11 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
           const e = next.value;
           recordCommentSessionEvent({
             scopeId: agentSessionScopeId,
-            sessions,
             sessionCatalog,
             capability,
             policy,
             event: e,
           });
-          if (capability.sessionKind !== 'codex-thread' && e.type === 'system' && e.sessionId) {
-            sessions.set(docSessionScopeId, e.sessionId, policy.cwdRealpath);
-          }
           switch (e.type) {
             case 'text':
               answer += e.delta;
@@ -537,10 +524,6 @@ function commentDocumentSessionScopeId(fileToken: string): string {
   return `doc:${commentTokenDigest(fileToken)}`;
 }
 
-function legacyCommentDocumentSessionScopeId(fileToken: string): string {
-  return `doc:${fileToken}`;
-}
-
 function markCommentAgentSessionRun(scopeId: string): {
   wasActive: boolean;
   release(): void;
@@ -721,10 +704,7 @@ function isBridgeSelfReply(channel: LarkChannel, evt: CommentEvent): boolean {
   if (!metadata || typeof metadata !== 'object') return false;
   const record = metadata as Record<string, unknown>;
   return (
-    record.bridge === true ||
-    record.bridgeReply === true ||
-    record.source === 'lark-bot-bridge' ||
-    record.source === 'lark-channel-bridge'
+    record.bridge === true || record.bridgeReply === true || record.source === 'lark-bot-bridge'
   );
 }
 

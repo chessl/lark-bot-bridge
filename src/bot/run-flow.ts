@@ -4,8 +4,8 @@ import type { AgentEvent } from '../agent/types';
 import type { ProfileConfig } from '../config/profile-schema';
 import type { AccessDecision } from '../policy/access';
 import {
-  evaluateRunPolicy,
   type AgentAttachment,
+  evaluateRunPolicy,
   type RunPolicyAllow,
   type RunPolicyReject,
   type ScopeContext,
@@ -15,10 +15,9 @@ import {
   type WorkingDirectoryRejectReason,
   type WorkingDirectoryResolveResult,
 } from '../policy/workspace';
-import type { RunExecution, RunExecutor } from '../runtime/run-executor';
 import { RunRejected, type RunRejectedCode } from '../runtime/errors';
+import type { RunExecution, RunExecutor } from '../runtime/run-executor';
 import type { SessionCatalog } from '../session/catalog';
-import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
 
 export interface StartRunFlowInput {
@@ -29,7 +28,6 @@ export interface StartRunFlowInput {
   access: AccessDecision;
   capability: AgentCapability;
   profileConfig: ProfileConfig;
-  sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
   executor: RunExecutor;
@@ -67,7 +65,6 @@ export type StartRunFlowResult =
 
 export interface RecordRunSessionEventInput {
   scopeId: string;
-  sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   capability: AgentCapability;
   policy: RunPolicyAllow;
@@ -128,14 +125,6 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
       resumeFrom = sessionId;
     }
   }
-  if (!resumeFrom && input.capability.sessionKind !== 'codex-thread') {
-    resumeFrom = input.sessions.resumeFor(input.scopeId, workspace.cwdRealpath);
-    sessionId = resumeFrom;
-    const stale = input.sessions.getRaw(input.scopeId);
-    if (!resumeFrom && stale?.cwd && stale.cwd !== workspace.cwdRealpath) {
-      input.sessions.clear(input.scopeId);
-    }
-  }
 
   let execution: RunExecution;
   try {
@@ -189,7 +178,6 @@ export function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
   if (input.event.type !== 'system') return;
   if (input.capability.sessionKind !== 'codex-thread' && input.event.sessionId) {
     const cwdRealpath = input.event.cwd ?? input.policy.cwdRealpath;
-    input.sessions.set(input.scopeId, input.event.sessionId, cwdRealpath);
     input.sessionCatalog?.upsertActive({
       scopeId: input.scopeId,
       agentId: input.capability.agentId,

@@ -1,9 +1,6 @@
 import { Command } from 'commander';
 import pkg from '../../package.json';
 import { formatAgentPreflightDiagnostic, getAgentPreflightDiagnostic } from '../agent/preflight';
-import { runMigrate } from './commands/migrate';
-import { runKillCli, runPs } from './commands/ps';
-import { runSecretsGet, runSecretsList, runSecretsRemove, runSecretsSet } from './commands/secrets';
 import {
   runProfileCreate,
   runProfileExport,
@@ -11,6 +8,8 @@ import {
   runProfileRemove,
   runProfileUse,
 } from './commands/profile';
+import { runKillCli, runPs } from './commands/ps';
+import { runSecretsGet, runSecretsList, runSecretsRemove, runSecretsSet } from './commands/secrets';
 import {
   runServiceRestart,
   runServiceStart,
@@ -32,7 +31,7 @@ program
 
 program
   .command('run')
-  .description('Run the bridge in the foreground (was `start` in older versions)')
+  .description('Run the bridge in the foreground')
   .option('-c, --config <path>', 'path to config file')
   .option('--profile <name>', 'profile name to run')
   .option(
@@ -63,16 +62,6 @@ program
       await runStart(opts);
     },
   );
-
-program
-  .command('migrate')
-  .description('Migrate legacy bridge config/state into the current profile layout')
-  .option('-c, --config <path>', 'path to config file')
-  .option('--profile <name>', 'target profile name for legacy v1 config migration')
-  .option('--agent <kind>', 'agent kind for legacy v1 profile migration (claude, codex, or omp)')
-  .action(async (opts: { config?: string; profile?: string; agent?: string }) => {
-    await runMigrate(opts);
-  });
 
 const profile = program.command('profile').description('Manage local bridge profiles');
 
@@ -154,9 +143,8 @@ profile
 program
   .command('ui')
   .description('Open the local web console (config, profiles, online bots) in your browser')
-  .option('--profile <name>', 'profile name (defaults to active profile)')
   .option('--print', 'print the URL instead of opening a browser')
-  .action(async (opts: { profile?: string; print?: boolean }) => {
+  .action(async (opts: { print?: boolean }) => {
     await runUi(opts);
   });
 
@@ -170,7 +158,7 @@ program
 program
   .command('kill <target>')
   .description(
-    'Kill a running bridge process by short id or list index (SIGTERM, then SIGKILL after 2s). Was `stop <target>` in older versions.',
+    'Kill a running bridge process by short id or list index (SIGTERM, then SIGKILL after 2s)',
   )
   .action(async (target: string) => {
     await runKillCli(target);

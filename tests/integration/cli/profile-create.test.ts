@@ -15,7 +15,7 @@ import { secretKeyForApp } from '../../../src/config/schema';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
 
 const auth = vi.hoisted(() => ({
-  validateAppCredentials: vi.fn(async () => ({ ok: true, botName: 'Claude Regression' })),
+  validateAppCredentials: vi.fn(async () => ({ ok: true, botName: 'Claude Work' })),
 }));
 
 vi.mock('../../../src/utils/feishu-auth', () => ({
@@ -36,31 +36,31 @@ describe('profile create command', () => {
     await mkdir(workspace, { recursive: true });
     await writeProfiles(root, 'codex-dev', ['codex-dev']);
 
-    await runProfileCreate('claude-regression', {
+    await runProfileCreate('claude-work', {
       rootDir: root,
       agent: 'claude',
       workspace,
-      appId: 'cli_claude_regression',
+      appId: 'cli_claude_work',
       appSecret: 'manual-secret',
       tenant: 'feishu',
     });
 
     const savedText = await readFile(join(root, 'config.json'), 'utf8');
     const saved = JSON.parse(savedText) as RootConfig;
-    const appPaths = resolveAppPaths({ rootDir: root, profile: 'claude-regression' });
-    const secret = await getSecret(secretKeyForApp('cli_claude_regression'), appPaths);
+    const appPaths = resolveAppPaths({ rootDir: root, profile: 'claude-work' });
+    const secret = await getSecret(secretKeyForApp('cli_claude_work'), appPaths);
     const workspaceRealpath = await realpath(workspace);
 
     expect(auth.validateAppCredentials).toHaveBeenCalledWith(
-      'cli_claude_regression',
+      'cli_claude_work',
       'manual-secret',
       'feishu',
     );
     expect(saved.activeProfile).toBe('codex-dev');
     await expect(readFile(join(root, 'active-profile'), 'utf8')).resolves.toBe('codex-dev\n');
     expect(saved.profiles['codex-dev']?.agentKind).toBe('codex');
-    expect(saved.profiles['claude-regression']?.agentKind).toBe('claude');
-    expect(saved.profiles['claude-regression']?.workspaces.default).toBe(workspaceRealpath);
+    expect(saved.profiles['claude-work']?.agentKind).toBe('claude');
+    expect(saved.profiles['claude-work']?.workspaces.default).toBe(workspaceRealpath);
     expect(savedText).not.toContain('manual-secret');
     expect(secret).toBe('manual-secret');
   });
@@ -94,12 +94,11 @@ describe('profile create command', () => {
     const configPath = join(root, 'config.json');
     const saved = JSON.parse(await readFile(configPath, 'utf8'));
     expect(saved.profiles['codex-dev']?.agentKind).toBe('codex');
-    expect(saved.profiles['codex-dev']).not.toHaveProperty('sandbox');
 
     const loaded = await loadRootConfig(configPath);
-    expect(loaded?.profiles['codex-dev']?.sandbox).toMatchObject({
-      defaultMode: 'danger-full-access',
-      maxMode: 'danger-full-access',
+    expect(loaded?.profiles['codex-dev']?.permissions).toEqual({
+      defaultAccess: 'full',
+      maxAccess: 'full',
     });
   });
 

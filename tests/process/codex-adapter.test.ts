@@ -76,7 +76,6 @@ describe('CodexAdapter process contract', () => {
     expect(record.stdin).toContain('lark-cli auth login');
     expect(record.stdin).toContain('LARK_CHANNEL_PROFILE');
     expect(record.stdin).toContain('LARKSUITE_CLI_CONFIG_DIR');
-    expect(record.stdin).not.toContain('lark-cli config bind --source lark-channel');
     expect(record.stdin).toContain('hello from lark');
     expect(record.stdin).not.toBe('hello from lark');
     expect(record.env).toMatchObject({

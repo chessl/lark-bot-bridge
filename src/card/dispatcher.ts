@@ -4,16 +4,16 @@ import type { ActiveRuns } from '../bot/active-runs';
 import type { ChatModeCache } from '../bot/chat-mode-cache';
 import type { PendingQueue } from '../bot/pending-queue';
 import type { ProcessPool } from '../bot/process-pool';
-import type { CallbackAuth } from './callback-auth';
-import { runCommandHandler, type CommandContext, type Controls } from '../commands';
+import { commandSessionCatalogIdentity } from '../bot/session-catalog-identity';
+import { lookupMessageThreadId } from '../bot/thread-id';
+import { type CommandContext, type Controls, runCommandHandler } from '../commands';
 import { log } from '../core/logger';
 import { canUseDm, canUseGroup } from '../policy/access';
 import type { RunExecutor } from '../runtime/run-executor';
 import type { SessionCatalog } from '../session/catalog';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
-import { commandSessionCatalogIdentity } from '../bot/session-catalog-identity';
-import { lookupMessageThreadId } from '../bot/thread-id';
+import type { CallbackAuth } from './callback-auth';
 
 /** Marker key on a button's value object that flags the cardAction as
  * a callback that should be forwarded back to the agent instead
@@ -22,7 +22,6 @@ import { lookupMessageThreadId } from '../bot/thread-id';
  * fields the agent might set.
  */
 const BRIDGE_CALLBACK_MARKER = '__bridge_cb';
-const LEGACY_CLAUDE_CALLBACK_MARKER = '__claude_cb';
 
 export interface CardDispatchDeps {
   channel: LarkChannel;
@@ -74,11 +73,6 @@ export async function handleCardAction(deps: CardDispatchDeps): Promise<void> {
       operator: operatorId.slice(-6),
       reason: accessDecision.reason,
     });
-    return;
-  }
-
-  if (LEGACY_CLAUDE_CALLBACK_MARKER in payload) {
-    log.info('cardAction', 'skip-legacy-callback-marker', { scope });
     return;
   }
 
@@ -231,15 +225,9 @@ function isSignedBridgeCallback(payload: Record<string, unknown>): boolean {
   return BRIDGE_CALLBACK_MARKER in payload || typeof payload.bridge_token === 'string';
 }
 
-/** Turn a button payload like {cmd:'ws.use', name:'proj-a'} into the arg
- * string the text-command handler expects: 'use proj-a'. Accepts `arg`
- * (preferred, generic) or `name` (legacy ws cards). */
 function composeArgs(sub: string, payload: Record<string, unknown>): string {
   if (!sub) return '';
-  const arg =
-    (typeof payload.arg === 'string' && payload.arg) ||
-    (typeof payload.name === 'string' && payload.name) ||
-    '';
+  const arg = typeof payload.arg === 'string' ? payload.arg : '';
   return arg ? `${sub} ${arg}` : sub;
 }
 

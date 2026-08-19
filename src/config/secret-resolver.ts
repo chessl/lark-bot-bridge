@@ -1,11 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
-import { spawnProcess, type SpawnedProcessByStdio } from '../platform/spawn';
+import { type SpawnedProcessByStdio, spawnProcess } from '../platform/spawn';
+import type { AppPaths } from './app-paths';
 import { getSecret, type KeystorePaths } from './keystore';
 import { paths } from './paths';
 import type { AppConfig, ProviderConfig, SecretInput, SecretRef } from './schema';
 import { isSecretRef, secretKeyForApp } from './schema';
+
+type SecretResolverPaths = KeystorePaths & Partial<Pick<AppPaths, 'secretsGetterScript'>>;
 
 /**
  * Bridge runtime secret resolver. Mirrors the lark-cli `ResolveSecretInput`
@@ -32,7 +35,7 @@ const DEFAULT_EXEC_MAX_OUTPUT = 64 * 1024;
 
 export async function resolveAppSecret(
   cfg: AppConfig,
-  secretPaths: KeystorePaths = paths,
+  secretPaths: SecretResolverPaths = paths,
 ): Promise<string> {
   const appId = cfg.accounts.app.id;
   const secret = cfg.accounts.app.secret;
@@ -43,7 +46,7 @@ async function resolveSecretInput(
   input: SecretInput,
   secretsCfg: AppConfig['secrets'],
   appId: string,
-  secretPaths: KeystorePaths,
+  secretPaths: SecretResolverPaths,
 ): Promise<string> {
   if (!input) {
     throw new Error('app secret is missing');
@@ -119,13 +122,13 @@ async function resolveExecRef(
   ref: SecretRef,
   pc: ProviderConfig | undefined,
   appId: string,
-  secretPaths: KeystorePaths,
+  secretPaths: SecretResolverPaths,
 ): Promise<string> {
   if (!pc?.command) {
     throw new Error('exec provider missing `command`');
   }
 
-  if (isSelfBridgeCommand(pc.command, pc.args)) {
+  if (isSelfBridgeCommand(pc.command, secretPaths)) {
     // Short-circuit: read keystore directly. The expected id under the
     // bridge convention is `app-<appId>`; if the user wired something
     // else, fall back to ref.id verbatim.
@@ -140,21 +143,9 @@ async function resolveExecRef(
   return spawnExecProvider(pc, ref);
 }
 
-function isSelfBridgeCommand(command: string, args: string[] | undefined): boolean {
-  // Canonical form (post-wrapper): command is our own secrets-getter
-  // script and args is empty. Match path exactly.
-  if (command === paths.secretsGetterScript) return true;
-  if (command === `${paths.secretsGetterScript}.cmd`) return true;
-  // Legacy / hand-edited form: command is node and args end with
-  // ['secrets', 'get']. Keep this branch so configs written by older
-  // bridge versions, or by power-users editing config.json directly,
-  // still short-circuit and avoid a re-spawn.
-  if (args && args.length >= 2) {
-    const a = args[args.length - 2];
-    const b = args[args.length - 1];
-    if (a === 'secrets' && b === 'get') return true;
-  }
-  return false;
+function isSelfBridgeCommand(command: string, secretPaths: SecretResolverPaths): boolean {
+  const wrapper = secretPaths.secretsGetterScript ?? paths.secretsGetterScript;
+  return command === wrapper || command === `${wrapper}.cmd`;
 }
 
 async function spawnExecProvider(pc: ProviderConfig, ref: SecretRef): Promise<string> {

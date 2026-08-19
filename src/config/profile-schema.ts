@@ -1,16 +1,14 @@
-import type { AppCredentials, AppPreferences, MessageReplyMode, SecretsConfig } from './schema';
 import {
-  normalizePermissions,
-  permissionsToLegacySandbox,
   type AccessMode,
   type CodexSandboxMode,
+  normalizePermissions,
   type PermissionConfig,
-  type PermissionSource,
 } from './permissions';
+import type { AppCredentials, AppPreferences, MessageReplyMode, SecretsConfig } from './schema';
 
 export type AgentKind = 'claude' | 'codex' | 'omp';
 export type SandboxMode = CodexSandboxMode;
-export type { AccessMode, PermissionConfig, PermissionSource };
+export type { AccessMode, PermissionConfig };
 
 export interface ProfileAccess {
   allowedUsers: string[];
@@ -24,13 +22,6 @@ export interface ProfileAccess {
    * priority over `requireMentionInGroup` for the chats it lists.
    */
   chatRequireMention?: Record<string, boolean>;
-}
-
-export interface SandboxConfig {
-  default?: SandboxMode;
-  max?: SandboxMode;
-  defaultMode: SandboxMode;
-  maxMode: SandboxMode;
 }
 
 export interface CodexConfig {
@@ -59,8 +50,6 @@ export interface AttachmentConfig {
   cacheTtlMs: number;
   cacheMaxBytes: number;
 }
-
-export type CommentConfig = Record<string, never>;
 
 /** Where the agent's answer goes when it responds to meeting content. */
 export type MeetingRespondIn = 'meeting' | 'im' | 'both';
@@ -156,13 +145,10 @@ export interface ProfileConfig {
   workspaces: {
     default?: string;
   };
-  sandbox: SandboxConfig;
   permissions: PermissionConfig;
-  permissionSource?: PermissionSource;
   codex?: CodexConfig;
   omp?: OmpConfig;
   attachments: AttachmentConfig;
-  comments: CommentConfig;
   /** In-meeting agent settings. See {@link MeetingConfig}. */
   meeting: MeetingConfig;
   larkCli: LarkCliConfig;
@@ -187,9 +173,6 @@ export interface RootConfig {
   activeProfile: string;
   preferences: Record<string, never>;
   secrets?: SecretsConfig;
-  migrations?: {
-    permissionDefaultsV1?: string[];
-  };
   profiles: Record<string, ProfileConfig>;
 }
 
@@ -202,7 +185,6 @@ export interface CreateDefaultProfileConfigInput {
   };
   preferences?: AppPreferences;
   access?: Partial<ProfileAccess>;
-  sandbox?: Partial<SandboxConfig>;
   permissions?: Partial<PermissionConfig>;
   codex?: CodexConfig;
   secrets?: SecretsConfig;
@@ -226,22 +208,15 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     mode?: unknown;
     accounts?: unknown;
     secrets?: SecretsConfig;
-    preferences?: (AppPreferences & { access?: Partial<ProfileAccess> }) | undefined;
+    preferences?: AppPreferences;
     access?: Partial<ProfileAccess>;
     workspaces?: {
       default?: unknown;
-      // Legacy workspace authorization fields are accepted for config
-      // compatibility only; normalizeWorkspaces drops them.
-      trusted?: unknown;
-      trustedRoots?: unknown;
-      riskFlags?: unknown;
     };
-    sandbox?: Partial<SandboxConfig>;
     permissions?: Partial<PermissionConfig>;
-    codex?: CodexConfig & { flags?: unknown };
+    codex?: CodexConfig;
     omp?: OmpConfig;
     attachments?: Partial<AttachmentConfig>;
-    comments?: unknown;
     meeting?: unknown;
     larkCli?: unknown;
   };
@@ -261,17 +236,9 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   }
 
   const preferences = normalizePreferences(raw.preferences);
-  const access = normalizeAccess(
-    raw.access ?? raw.preferences?.access,
-    raw.preferences?.requireMentionInGroup,
-  );
-  const { permissions, source: permissionSource } = normalizePermissions({
-    permissions: raw.permissions,
-    sandbox: raw.sandbox,
-  });
-  const sandbox = permissionsToLegacySandbox(permissions);
+  const access = normalizeAccess(raw.access);
+  const permissions = normalizePermissions(raw.permissions);
   const workspaces = normalizeWorkspaces(raw.workspaces);
-  const comments = normalizeComments(raw.comments);
   const meeting = normalizeMeeting(raw.meeting);
   const larkCli = normalizeLarkCli(raw.larkCli);
 
@@ -284,9 +251,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     preferences,
     access,
     workspaces,
-    sandbox,
     permissions,
-    permissionSource,
     ...(raw.codex ? { codex: normalizeCodex(raw.codex) } : {}),
     ...(raw.omp ? { omp: normalizeOmp(raw.omp) } : {}),
     attachments: {
@@ -297,7 +262,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
       cacheTtlMs: numberOr(raw.attachments?.cacheTtlMs, 24 * 60 * 60 * 1000),
       cacheMaxBytes: numberOr(raw.attachments?.cacheMaxBytes, 512 * 1024 * 1024),
     },
-    comments,
     meeting,
     larkCli,
   };
@@ -343,17 +307,13 @@ function isMessageReply(value: unknown): value is MessageReplyMode {
   return value === 'card' || value === 'markdown' || value === 'text';
 }
 
-function normalizeAccess(
-  access: Partial<ProfileAccess> | undefined,
-  legacyRequireMentionInGroup: boolean | undefined,
-): ProfileAccess {
+function normalizeAccess(access: Partial<ProfileAccess> | undefined): ProfileAccess {
   const chatRequireMention = normalizeChatMentionMap(access?.chatRequireMention);
   return {
     allowedUsers: stringArray(access?.allowedUsers),
     allowedChats: stringArray(access?.allowedChats),
     admins: stringArray(access?.admins),
-    requireMentionInGroup: access?.requireMentionInGroup ?? legacyRequireMentionInGroup ?? true,
-    // Omit when empty so configs without per-chat overrides stay clean.
+    requireMentionInGroup: access?.requireMentionInGroup ?? true,
     ...(Object.keys(chatRequireMention).length > 0 ? { chatRequireMention } : {}),
   };
 }
@@ -369,21 +329,14 @@ function normalizeChatMentionMap(input: unknown): Record<string, boolean> {
 }
 
 function normalizeWorkspaces(
-  input:
-    | {
-        default?: unknown;
-        trusted?: unknown;
-        trustedRoots?: unknown;
-        riskFlags?: unknown;
-      }
-    | undefined,
+  input: { default?: unknown } | undefined,
 ): ProfileConfig['workspaces'] {
   const defaultWorkspace =
     typeof input?.default === 'string' && input.default.trim() ? input.default.trim() : undefined;
   return defaultWorkspace ? { default: defaultWorkspace } : {};
 }
 
-function normalizeCodex(input: CodexConfig & { flags?: unknown }): CodexConfig {
+function normalizeCodex(input: CodexConfig): CodexConfig {
   const codex: CodexConfig = {
     binaryPath: input.binaryPath,
     ...(typeof input.realpath === 'string' ? { realpath: input.realpath } : {}),
@@ -408,10 +361,6 @@ function normalizeOmp(input: OmpConfig): OmpConfig {
     binaryPath: input.binaryPath,
     ...(profile ? { profile } : {}),
   };
-}
-
-function normalizeComments(_input: unknown): CommentConfig {
-  return {};
 }
 
 /** Defaults keep the in-meeting agent off until a profile opts in. */

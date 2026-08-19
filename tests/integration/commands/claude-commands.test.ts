@@ -46,34 +46,26 @@ describe('Claude slash command visible behavior', () => {
     expect(h.channel.sent).toEqual([]);
   });
 
-  it('handles /new and /reset by clearing session state', async () => {
+  it('handles /new and /reset', async () => {
     const h = await createHarness();
-    h.sessions.set('chat-1', 'old-session', h.tmp.workspace);
 
     await expect(h.run('/new')).resolves.toBe(true);
     expect(lastMarkdown(h.channel)).toBe('已开始新会话。');
-    expect(h.sessions.getRaw('chat-1')).toBeUndefined();
-
-    h.sessions.set('chat-1', 'old-session-2', h.tmp.workspace);
     await expect(h.run('/reset')).resolves.toBe(true);
     expect(lastMarkdown(h.channel)).toBe('已开始新会话。');
-    expect(h.sessions.getRaw('chat-1')).toBeUndefined();
   });
 
-  it('keeps the per-scope timeout override when /new clears the resumable session', async () => {
+  it('keeps the per-scope timeout override when starting a new conversation', async () => {
     const h = await createHarness();
-    h.sessions.set('chat-1', 'old-session', h.tmp.workspace);
     h.sessions.setIdleTimeoutMinutes('chat-1', 15);
 
     await expect(h.run('/new')).resolves.toBe(true);
 
-    expect(h.sessions.resumeFor('chat-1', h.tmp.workspace)).toBeUndefined();
     expect(h.sessions.getIdleTimeoutMinutes('chat-1')).toBe(15);
   });
 
-  it('handles /cd by requiring absolute paths and resetting session on success', async () => {
+  it('handles /cd by requiring absolute paths and switching on success', async () => {
     const h = await createHarness();
-    h.sessions.set('chat-1', 'old-session', '/old');
 
     await expect(h.run('/cd relative')).resolves.toBe(true);
     expect(lastMarkdown(h.channel)).toContain('请使用绝对路径');
@@ -82,7 +74,6 @@ describe('Claude slash command visible behavior', () => {
     const workspaceRealpath = await realpath(h.tmp.workspace);
     expect(lastMarkdown(h.channel)).toContain(`已切换 cwd 到 \`${workspaceRealpath}\``);
     expect(h.workspaces.cwdFor('chat-1')).toBe(workspaceRealpath);
-    expect(h.sessions.getRaw('chat-1')).toBeUndefined();
   });
 
   it('handles /ws list, save, use, and remove', async () => {
@@ -126,16 +117,6 @@ describe('Claude slash command visible behavior', () => {
 
     expect(lastMarkdown(h.channel)).toContain('工作目录别名已保存');
     expect(lastMarkdown(h.channel)).toContain(h.tmp.workspace);
-  });
-
-  it('handles /resume use by pinning the requested session', async () => {
-    const h = await createHarness();
-    h.workspaces.setCwd('chat-1', h.tmp.workspace);
-
-    await expect(h.run('/resume use sess-1234567890')).resolves.toBe(true);
-
-    expect(h.sessions.resumeFor('chat-1', h.tmp.workspace)).toBe('sess-1234567890');
-    expect(lastMarkdown(h.channel)).toContain('已完成');
   });
 
   it('handles /status and /help with cards', async () => {

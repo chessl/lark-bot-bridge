@@ -1,4 +1,3 @@
-import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -20,7 +19,6 @@ import {
 } from '../../../src/config/profile-schema.js';
 import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionCatalog } from '../../../src/session/catalog.js';
-import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
@@ -59,26 +57,8 @@ describe('agent-aware run-flow resume', () => {
     });
   });
 
-  it('falls back to legacy Claude sessions when the agent-aware catalog has no match', async () => {
-    const h = await createHarness('claude');
-    const cwdRealpath = await realpath(h.tmp.workspace);
-    h.sessions.set('chat-1', 'legacy-session', cwdRealpath);
-
-    const run = await start(h);
-
-    expect(run.ok).toBe(true);
-    if (!run.ok) throw new Error('expected resumed legacy run');
-    expect(run.resumeFrom).toBe('legacy-session');
-    expect(h.agent.runOptions[0]).toMatchObject({
-      sessionId: 'legacy-session',
-      threadId: undefined,
-    });
-  });
-
-  it('resumes Codex thread from catalog and ignores legacy Claude SessionStore entries', async () => {
+  it('resumes Codex threads from the catalog', async () => {
     const h = await createHarness('codex');
-    const cwdRealpath = await realpath(h.tmp.workspace);
-    h.sessions.set('chat-1', 'legacy-claude-session', cwdRealpath);
     const probe = await start(h);
     expect(probe.ok).toBe(true);
     if (!probe.ok) throw new Error('expected probe run');
@@ -163,7 +143,6 @@ describe('agent-aware run-flow resume', () => {
 
     recordRunSessionEvent({
       scopeId: 'chat-1',
-      sessions: claude.sessions,
       sessionCatalog: claude.catalog,
       capability: claudeCapability(claude.profileConfig),
       policy: claudeRun.policy,
@@ -178,7 +157,6 @@ describe('agent-aware run-flow resume', () => {
         policyFingerprint: claudeRun.policy.policyFingerprint,
       }),
     ).toMatchObject({ sessionId: 'sess-recorded' });
-    expect(claude.sessions.resumeFor('chat-1', claudeRun.cwdRealpath)).toBe('sess-recorded');
 
     const codex = await createHarness('codex');
     const codexRun = await start(codex);
@@ -188,7 +166,6 @@ describe('agent-aware run-flow resume', () => {
 
     recordRunSessionEvent({
       scopeId: 'chat-1',
-      sessions: codex.sessions,
       sessionCatalog: codex.catalog,
       capability: codexCapability(codex.profileConfig),
       policy: codexRun.policy,
@@ -203,7 +180,6 @@ describe('agent-aware run-flow resume', () => {
         policyFingerprint: codexRun.policy.policyFingerprint,
       }),
     ).toMatchObject({ threadId: 'thread-recorded' });
-    expect(codex.sessions.getRaw('chat-1')).toBeUndefined();
   });
 });
 
@@ -211,7 +187,6 @@ async function createHarness(agentKind: AgentKind): Promise<{
   tmp: TmpProfile;
   agent: FakeAgentAdapter;
   executor: RunExecutor;
-  sessions: SessionStore;
   workspaces: WorkspaceStore;
   catalog: SessionCatalog;
   profileConfig: ProfileConfig;
@@ -236,10 +211,9 @@ async function createHarness(agentKind: AgentKind): Promise<{
   });
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   workspaces.setCwd('chat-1', tmp.workspace);
-  const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
   const catalog = new SessionCatalog(join(tmp.profile, 'session-catalog.json'));
   cleanups.push(async () => {
-    await Promise.all([sessions.flush(), workspaces.flush(), catalog.flush()]);
+    await Promise.all([workspaces.flush(), catalog.flush()]);
     await tmp.cleanup();
   });
   return {
@@ -252,7 +226,6 @@ async function createHarness(agentKind: AgentKind): Promise<{
       createRunId: () => `run-${agent.runOptions.length + 1}`,
       now: () => 1000,
     }),
-    sessions,
     workspaces,
     catalog,
     profileConfig: {
@@ -280,7 +253,6 @@ async function start(h: Awaited<ReturnType<typeof createHarness>>) {
     access: { ok: true, reason: 'allowed-user' },
     capability: capabilityForProfile(h.profileConfig),
     profileConfig: h.profileConfig,
-    sessions: h.sessions,
     sessionCatalog: h.catalog,
     workspaces: h.workspaces,
     executor: h.executor,

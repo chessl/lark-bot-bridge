@@ -24,9 +24,9 @@ describe('profile-scoped daemon paths and arguments', () => {
     expect(launchAgentLabel('codex-dev')).toContain('codex-dev');
     expect(systemdUnitName('claude')).not.toBe(systemdUnitName('codex-dev'));
     expect(windowsTaskName('claude')).not.toBe(windowsTaskName('codex-dev'));
-    expect(launchAgentLabel('claude')).toBe('ai.lark-channel-bridge.bot.claude');
-    expect(systemdUnitName('claude')).toBe('lark-channel-bridge.bot.claude.service');
-    expect(windowsTaskName('claude')).toBe('LarkChannelBridge.Bot.claude');
+    expect(launchAgentLabel('claude')).toBe('ai.lark-bot-bridge.bot.claude');
+    expect(systemdUnitName('claude')).toBe('lark-bot-bridge.bot.claude.service');
+    expect(windowsTaskName('claude')).toBe('LarkBotBridge.Bot.claude');
     expect(daemonStdoutPath('claude')).not.toBe(daemonStdoutPath('codex-dev'));
     expect(daemonStderrPath('codex-dev').replace(/\\/g, '/')).toContain(
       '/profiles/codex-dev/logs/daemon/',

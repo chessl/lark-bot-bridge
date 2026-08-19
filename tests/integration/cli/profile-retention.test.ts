@@ -201,8 +201,8 @@ describe('profile retention and export', () => {
       providers: {
         bridge: {
           source: 'exec',
-          command: process.execPath,
-          args: ['secrets', 'get'],
+          command: appPaths.secretsGetterScript,
+          args: [],
         },
       },
     };
@@ -260,41 +260,6 @@ describe('profile retention and export', () => {
     await expect(readFile(output, 'utf8')).resolves.toContain('"activeProfile": "claude"');
     await expect(runProfileExport('claude', { rootDir: root, output })).rejects.toThrow(/--force/);
     await runProfileExport('claude', { rootDir: root, output, force: true });
-  });
-
-  it('exports profile permissions with migration markers and without runtime-only fields', async () => {
-    const root = await makeRoot();
-    await writeProfiles(root, 'claude', ['claude']);
-    const rootConfig = await readRoot(root);
-    rootConfig.migrations = { permissionDefaultsV1: ['claude'] };
-    const profile = rootConfig.profiles.claude!;
-    profile.permissions = {
-      defaultAccess: 'workspace',
-      maxAccess: 'workspace',
-    };
-    profile.sandbox = {
-      default: 'workspace-write',
-      max: 'workspace-write',
-      defaultMode: 'workspace-write',
-      maxMode: 'workspace-write',
-    };
-    (profile as typeof profile & { permissionSource?: string }).permissionSource = 'permissions';
-    await writeJson(join(root, 'config.json'), rootConfig);
-    const lines: string[] = [];
-    vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
-
-    await runProfileExport('claude', { rootDir: root });
-
-    const exported = JSON.parse(lines.pop() ?? '') as RootConfig & {
-      profiles: Record<string, Record<string, unknown>>;
-    };
-    expect(exported.migrations).toEqual({ permissionDefaultsV1: ['claude'] });
-    expect(exported.profiles.claude?.permissions).toEqual({
-      defaultAccess: 'workspace',
-      maxAccess: 'workspace',
-    });
-    expect(exported.profiles.claude).not.toHaveProperty('sandbox');
-    expect(exported.profiles.claude).not.toHaveProperty('permissionSource');
   });
 });
 

@@ -1,22 +1,21 @@
-import { isComplete } from '../../config/schema';
 import { createInterface } from 'node:readline';
 import { paths } from '../../config/paths';
 import { loadRootConfig, readActiveProfile } from '../../config/profile-store';
+import { isComplete } from '../../config/schema';
 import { daemonStderrPath, daemonStdoutPath, SUPERVISOR_SERVICE_ID } from '../../daemon/paths';
 import {
   getServiceAdapter,
   type ServiceAdapter,
   type ServiceResultLike,
 } from '../../daemon/service-adapter';
+import { checkRuntimeLock, type RuntimeLockMeta } from '../../runtime/locks';
 import {
   materializeEnvSecretForService,
   resolveProfileRuntime,
 } from '../../runtime/profile-runtime';
-import { readAndPrune, type ProcessEntry } from '../../runtime/registry';
-import { checkRuntimeLock, type RuntimeLockMeta } from '../../runtime/locks';
+import { type ProcessEntry, readRegistry } from '../../runtime/registry';
 import { preFlightChecks } from '../preflight';
-import { promptAndStopActiveBridgeMigrationConflict } from './migrate';
-import { stopProcessEntry, type StopProcessEntryResult } from './ps';
+import { type StopProcessEntryResult, stopProcessEntry } from './ps';
 
 export interface ServiceStartOptions {
   profile?: string;
@@ -87,7 +86,7 @@ async function lookupProfileEntry(profile: string): Promise<ProcessEntry | undef
   const runtime = await maybeResolveProfileRuntime(profile);
   const appId = runtime?.cfg.accounts?.app?.id;
   if (!appId) return undefined;
-  return readAndPrune().find(
+  return readRegistry().find(
     (e) => e.appId === appId && e.profileName === profile && Boolean(e.botName),
   );
 }
@@ -163,13 +162,6 @@ async function ensureBridgeConfigured(
     appSecret: opts.appSecret,
     tenant: opts.tenant,
     allowBootstrap: true,
-    handleActiveBridgeMigrationConflict: async (err) => {
-      const handled = await promptAndStopActiveBridgeMigrationConflict(err, {
-        cancelMessage: '已取消启动。',
-      });
-      if (!handled) process.exit(0);
-      return true;
-    },
   });
   if (!isComplete(cfg)) {
     console.error('bot 还没配置 app 凭据。');
@@ -264,7 +256,7 @@ async function waitForServiceConnect(
 ): Promise<ProcessEntry | undefined> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const live = readAndPrune();
+    const live = readRegistry();
     const fresh = live.find(
       (e) =>
         e.appId === appId &&
@@ -291,7 +283,7 @@ async function reportConnectAfter(
   const { cfg } = await resolveProfileRuntime({ profile, allowBootstrap: false });
   const appId = cfg.accounts?.app?.id ?? '';
   const beforePids = new Set(
-    readAndPrune()
+    readRegistry()
       .filter((e) => e.appId === appId && e.profileName === profile)
       .map((e) => e.pid),
   );
@@ -398,7 +390,7 @@ export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<v
  * simply shows it offline in the console.
  */
 async function runServiceStartWebUi(opts: ServiceStartOptions): Promise<void> {
-  const { profile, cfg, profileConfig, appPaths, configPath } = await ensureBridgeConfigured(opts);
+  const { profile, profileConfig, appPaths, configPath } = await ensureBridgeConfigured(opts);
   const adapter = requireAdapter('start', SUPERVISOR_SERVICE_ID, WEB_UI_RUN_ARGS);
   await materializeEnvSecretForService({ profile });
   const bridgeConfig = (await resolveProfileRuntime({ profile, allowBootstrap: false })).cfg;
@@ -548,7 +540,7 @@ export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promis
 
   if (webUi) {
     console.log('✓ 控制面 supervisor 正在后台运行');
-    const online = readAndPrune().filter((e) => Boolean(e.botName));
+    const online = readRegistry().filter((e) => Boolean(e.botName));
     if (online.length) {
       console.log(`  在线 bot: ${online.map((e) => e.botName).join('、')}`);
     }

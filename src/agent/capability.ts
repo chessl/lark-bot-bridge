@@ -14,7 +14,6 @@ export interface AgentCapability {
   supportsNativeHistory: boolean;
   callback: {
     marker: '__bridge_cb';
-    legacyMarkers: string[];
   };
   permissions: {
     maxAccess: AccessMode;
@@ -32,7 +31,6 @@ export function claudeCapability(profile?: Pick<ProfileConfig, 'permissions'>): 
     supportsNativeHistory: true,
     callback: {
       marker: '__bridge_cb',
-      legacyMarkers: ['__claude_cb'],
     },
     permissions: {
       maxAccess,
@@ -50,7 +48,6 @@ export function codexCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     supportsNativeHistory: false,
     callback: {
       marker: '__bridge_cb',
-      legacyMarkers: [],
     },
     permissions: {
       maxAccess,
@@ -67,7 +64,6 @@ export function ompCapability(): AgentCapability {
     supportsNativeHistory: true,
     callback: {
       marker: '__bridge_cb',
-      legacyMarkers: [],
     },
     permissions: {
       maxAccess: 'full',

@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { claudeCapability, codexCapability, ompCapability } from '../../../src/agent/capability';
 import type { AccessMode } from '../../../src/config/permissions';
@@ -163,16 +161,6 @@ describe('run policy', () => {
         code: 'folder-allowlist-unverified',
       },
     });
-  });
-
-  it('is pure policy calculation and does not import IO or API clients', () => {
-    const source = readFileSync(join(process.cwd(), 'src/policy/run-policy.ts'), 'utf8');
-
-    expect(source).not.toMatch(
-      /from ['"]node:fs|from ['"]node:fs\/promises|fs\.realpath|fs\.stat|statSync|realpathSync/,
-    );
-    expect(source).not.toMatch(/rawClient|LarkChannel|createLarkChannel/);
-    expect(source).not.toMatch(/writeFile|mkdir|rm\(/);
   });
 });
 

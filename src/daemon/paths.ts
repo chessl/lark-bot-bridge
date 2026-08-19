@@ -1,15 +1,11 @@
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { resolveAppPaths } from '../config/app-paths';
 import { paths } from '../config/paths';
 
-/**
- * Logical service name — used as the launchd label AND as the systemd
- * unit name. Single-instance for now; if we ever support multiple bots
- * per machine the suffix can grow `.{appid}` without breaking installs.
- */
-export const SERVICE_NAME = 'lark-channel-bridge.bot';
+/** Logical service name used by launchd and systemd. */
+export const SERVICE_NAME = 'lark-bot-bridge.bot';
 
 /**
  * Reserved service id for the machine-wide supervisor+console daemon
@@ -24,10 +20,8 @@ export function serviceProfileId(profile: string): string {
   const trimmed = profile.trim();
   if (!trimmed) throw new Error('profile name is required for service id');
   if (trimmed === '.' || trimmed === '..') throw new Error(`invalid profile name: ${profile}`);
-  // ASCII-safe names pass through unchanged so existing service labels/paths
-  // stay stable. Names with non-ASCII characters or other OS-label-
-  // unsafe chars get a deterministic ASCII-safe, unique id (sanitized base +
-  // short hash) so any profile can still be installed as an OS daemon.
+  // ASCII-safe names pass through unchanged. Other names get a deterministic
+  // ASCII-safe id.
   if (/^[A-Za-z0-9._-]+$/.test(trimmed)) return trimmed;
   const base =
     trimmed
@@ -78,15 +72,11 @@ export function systemdUnitPath(profile: string = paths.profile): string {
 
 // === Windows Task Scheduler ===
 
-/**
- * schtasks task name. Backslashes turn into Task Scheduler "folders" so
- * `LarkChannelBridge\Bot` would create a Bot task under a LarkChannelBridge
- * folder. This legacy identifier stays stable across CLI/package renames.
- */
+/** Windows Task Scheduler task name. */
 export const WINDOWS_TASK_NAME = windowsTaskName();
 
 export function windowsTaskName(profile: string = paths.profile): string {
-  return `LarkChannelBridge.Bot.${serviceProfileId(profile)}`;
+  return `LarkBotBridge.Bot.${serviceProfileId(profile)}`;
 }
 
 /**

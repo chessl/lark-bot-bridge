@@ -2,12 +2,13 @@ import { ClaudeAdapter } from '../agent/claude/adapter';
 import { CodexAdapter } from '../agent/codex/adapter';
 import { OmpAdapter } from '../agent/omp/adapter';
 import {
-  AgentPreflightError,
   type AgentAvailability,
   type AgentPreflightDiagnostic,
+  AgentPreflightError,
 } from '../agent/preflight';
 import type { AgentAdapter } from '../agent/types';
 import type { AppPaths } from '../config/app-paths';
+import { accessToCodexSandbox } from '../config/permissions';
 import type { AgentKind, ProfileConfig } from '../config/profile-schema';
 import type { AcquiredRuntimeLock } from './locks';
 
@@ -55,7 +56,7 @@ export function createRuntimeAgent(
       inheritCodexHome: codex.inheritCodexHome === true,
       ignoreUserConfig: codex.ignoreUserConfig === true,
       ignoreRules: codex.ignoreRules !== false,
-      sandbox: profileConfig.sandbox.defaultMode,
+      sandbox: accessToCodexSandbox(profileConfig.permissions.defaultAccess),
       larkChannel,
     });
   }

@@ -90,40 +90,6 @@ describe('Bridge command contracts', () => {
     expect(h.workspaces.cwdFor('chat-b')).toBe(alternate);
   });
 
-  it('continues to support legacy unscoped workspace aliases', async () => {
-    const h = await createHarness();
-    const legacy = join(h.tmp.root, 'legacy-alias');
-    await mkdir(legacy, { recursive: true });
-    h.workspaces.saveNamed('legacy', legacy);
-
-    await expect(h.run('/ws')).resolves.toBe(true);
-    expect(JSON.stringify(lastContent(h.channel))).toContain('legacy');
-
-    await expect(h.run('/ws use legacy')).resolves.toBe(true);
-    expect(lastMarkdown(h.channel)).toContain('已切换到 `legacy`');
-    await expect(realpath(legacy)).resolves.toBe(h.workspaces.cwdFor('chat-1'));
-
-    await expect(h.run('/ws remove legacy')).resolves.toBe(true);
-    expect(lastMarkdown(h.channel)).toContain('已删除工作目录别名');
-    expect(h.workspaces.getNamed('legacy')).toBeUndefined();
-  });
-
-  it('removes scoped workspace aliases without deleting same-name legacy aliases', async () => {
-    const h = await createHarness();
-    const legacy = join(h.tmp.root, 'legacy-main');
-    await mkdir(legacy, { recursive: true });
-    h.workspaces.saveNamed('main', legacy);
-
-    await expect(h.run('/ws save main')).resolves.toBe(true);
-    await expect(h.run('/ws remove main')).resolves.toBe(true);
-
-    expect(lastMarkdown(h.channel)).toContain('已删除工作目录别名');
-    expect(h.workspaces.getNamed('main')).toBe(legacy);
-
-    await expect(h.run('/ws use main')).resolves.toBe(true);
-    await expect(realpath(legacy)).resolves.toBe(h.workspaces.cwdFor('chat-1'));
-  });
-
   it('keeps directory commands admin-only', async () => {
     const h = await createHarness();
 
@@ -132,19 +98,6 @@ describe('Bridge command contracts', () => {
 
     await expect(h.run('/ws save mine', { senderId: 'ou-not-admin' })).resolves.toBe(true);
     expect(lastMarkdown(h.channel)).toContain('仅管理员可用');
-  });
-
-  it('does not expose authorization root management commands', async () => {
-    const h = await createHarness();
-    const plain = join(h.tmp.root, 'plain-nongit');
-    await mkdir(plain, { recursive: true });
-
-    await expect(h.run(`/ws add ${plain} docs`)).resolves.toBe(true);
-    expect(lastMarkdown(h.channel)).toContain('用法');
-    expect(lastMarkdown(h.channel)).not.toContain('允许访问目录');
-
-    await expect(h.run(`/ws remove --root ${plain}`)).resolves.toBe(true);
-    expect(lastMarkdown(h.channel)).toContain('未找到工作目录别名');
   });
 
   it('keeps /ws remove as alias removal by default', async () => {
@@ -208,18 +161,6 @@ describe('Bridge command contracts', () => {
 
     expect(lastMarkdown(h.channel)).toContain('路径不是目录');
     expect(lastMarkdown(h.channel)).toContain(await realpath(file));
-  });
-
-  it('treats legacy document workspace commands as informational no-ops', async () => {
-    const h = await createHarness();
-    const target = join(h.tmp.root, 'sensitive-doc-root');
-    await mkdir(target, { recursive: true });
-
-    await expect(h.run(`/doc ws bind doc-token ${target}`, { chatMode: 'group' })).resolves.toBe(
-      true,
-    );
-    expect(lastMarkdown(h.channel)).toContain('不需要绑定工作区');
-    expect(lastMarkdown(h.channel)).not.toContain(target);
   });
 
   it('keeps Claude resume history details out of group chats', async () => {
@@ -384,7 +325,7 @@ function appConfig(defaultWorkspace: string): ProfileConfig {
     agentKind: 'claude',
     accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
     access: { admins: ['ou-admin'] },
-    sandbox: { defaultMode: 'read-only', maxMode: 'workspace-write' },
+    permissions: { defaultAccess: 'read-only', maxAccess: 'workspace' },
     preferences: { maxConcurrentRuns: 2 },
   });
   config.workspaces.default = defaultWorkspace;

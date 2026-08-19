@@ -7,6 +7,11 @@ import { capabilityForProfile } from '../agent/capability';
 import { DEFAULT_MODEL, normalizeModelSelection, supportedModels } from '../agent/models';
 import type { AgentAdapter } from '../agent/types';
 import type { ActiveRuns } from '../bot/active-runs';
+import { GROUP_MSG_SCOPE, hasGroupMsgScope } from '../bot/app-scope';
+import { createBoundChat, defaultChatName } from '../bot/group';
+import { fetchKnownChats, type KnownChat } from '../bot/lark-info';
+import type { ProcessPool } from '../bot/process-pool';
+import { requestScopeGrantLink } from '../bot/wizard';
 import {
   accountCurrentCard,
   accountFailureCard,
@@ -21,10 +26,26 @@ import {
   groupMsgScopeGrantCard,
   groupMsgScopeGrantedCard,
 } from '../card/config-card';
-import { GROUP_MSG_SCOPE, hasGroupMsgScope } from '../bot/app-scope';
-import { requestScopeGrantLink } from '../bot/wizard';
 import { forgetManagedCard, sendManagedCard, updateManagedCard } from '../card/managed';
+import { renderCard } from '../card/run-renderer';
+import {
+  finalizeIfRunning,
+  initialState,
+  markInterrupted,
+  type RunState,
+  reduce,
+} from '../card/run-state';
 import { helpCard, resumeCard, statusCard, workspacesCard } from '../card/templates';
+import { resolveAppPaths } from '../config/app-paths';
+import * as configOps from '../config/config-ops';
+import { accessToClaudePermissionMode, accessToCodexSandbox } from '../config/permissions';
+import type {
+  LarkCliIdentityPreset,
+  ProfileAccess,
+  ProfileConfig,
+  ProfileMode,
+} from '../config/profile-schema';
+import { effectiveLarkCliIdentity } from '../config/profile-schema';
 import type { AppConfig, AppPreferences, MessageReplyMode, TenantBrand } from '../config/schema';
 import {
   getAgentStopGraceMs,
@@ -35,56 +56,35 @@ import {
   getRunIdleTimeoutMs,
   getShowToolCalls,
 } from '../config/schema';
-import type {
-  LarkCliIdentityPreset,
-  ProfileAccess,
-  ProfileConfig,
-  ProfileMode,
-} from '../config/profile-schema';
-import { effectiveLarkCliIdentity } from '../config/profile-schema';
-import { resolveAppPaths } from '../config/app-paths';
-import { accessToClaudePermissionMode } from '../config/permissions';
+import { buildEncryptedAccountConfig } from '../config/store';
+import { log } from '../core/logger';
+import { hasStructuredLarkCliUserAuth } from '../lark-cli/identity-policy';
+import { isMeetingNo } from '../meeting/api';
+import { describeMeetingError, type MeetingManager } from '../meeting/manager';
+import { answerInMeeting, meetingScopeId } from '../meeting/orchestrator';
+import type { MeetingSession } from '../meeting/session';
 import {
   canRunAdminCommand,
   canUseDm,
   canUseGroup,
   type OwnerRefreshState,
 } from '../policy/access';
-import { buildEncryptedAccountConfig } from '../config/store';
-import * as configOps from '../config/config-ops';
-import { log } from '../core/logger';
-import { renderCard } from '../card/run-renderer';
+import { evaluateRunPolicy } from '../policy/run-policy';
+import { resolveWorkingDirectory } from '../policy/workspace';
+import { RunRejected } from '../runtime/errors';
+import { isAlive, readRegistry, resolveTarget } from '../runtime/registry';
+import type { RunExecutor } from '../runtime/run-executor';
+import type { SessionCatalog, SessionCatalogIdentity } from '../session/catalog';
 import {
-  finalizeIfRunning,
-  initialState,
-  markInterrupted,
-  reduce,
-  type RunState,
-} from '../card/run-state';
-import { formatRelTime, listRecentSessions, type SessionSummary } from '../session/history';
-import {
-  listCodexThreadHistory,
   type CodexThreadHistoryEntry,
   type ListCodexThreadHistoryOptions,
+  listCodexThreadHistory,
 } from '../session/codex-history';
-import type { SessionCatalog, SessionCatalogIdentity } from '../session/catalog';
-import { isAlive, readAndPrune, resolveTarget } from '../runtime/registry';
-import { readUiSidecar } from '../ui/sidecar';
+import { formatRelTime, listRecentSessions, type SessionSummary } from '../session/history';
 import type { SessionStore } from '../session/store';
-import { resolveWorkingDirectory } from '../policy/workspace';
-import { evaluateRunPolicy } from '../policy/run-policy';
-import type { ProcessPool } from '../bot/process-pool';
-import type { RunExecutor } from '../runtime/run-executor';
-import { RunRejected } from '../runtime/errors';
+import { readUiSidecar } from '../ui/sidecar';
 import { validateAppCredentials } from '../utils/feishu-auth';
 import type { WorkspaceStore } from '../workspace/store';
-import { createBoundChat, defaultChatName } from '../bot/group';
-import { fetchKnownChats, type KnownChat } from '../bot/lark-info';
-import { describeMeetingError, type MeetingManager } from '../meeting/manager';
-import { isMeetingNo } from '../meeting/api';
-import { answerInMeeting, meetingScopeId } from '../meeting/orchestrator';
-import type { MeetingSession } from '../meeting/session';
-import { hasStructuredLarkCliUserAuth } from '../lark-cli/identity-policy';
 
 export interface Controls {
   profile: string;
@@ -182,7 +182,6 @@ const handlers: Record<string, Handler> = {
   '/exit': handleExit,
   '/doctor': handleDoctor,
   '/reconnect': handleReconnect,
-  '/doc': handleDoc,
   '/invite': handleInvite,
   '/remove': handleRemove,
   '/meeting': handleMeeting,
@@ -334,7 +333,6 @@ async function handleNew(args: string, ctx: CommandContext): Promise<void> {
       now: Date.now(),
     });
   }
-  ctx.sessions.clear(ctx.scope);
   await reply(ctx, wasRunning ? '已中断当前任务并开始新会话。' : '已开始新会话。');
 }
 
@@ -392,7 +390,6 @@ async function handleCd(args: string, ctx: CommandContext): Promise<void> {
   }
   ctx.activeRuns.interrupt(ctx.scope);
   ctx.workspaces.setCwd(ctx.scope, workspace.cwdRealpath);
-  ctx.sessions.clear(ctx.scope);
   await reply(ctx, `✓ 已切换 cwd 到 \`${workspace.cwdRealpath}\`\n（session 已重置）`);
 }
 
@@ -454,7 +451,6 @@ async function handleWsUse(name: string, ctx: CommandContext): Promise<void> {
   }
   ctx.activeRuns.interrupt(ctx.scope);
   ctx.workspaces.setCwd(ctx.scope, workspace.cwdRealpath);
-  ctx.sessions.clear(ctx.scope);
   await reply(ctx, `✓ 已切换到 \`${name}\` (${workspace.cwdRealpath})\n（session 已重置）`);
 }
 
@@ -470,11 +466,6 @@ async function handleWsRemove(name: string, ctx: CommandContext): Promise<void> 
   await reply(ctx, `✓ 已删除工作目录别名：\`${name}\``);
 }
 
-async function handleDoc(args: string, ctx: CommandContext): Promise<void> {
-  void args;
-  await reply(ctx, '云文档评论现在不需要绑定工作区；在支持的文档评论里 @bot 即可触发回复。');
-}
-
 const WORKSPACE_NAME_SEPARATOR = '\u001f';
 
 function scopedWorkspaceName(ctx: CommandContext, name: string): string {
@@ -483,26 +474,12 @@ function scopedWorkspaceName(ctx: CommandContext, name: string): string {
   );
 }
 
-function workspaceAliasKeys(ctx: CommandContext, name: string): string[] {
-  return [scopedWorkspaceName(ctx, name), name];
-}
-
 function getWorkspaceAlias(ctx: CommandContext, name: string): string | undefined {
-  for (const key of workspaceAliasKeys(ctx, name)) {
-    const cwd = ctx.workspaces.getNamed(key);
-    if (cwd) return cwd;
-  }
-  return undefined;
+  return ctx.workspaces.getNamed(scopedWorkspaceName(ctx, name));
 }
 
 function removeWorkspaceAlias(ctx: CommandContext, name: string): boolean {
-  const scopedKey = scopedWorkspaceName(ctx, name);
-  if (ctx.workspaces.removeNamed(scopedKey)) return true;
-  return ctx.workspaces.removeNamed(name);
-}
-
-function isLegacyWorkspaceAlias(key: string): boolean {
-  return key !== '' && !key.includes(WORKSPACE_NAME_SEPARATOR);
+  return ctx.workspaces.removeNamed(scopedWorkspaceName(ctx, name));
 }
 
 function listScopedWorkspaces(ctx: CommandContext): Record<string, string> {
@@ -513,9 +490,6 @@ function listScopedWorkspaces(ctx: CommandContext): Record<string, string> {
     if (!key.startsWith(prefix)) continue;
     const displayName = key.slice(prefix.length);
     if (displayName) scoped[displayName] = cwd;
-  }
-  for (const [key, cwd] of Object.entries(named)) {
-    if (isLegacyWorkspaceAlias(key) && scoped[key] === undefined) scoped[key] = cwd;
   }
   return scoped;
 }
@@ -543,13 +517,16 @@ async function handleResume(args: string, ctx: CommandContext): Promise<void> {
     await reply(ctx, '群聊中不展示历史会话详情。请私聊 bot 使用 `/resume` 查看和选择历史会话。');
     return;
   }
+  const identity = ctx.sessionCatalogIdentity;
+  if (!ctx.sessionCatalog || !identity) {
+    await reply(ctx, '当前上下文没有可恢复的会话。');
+    return;
+  }
+  const activeEntry = ctx.sessionCatalog.activeFor(identity);
 
   if (ctx.controls.profileConfig.agentKind === 'codex') {
-    const identity = ctx.sessionCatalogIdentity;
-    const entry =
-      ctx.sessionCatalog && identity ? ctx.sessionCatalog.activeFor(identity) : undefined;
-    const history = identity ? await listCodexResumeHistory(ctx, cwd, limit) : [];
-    if (history.length > 0 && identity) {
+    const history = await listCodexResumeHistory(ctx, cwd, limit);
+    if (history.length > 0) {
       const entries = history.map((thread) => {
         const nonce = issueResumeCandidate(identity, { threadId: thread.threadId });
         return {
@@ -557,15 +534,15 @@ async function handleResume(args: string, ctx: CommandContext): Promise<void> {
           preview: thread.name || thread.preview,
           relTime: formatRelTime(thread.updatedAtMs),
           detail: `Codex · ${thread.source}`,
-          current: thread.threadId === entry?.threadId,
+          current: thread.threadId === activeEntry?.threadId,
         };
       });
       const card = resumeCard(cwd, entries);
       await ctx.channel.send(ctx.msg.chatId, { card }, commandReplyOptions(ctx));
       return;
     }
-    if (entry?.threadId && identity) {
-      const nonce = issueResumeCandidate(identity, { threadId: entry.threadId });
+    if (activeEntry?.threadId) {
+      const nonce = issueResumeCandidate(identity, { threadId: activeEntry.threadId });
       await reply(
         ctx,
         `当前 Codex thread 可恢复。\n使用 \`/resume use ${nonce}\` 恢复（10 分钟内有效）。`,
@@ -578,88 +555,52 @@ async function handleResume(args: string, ctx: CommandContext): Promise<void> {
   }
 
   if (ctx.controls.profileConfig.agentKind === 'omp') {
-    const identity = ctx.sessionCatalogIdentity;
-    const entry =
-      ctx.sessionCatalog && identity ? ctx.sessionCatalog.activeFor(identity) : undefined;
-    const entries =
-      entry?.sessionId && identity
-        ? [
-            {
-              sessionId: issueResumeCandidate(identity, { sessionId: entry.sessionId }),
-              displayId: entry.sessionId,
-              preview: '当前 OMP 会话',
-              relTime: '',
-              current: true,
-            },
-          ]
-        : [];
+    const entries = activeEntry?.sessionId
+      ? [
+          {
+            sessionId: issueResumeCandidate(identity, { sessionId: activeEntry.sessionId }),
+            displayId: activeEntry.sessionId,
+            preview: '当前 OMP 会话',
+            relTime: '',
+            current: true,
+          },
+        ]
+      : [];
     const card = resumeCard(cwd, entries);
     await ctx.channel.send(ctx.msg.chatId, { card }, commandReplyOptions(ctx));
     return;
   }
   const sessions = await listClaudeResumeHistory(ctx, cwd, limit);
-  const currentSession = ctx.sessions.getRaw(ctx.scope);
-  const identity = ctx.sessionCatalogIdentity;
   const entries = sessions.map((s) => ({
-    sessionId: identity ? issueResumeCandidate(identity, { sessionId: s.sessionId }) : s.sessionId,
+    sessionId: issueResumeCandidate(identity, { sessionId: s.sessionId }),
     displayId: s.sessionId,
     preview: s.preview,
     relTime: formatRelTime(s.mtime),
     lineCount: s.lineCount,
-    current: s.sessionId === currentSession?.sessionId,
+    current: s.sessionId === activeEntry?.sessionId,
   }));
   const card = resumeCard(cwd, entries);
   await ctx.channel.send(ctx.msg.chatId, { card }, commandReplyOptions(ctx));
 }
 
-async function applyResume(sessionId: string, ctx: CommandContext): Promise<void> {
-  if (ctx.sessionCatalog && ctx.sessionCatalogIdentity) {
-    const entry = ctx.sessionCatalog.activeFor(ctx.sessionCatalogIdentity);
-    const resolved = consumeResumeCandidate(sessionId, ctx.sessionCatalogIdentity);
-    if (resolved) {
-      ctx.activeRuns.interrupt(ctx.scope);
-      if (ctx.sessionCatalogIdentity.agentId === 'codex') {
-        ctx.sessionCatalog.upsertActive({
-          ...ctx.sessionCatalogIdentity,
-          threadId: resolved.threadId!,
-        });
-      } else {
-        ctx.sessionCatalog.upsertActive({
-          ...ctx.sessionCatalogIdentity,
-          sessionId: resolved.sessionId!,
-        });
-        ctx.sessions.set(ctx.scope, resolved.sessionId!, ctx.sessionCatalogIdentity.cwdRealpath);
-      }
-      await reply(ctx, RESUME_APPLIED_REPLY);
-      return;
-    }
-    if (ctx.sessionCatalogIdentity.agentId === 'codex') {
-      await reply(ctx, '当前上下文不可恢复这个会话，请先用 `/resume` 重新生成恢复候选。');
-      return;
-    }
-    const expected = entry?.sessionId;
-    if (expected !== sessionId) {
-      await reply(ctx, '当前上下文不可恢复这个会话，请重新选择当前工作区和权限策略下的会话。');
-      return;
-    }
-    ctx.activeRuns.interrupt(ctx.scope);
-    ctx.sessions.set(ctx.scope, sessionId, ctx.sessionCatalogIdentity.cwdRealpath);
-    await reply(ctx, RESUME_APPLIED_REPLY);
+async function applyResume(candidate: string, ctx: CommandContext): Promise<void> {
+  const identity = ctx.sessionCatalogIdentity;
+  if (!ctx.sessionCatalog || !identity) {
+    await reply(ctx, '当前上下文没有可恢复的会话。');
     return;
   }
-
-  if (ctx.controls.profileConfig.agentKind === 'codex') {
-    await reply(ctx, '当前上下文没有可恢复的 Codex thread，请先在当前工作区完成一次运行。');
-    return;
-  }
-
-  const cwd = selectedResumeCwd(ctx);
-  if (!cwd) {
-    await reply(ctx, '请先使用 /cd <path> 选择工作目录，再查看或恢复会话。');
+  const resolved = consumeResumeCandidate(candidate, identity);
+  if (!resolved) {
+    await reply(ctx, '当前上下文不可恢复这个会话，请先用 `/resume` 重新生成恢复候选。');
     return;
   }
   ctx.activeRuns.interrupt(ctx.scope);
-  ctx.sessions.set(ctx.scope, sessionId, cwd);
+  ctx.sessionCatalog.upsertActive({
+    ...identity,
+    ...(identity.agentId === 'codex'
+      ? { threadId: resolved.threadId! }
+      : { sessionId: resolved.sessionId! }),
+  });
   await reply(ctx, RESUME_APPLIED_REPLY);
 }
 
@@ -767,7 +708,7 @@ function runtimeAccessStatus(profileConfig: ProfileConfig): { label: string; val
   }
   return {
     label: 'sandbox',
-    value: `${profileConfig.sandbox.defaultMode}/${profileConfig.sandbox.maxMode}`,
+    value: `${accessToCodexSandbox(profileConfig.permissions.defaultAccess)}/${accessToCodexSandbox(profileConfig.permissions.maxAccess)}`,
   };
 }
 
@@ -811,19 +752,18 @@ async function larkCliStatus(
 
 async function handleStatus(_args: string, ctx: CommandContext): Promise<void> {
   const cwd = effectiveWorkspaceCwd(ctx);
-  const sess = ctx.sessions.getRaw(ctx.scope);
   const isCodex = ctx.controls.profileConfig.agentKind === 'codex';
   const catalogEntry =
     ctx.sessionCatalog && ctx.sessionCatalogIdentity
       ? ctx.sessionCatalog.activeFor(ctx.sessionCatalogIdentity)
       : undefined;
-  const sessionId = isCodex ? catalogEntry?.threadId : (catalogEntry?.sessionId ?? sess?.sessionId);
+  const sessionId = isCodex ? catalogEntry?.threadId : catalogEntry?.sessionId;
   const card = statusCard({
     profileName: ctx.controls.profile,
     cwd,
     sessionId,
     emptySessionText: isCodex ? '(未建立)' : undefined,
-    sessionStale: !isCodex && Boolean(cwd && sess && sess.cwd !== cwd),
+    sessionStale: false,
     agentName: ctx.agent.displayName,
     runtimeAccess: runtimeAccessStatus(ctx.controls.profileConfig),
     larkCliStatus: await larkCliStatus(ctx),
@@ -958,7 +898,7 @@ function parseTimeoutTarget(
 }
 
 async function handlePs(_args: string, ctx: CommandContext): Promise<void> {
-  const live = readAndPrune();
+  const live = readRegistry();
   log.info('command', 'ps', { count: live.length });
   if (live.length === 0) {
     await reply(ctx, '当前没有 bot 在运行(理论上不可能,你正在跟其中之一对话…)');
@@ -1887,11 +1827,6 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
       ...(ctx.controls.cfg.preferences ?? {}),
       model,
       messageReply,
-      // Mark the messageReply value as living in the new (post-0.1.27)
-      // semantic — `text` now means real plain text, not the lightweight
-      // markdown card. Set unconditionally on every submit so a user who
-      // explicitly picks any option gets out of the legacy-coerce path.
-      messageReplyMigrated: true,
       showToolCalls,
       cotMessages,
       maxConcurrentRuns,

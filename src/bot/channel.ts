@@ -1,30 +1,31 @@
+import { dirname, join } from 'node:path';
 import type { LarkChannel, LarkChannelOptions, NormalizedMessage } from '@larksuite/channel';
 import { createLarkChannel } from '@larksuite/channel';
-import { dirname, join } from 'node:path';
 import { capabilityForProfile } from '../agent/capability';
 import { modelLabel, normalizeModelSelection, resolveModelArg } from '../agent/models';
 import {
-  buildAgentPrompt,
   type BridgePromptInteractiveCard,
   type BridgePromptMention,
   type BridgePromptQuotedMessage,
   type BridgePromptTopicMessage,
+  buildAgentPrompt,
 } from '../agent/prompt';
 import type { AgentAdapter, AgentEvent } from '../agent/types';
-import { handleCardAction } from '../card/dispatcher';
 import { CallbackAuth } from '../card/callback-auth';
 import { CallbackNonceStore } from '../card/callback-store';
+import { handleCardAction } from '../card/dispatcher';
 import { renderCard } from '../card/run-renderer';
 import {
   finalizeIfRunning,
   initialState,
   markIdleTimeout,
   markInterrupted,
-  reduce,
   type RunState,
+  reduce,
 } from '../card/run-state';
 import { renderText } from '../card/text-renderer';
-import { tryHandleCommand, type Controls } from '../commands';
+import { type Controls, tryHandleCommand } from '../commands';
+import type { AppPaths } from '../config/app-paths';
 import type { AppConfig } from '../config/schema';
 import {
   getAgentStopGraceMs,
@@ -36,32 +37,31 @@ import {
 } from '../config/schema';
 import { resolveAppSecret } from '../config/secret-resolver';
 import { log, withTrace } from '../core/logger';
-import { MediaCache, type LocalAttachment } from '../media/cache';
 import { toPolicyAttachment, toPromptAttachment } from '../media/attachment';
-import { canUseDm, canUseGroup, requireMentionForChat } from '../policy/access';
-import { MeetingManager } from '../meeting/manager';
+import { type LocalAttachment, MediaCache } from '../media/cache';
 import type { VcRequestClient } from '../meeting/api';
+import { MeetingManager } from '../meeting/manager';
 import { attachMeetingAgent, summarizeEndedMeeting } from '../meeting/orchestrator';
-import type { ScopeContext } from '../policy/run-policy';
+import { canUseDm, canUseGroup, requireMentionForChat } from '../policy/access';
 import { createOwnerRefreshController } from '../policy/owner';
+import type { ScopeContext } from '../policy/run-policy';
 import { RunExecutor } from '../runtime/run-executor';
 import type { SessionCatalog } from '../session/catalog';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
 import { ActiveRuns, type RunHandle } from './active-runs';
-import { ChatModeCache, type ChatMode } from './chat-mode-cache';
+import { type ChatMode, ChatModeCache } from './chat-mode-cache';
 import { handleCommentMention } from './comments';
-import { recordRunSessionEvent, startRunFlow } from './run-flow';
-import { commandSessionCatalogIdentity } from './session-catalog-identity';
+import { CotClient, CotPublisher, finalAnswerOnlyState, withCotEvents } from './cot';
 import { startKeepalive } from './keepalive';
+import { fetchKnownChats } from './lark-info';
 import { PendingQueue } from './pending-queue';
 import { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
-import { lookupMessageThreadId } from './thread-id';
 import { addWorkingReaction, removeReaction } from './reaction';
-import { fetchKnownChats } from './lark-info';
-import type { AppPaths } from '../config/app-paths';
-import { withCotEvents, CotClient, CotPublisher, finalAnswerOnlyState } from './cot';
+import { recordRunSessionEvent, startRunFlow } from './run-flow';
+import { commandSessionCatalogIdentity } from './session-catalog-identity';
+import { lookupMessageThreadId } from './thread-id';
 
 const DEBOUNCE_MS = 600;
 const STREAM_TERMINAL_GRACE_MS = 3000;
@@ -558,13 +558,8 @@ async function sendNonAllowedGroupHint(
 }
 
 /**
- * The SDK (@larksuite/channel >= 0.4.1) normalizes a merge_forward whose
- * sub-messages it could not fetch — after its own retries — to this exact
- * sentinel, rather than the empty `<forwarded_messages/>` it emits for a
- * genuinely empty forward. Distinguishing the two is the whole point of that
- * fix: pre-0.4.1 a transient Feishu 5xx/timeout on `im.v1.message.get` was
- * silently indistinguishable from empty, so the agent saw an empty forward and
- * replied "转发内容是空的，请重新转发一次".
+ * The SDK normalizes a merge_forward whose sub-messages it could not fetch
+ * to this sentinel, distinct from a genuinely empty forward.
  */
 const FORWARD_FETCH_FAILED_CONTENT = '<forwarded_messages status="fetch_failed"/>';
 
@@ -855,7 +850,10 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // the user is pointing at. An already-engaged topic keeps that history in its
   // resumed session, so we skip the fetch there.
   let topicContext: QuotedContext[] = [];
-  if (mode === 'topic' && threadId && !sessions.getRaw(scope)) {
+  const hasTopicSession = sessionCatalog
+    ?.entries()
+    .some((entry) => entry.scopeId === scope && entry.status === 'active');
+  if (mode === 'topic' && threadId && !hasTopicSession) {
     const exclude = new Set([...batchIds, ...quoteTargets]);
     topicContext = await fetchTopicContext(channel, threadId, {
       maxMessages: 40,
@@ -941,7 +939,6 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     access: accessDecision,
     capability,
     profileConfig: controls.profileConfig,
-    sessions,
     sessionCatalog,
     workspaces,
     executor,
@@ -977,7 +974,6 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const recordSession = (evt: AgentEvent): void => {
     recordRunSessionEvent({
       scopeId: scope,
-      sessions,
       sessionCatalog,
       capability,
       policy: flow.policy,

@@ -4,56 +4,47 @@ import pkg from '../../../package.json';
 import { ClaudeAdapter } from '../../agent/claude/adapter';
 import { CodexAdapter } from '../../agent/codex/adapter';
 import {
+  type AgentAvailability,
   AgentPreflightError,
   formatAgentPreflightDiagnostic,
-  type AgentAvailability,
 } from '../../agent/preflight';
 import type { AgentAdapter } from '../../agent/types';
-import { startChannel, type BridgeChannel } from '../../bot/channel';
+import { type BridgeChannel, startChannel } from '../../bot/channel';
 import type { Controls } from '../../commands';
 import type { AppPaths } from '../../config/app-paths';
-import { type AgentKind, type ProfileConfig } from '../../config/profile-schema';
+import type { AgentKind, ProfileConfig } from '../../config/profile-schema';
 import type { AppConfig } from '../../config/schema';
 import { isComplete } from '../../config/schema';
 import { configureLogger, gcOldLogs, log } from '../../core/logger';
 import { gcMediaCache } from '../../media/cache';
-import { startUiServer } from '../../ui/server';
-import { readUiSidecar, removeUiSidecar, writeUiSidecar } from '../../ui/sidecar';
-import type { UiServerHandle } from '../../ui/types';
-import { Supervisor } from '../../runtime/supervisor';
+import { refreshOwnerControls } from '../../policy/owner';
+import { checkRuntimeAgentAvailability, releaseRuntimeLocks } from '../../runtime/agent-runtime';
 import { acquireHostLock } from '../../runtime/host-lock';
-import { preFlightChecks } from '../preflight';
-import { promptAndStopActiveBridgeMigrationConflict } from './migrate';
-import { stopProcessEntry, type StopProcessEntryResult } from './ps';
+import {
+  type AcquiredRuntimeLock,
+  acquireAppRuntimeLock,
+  RuntimeLockConflictError,
+  type RuntimeLockMeta,
+  withProfileAndAppLocks,
+} from '../../runtime/locks';
+import { resolveProfileRuntime } from '../../runtime/profile-runtime';
 import {
   cleanupTmpFiles,
+  type ProcessEntry,
   register,
   sameAppLiveOthers,
   unregisterSync,
   updateEntry,
-  type ProcessEntry,
 } from '../../runtime/registry';
-import {
-  acquireAppRuntimeLock,
-  RuntimeLockConflictError,
-  withProfileAndAppLocks,
-  type AcquiredRuntimeLock,
-  type RuntimeLockMeta,
-} from '../../runtime/locks';
-import { resolveProfileRuntime } from '../../runtime/profile-runtime';
-import {
-  assertReconnectAgentKindUnchanged,
-  checkRuntimeAgentAvailability,
-  createRuntimeAgent,
-  releaseRuntimeLocks,
-} from '../../runtime/agent-runtime';
-import { refreshOwnerControls } from '../../policy/owner';
-
-// Re-exported for existing tests that import these from this module.
-export { assertReconnectAgentKindUnchanged, createRuntimeAgent };
-import { SessionStore } from '../../session/store';
+import { Supervisor } from '../../runtime/supervisor';
 import { SessionCatalog } from '../../session/catalog';
+import { SessionStore } from '../../session/store';
+import { startUiServer } from '../../ui/server';
+import { readUiSidecar, removeUiSidecar, writeUiSidecar } from '../../ui/sidecar';
+import type { UiServerHandle } from '../../ui/types';
 import { WorkspaceStore } from '../../workspace/store';
+import { preFlightChecks } from '../preflight';
+import { type StopProcessEntryResult, stopProcessEntry } from './ps';
 
 // Prefer IPv4 — Node 20+ defaults to "verbatim" which respects whatever
 // the resolver returns first; in IPv6-broken networks (WSL2, certain VPNs,
@@ -109,25 +100,11 @@ export async function runStart(opts: StartOptions): Promise<void> {
   await runClassic(opts);
 }
 
-const migrationConflictHandler = async (err: unknown): Promise<boolean> => {
-  const handled = await promptAndStopActiveBridgeMigrationConflict(err as never, {
-    cancelMessage: '已取消启动。',
-  });
-  if (!handled) process.exit(0);
-  return true;
-};
-
-/**
- * Classic single-profile foreground run (the pre-supervisor default). Uses the
- * Supervisor internally to host exactly one profile — no host lock (so multiple
- * classic runs coexist in separate terminals) and no web console. Fails loudly
- * if the profile can't come online.
- */
+/** Classic single-profile foreground run. */
 async function runClassic(opts: StartOptions): Promise<void> {
   const runtime = await resolveProfileRuntime({
     ...opts,
     allowBootstrap: true,
-    handleActiveBridgeMigrationConflict: migrationConflictHandler,
   });
   const { cfg, configPath, appPaths } = runtime;
   configureLogger({ logsDir: appPaths.logsDir });
@@ -135,8 +112,7 @@ async function runClassic(opts: StartOptions): Promise<void> {
 
   const supervisor = new Supervisor({ configPath, rootDir: appPaths.rootDir });
 
-  // Retry loop: on a profile/app runtime-lock conflict, offer to stop the
-  // holder and try again (same UX as older single-profile `run`).
+  // Retry on profile/app runtime-lock conflicts after stopping the holder.
   for (;;) {
     try {
       await supervisor.startProfile(appPaths.profile);
@@ -164,7 +140,6 @@ async function runSupervisorConsole(opts: StartOptions): Promise<void> {
   const runtime = await resolveProfileRuntime({
     ...opts,
     allowBootstrap: true,
-    handleActiveBridgeMigrationConflict: migrationConflictHandler,
   });
   const cfg = runtime.cfg;
   const configPath = runtime.configPath;

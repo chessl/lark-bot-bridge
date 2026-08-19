@@ -55,7 +55,7 @@ afterEach(async () => {
 });
 
 describe('profile-aware account and config commands', () => {
-  it('saves /config submit into the active v2 profile without flattening root config', async () => {
+  it('saves /config submit into the active profile without flattening root config', async () => {
     vi.useFakeTimers();
     const h = await createHarness();
 
@@ -77,7 +77,6 @@ describe('profile-aware account and config commands', () => {
     expect(root.profiles['codex-dev']).toBeDefined();
     expect(root.profiles.claude?.preferences).toMatchObject({
       messageReply: 'text',
-      messageReplyMigrated: true,
       showToolCalls: false,
       maxConcurrentRuns: 7,
       runIdleTimeoutMinutes: 15,
@@ -122,7 +121,6 @@ describe('profile-aware account and config commands', () => {
     const h = await createHarness({
       preferences: {
         messageReply: 'text',
-        messageReplyMigrated: true,
       },
     });
 
@@ -138,7 +136,6 @@ describe('profile-aware account and config commands', () => {
       (candidate) => candidate.profiles.claude?.preferences.maxConcurrentRuns === 8,
     );
     expect(root.profiles.claude?.preferences.messageReply).toBe('text');
-    expect(root.profiles.claude?.preferences.messageReplyMigrated).toBe(true);
     expect(getMessageReplyMode(runtimeProfileConfig(root, 'claude'))).toBe('text');
   });
 
@@ -203,7 +200,7 @@ describe('profile-aware account and config commands', () => {
     expect(card).not.toContain('偏好已保存');
   });
 
-  it('saves /account submit into the active v2 profile and profile-local keystore', async () => {
+  it('saves /account submit into the active profile and profile-local keystore', async () => {
     vi.useFakeTimers();
     const h = await createHarness();
 

@@ -1,32 +1,12 @@
-import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { writeFileAtomic } from '../platform/atomic-write';
 import type { AppPaths } from './app-paths';
-import { paths } from './paths';
 import type { AppConfig, AppPreferences, TenantBrand } from './schema';
 import { secretKeyForApp } from './schema';
-import { writeFileAtomic } from '../platform/atomic-write';
-
-export async function loadConfig(path: string = paths.configFile): Promise<Partial<AppConfig>> {
-  try {
-    const text = await readFile(path, 'utf8');
-    return JSON.parse(text) as Partial<AppConfig>;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    throw err;
-  }
-}
 
 /**
- * Atomic write: write to a sibling temp file with 0600 perms, then rename
- * (atomic on POSIX) into place. Avoids the partial-write window where a
- * crash could leave the config truncated, and keeps secret-bearing bytes
- * from ever existing at the final path with looser perms.
- */
-/**
- * Build an AppConfig that points the app's secret at the encrypted local
- * keystore via an exec-provider SecretRef. Used by /account change and the
- * first-run migration path. Preserves the existing `preferences` block so
- * users don't lose unrelated settings on credential update.
+ * Build an AppConfig that reads the app secret from the encrypted local
+ * keystore through an exec-provider SecretRef.
  *
  * The provider command is a thin shell wrapper bridge writes under
  * `~/.lark-bot-bridge/secrets-getter` (always user-owned, never a symlink) so
@@ -39,8 +19,8 @@ export async function loadConfig(path: string = paths.configFile): Promise<Parti
 export async function buildEncryptedAccountConfig(
   appId: string,
   tenant: TenantBrand,
-  preferences?: AppPreferences,
-  appPaths: Pick<AppPaths, 'secretsGetterScript'> & { rootDir?: string } = paths,
+  preferences: AppPreferences | undefined,
+  appPaths: Pick<AppPaths, 'secretsGetterScript'> & { rootDir?: string },
 ): Promise<AppConfig> {
   const wrapperPath = await ensureSecretsGetterWrapper(appPaths);
   return {
@@ -79,7 +59,7 @@ export async function buildEncryptedAccountConfig(
  * extra restrictive — wrapper is a private user resource).
  */
 export async function ensureSecretsGetterWrapper(
-  appPaths: Pick<AppPaths, 'secretsGetterScript'> & { rootDir?: string } = paths,
+  appPaths: Pick<AppPaths, 'secretsGetterScript'> & { rootDir?: string },
   opts: {
     platform?: NodeJS.Platform;
     nodePath?: string;
@@ -114,10 +94,4 @@ export async function ensureSecretsGetterWrapper(
 
   await writeFileAtomic(wrapperPath, content, { mode: 0o700 });
   return wrapperPath;
-}
-
-export async function saveConfig(cfg: AppConfig, path: string = paths.configFile): Promise<void> {
-  // chmod the temp file before rename, so the destination path is never
-  // visible with default permissions.
-  await writeFileAtomic(path, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
 }

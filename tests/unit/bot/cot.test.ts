@@ -109,7 +109,7 @@ describe('COT event mapping', () => {
     });
   });
 
-  it('uses the legacy tool header format for brief COT titles', () => {
+  it('uses compact tool headers for brief COT titles', () => {
     expect(cotBriefToolTitle('command_execution', { command: 'echo hello' }, 'done')).toContain(
       '✅ command_execution',
     );

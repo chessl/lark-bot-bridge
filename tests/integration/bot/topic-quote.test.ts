@@ -257,43 +257,6 @@ describe('topic message quote handling', () => {
     expect(topicBlock).not.toContain('om_at_in_topic');
   });
 
-  it('does not fetch topic context when the topic session already exists', async () => {
-    // A prior session for this topic scope means the history is already in the
-    // resumed conversation — no need to re-fetch and re-inject it every turn.
-    const h = await createHarness({
-      chatMode: 'topic',
-      threadMessages: [
-        {
-          message_id: 'om_topic_root',
-          msg_type: 'text',
-          body: { content: JSON.stringify({ text: 'the real upstream question' }) },
-          sender: { id: 'ou_asker', sender_type: 'user' },
-          create_time: '1760000000000',
-          thread_id: 'omt_existing',
-        },
-      ],
-    });
-    // Seed a session for the topic scope so it looks already-engaged.
-    h.sessions.set('oc_topic_chat:omt_existing', 'sess_existing', await realpath(h.tmp.workspace));
-
-    await startTestBridge(h);
-
-    await h.channel.handlers.message?.(
-      message({
-        messageId: 'om_followup',
-        rootId: 'om_topic_root',
-        parentId: 'om_topic_root',
-        threadId: 'omt_existing',
-        content: '@Bridge 接着说',
-      }),
-    );
-    await waitFor(() => h.agent.runOptions.length === 1);
-
-    expect(h.channel.rawClient.im.v1.message.list).not.toHaveBeenCalled();
-    const prompt = h.agent.runOptions[0]?.prompt ?? '';
-    expect(prompt).not.toContain('<topic_context>');
-  });
-
   it('does not open a progress stream when the agent produces no content', async () => {
     // The SDK starts a stream eagerly and finishes an empty one with its
     // "(no content)" placeholder, so a content-less run used to post a card and

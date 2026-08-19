@@ -28,7 +28,7 @@ async function tmpRoot(): Promise<string> {
 }
 
 describe('profile store canonical serialization', () => {
-  it('saves stored root and profile config without unknown root fields or runtime-only profile fields', async () => {
+  it('saves only canonical root and profile fields', async () => {
     const root = await tmpRoot();
     const configPath = join(root, 'config.json');
     const rootSecrets = {
@@ -74,7 +74,6 @@ describe('profile store canonical serialization', () => {
         cacheTtlMs: 60_000,
         cacheMaxBytes: 2048,
       },
-      comments: {},
       larkCli: {
         identityPreset: 'user-default' as const,
         localUserImport: {
@@ -93,17 +92,6 @@ describe('profile store canonical serialization', () => {
         activeProfile: 'codex',
         preferences: { messageReply: 'text' },
         secrets: rootSecrets,
-        migrations: {
-          permissionDefaultsV1: [
-            'codex',
-            'codex',
-            '  claude  ',
-            'claude',
-            'claude ',
-            '',
-            42 as unknown as string,
-          ],
-        },
         profiles: { codex: profile },
         extra: true,
       } as unknown as RootConfig & { extra?: true; preferences: any },
@@ -115,7 +103,6 @@ describe('profile store canonical serialization', () => {
     expect(saved.activeProfile).toBe('codex');
     expect(saved.secrets).toEqual(rootSecrets);
     expect(saved.preferences).toEqual({});
-    expect(saved.migrations).toEqual({ permissionDefaultsV1: ['claude', 'codex'] });
     expect(saved).not.toHaveProperty('extra');
 
     const savedProfile = saved.profiles.codex;
@@ -126,18 +113,15 @@ describe('profile store canonical serialization', () => {
     expect(savedProfile.workspaces).toEqual(profile.workspaces);
     expect(savedProfile.codex).toEqual(profile.codex);
     expect(savedProfile.attachments).toEqual(profile.attachments);
-    expect(savedProfile.comments).toEqual(profile.comments);
     expect(savedProfile.larkCli).toEqual(profile.larkCli);
     expect(savedProfile.permissions).toEqual({
       defaultAccess: 'workspace',
       maxAccess: 'full',
     });
     expect(savedProfile).not.toHaveProperty('runtimeOnlyFutureField');
-    expect(savedProfile).not.toHaveProperty('permissionSource');
-    expect(savedProfile).not.toHaveProperty('sandbox');
   });
 
-  it('loads canonical-only saved config and re-derives runtime sandbox', async () => {
+  it('loads canonical permissions unchanged', async () => {
     const root = await tmpRoot();
     const configPath = join(root, 'config.json');
     const profile = createDefaultProfileConfig({
@@ -164,10 +148,6 @@ describe('profile store canonical serialization', () => {
     expect(loaded?.profiles.codex?.permissions).toEqual({
       defaultAccess: 'workspace',
       maxAccess: 'workspace',
-    });
-    expect(loaded?.profiles.codex?.sandbox).toMatchObject({
-      defaultMode: 'workspace-write',
-      maxMode: 'workspace-write',
     });
   });
 
@@ -262,16 +242,5 @@ describe('profile store canonical serialization', () => {
       trigger: '@小助手',
       transcript: { keep: 50, stabilizeMs: 800 },
     });
-  });
-
-  it('marks newly created roots as already evaluated for permission default migration', () => {
-    const profile = createDefaultProfileConfig({
-      agentKind: 'claude',
-      accounts: { app },
-    });
-
-    const root = createRootConfig('claude', profile);
-
-    expect(root.migrations?.permissionDefaultsV1).toEqual(['claude']);
   });
 });

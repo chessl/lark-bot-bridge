@@ -36,6 +36,8 @@ describe('RunExecutor', () => {
       runId: 'run-1',
       prompt: 'hello',
       cwd: h.tmp.workspace,
+      sandbox: 'read-only',
+      permissionMode: 'plan',
       stopGraceMs: 123,
     });
     expect(h.activeRuns.get('scope-1')?.run.runId).toBe('run-1');

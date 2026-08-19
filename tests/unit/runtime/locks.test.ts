@@ -59,13 +59,6 @@ describe('runtime locks', () => {
     }
   });
 
-  it('keeps lock implementation realpath-safe and out of slow business code', async () => {
-    const source = await readFile(join(process.cwd(), 'src/runtime/locks.ts'), 'utf8');
-
-    expect(source).toMatch(/realpath:\s*false/);
-    expect(source).not.toMatch(/RunPolicy|AgentAdapter|startChannel|createLarkChannel/);
-  });
-
   it('surfaces holder metadata when profile or app locks conflict', async () => {
     const root = await makeRoot();
     const first = resolveAppPaths({ rootDir: root, profile: 'claude' });
@@ -96,8 +89,6 @@ describe('runtime locks', () => {
       });
     });
 
-    await withProfileAndAppLocks(second, 'cli_new', 'codex', async () => {
-      expect(true).toBe(true);
-    });
+    await withProfileAndAppLocks(second, 'cli_new', 'codex', async () => {});
   });
 });

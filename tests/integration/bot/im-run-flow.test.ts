@@ -7,7 +7,6 @@ import { startRunFlow } from '../../../src/bot/run-flow';
 import { ProcessPool } from '../../../src/bot/process-pool';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { RunExecutor } from '../../../src/runtime/run-executor';
-import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
@@ -30,7 +29,6 @@ describe('IM run flow', () => {
       access: { ok: true, reason: 'allowed-user' },
       capability: claudeCapability(h.profileConfig),
       profileConfig: h.profileConfig,
-      sessions: h.sessions,
       workspaces: h.workspaces,
       executor: h.executor,
       now: 1000,
@@ -45,11 +43,10 @@ describe('IM run flow', () => {
     expect(h.agent.runOptions).toEqual([]);
   });
 
-  it('submits cwd through RunExecutor and resumes matching sessions', async () => {
+  it('submits the selected working directory through RunExecutor', async () => {
     const h = await createHarness();
     const workspaceRealpath = await realpath(h.tmp.workspace);
     h.workspaces.setCwd('chat-1', h.tmp.workspace);
-    h.sessions.set('chat-1', 'sess-1', workspaceRealpath);
 
     const result = await startRunFlow({
       scopeId: 'chat-1',
@@ -59,7 +56,6 @@ describe('IM run flow', () => {
       access: { ok: true, reason: 'allowed-user' },
       capability: claudeCapability(h.profileConfig),
       profileConfig: h.profileConfig,
-      sessions: h.sessions,
       workspaces: h.workspaces,
       executor: h.executor,
       now: 1000,
@@ -68,11 +64,10 @@ describe('IM run flow', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('expected run flow to start');
     expect(result.cwdRealpath).toBe(workspaceRealpath);
-    expect(result.resumeFrom).toBe('sess-1');
+    expect(result.resumeFrom).toBeUndefined();
     expect(h.agent.runOptions[0]).toMatchObject({
       runId: 'run-1',
       cwd: workspaceRealpath,
-      sessionId: 'sess-1',
     });
   });
 
@@ -88,7 +83,6 @@ describe('IM run flow', () => {
       access: { ok: true, reason: 'allowed-user' },
       capability: claudeCapability(h.profileConfig),
       profileConfig: h.profileConfig,
-      sessions: h.sessions,
       workspaces: h.workspaces,
       executor: h.executor,
       now: 1000,
@@ -105,7 +99,6 @@ async function createHarness(options: { defaultWorkspace?: boolean } = {}): Prom
   tmp: TmpProfile;
   agent: FakeAgentAdapter;
   executor: RunExecutor;
-  sessions: SessionStore;
   workspaces: WorkspaceStore;
   profileConfig: ReturnType<typeof createDefaultProfileConfig>;
 }> {
@@ -130,17 +123,15 @@ async function createHarness(options: { defaultWorkspace?: boolean } = {}): Prom
       },
     },
   });
-  const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   cleanups.push(async () => {
-    await Promise.all([sessions.flush(), workspaces.flush()]);
+    await workspaces.flush();
     await tmp.cleanup();
   });
   return {
     tmp,
     agent,
     executor,
-    sessions,
     workspaces,
     profileConfig: {
       ...profileConfig,

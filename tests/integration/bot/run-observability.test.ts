@@ -9,7 +9,6 @@ import { startRunFlow } from '../../../src/bot/run-flow';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { closeLogger, configureLogger, flushLogger } from '../../../src/core/logger';
 import { RunExecutor } from '../../../src/runtime/run-executor';
-import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
@@ -35,7 +34,6 @@ describe('bot run observability', () => {
       access: { ok: true, reason: 'allowed-user' },
       capability: claudeCapability(h.profileConfig),
       profileConfig: h.profileConfig,
-      sessions: h.sessions,
       workspaces: h.workspaces,
       executor: h.executor,
       now: 1_700_000_000_000,
@@ -70,7 +68,6 @@ async function createHarness(): Promise<{
   logsDir: string;
   agent: FakeAgentAdapter;
   executor: RunExecutor;
-  sessions: SessionStore;
   workspaces: WorkspaceStore;
   profileConfig: ReturnType<typeof createDefaultProfileConfig>;
 }> {
@@ -108,10 +105,9 @@ async function createHarness(): Promise<{
       default: tmp.workspace,
     },
   };
-  const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   cleanups.push(async () => {
-    await Promise.all([sessions.flush(), workspaces.flush()]);
+    await workspaces.flush();
     await tmp.cleanup();
   });
   return {
@@ -119,7 +115,6 @@ async function createHarness(): Promise<{
     logsDir,
     agent,
     executor,
-    sessions,
     workspaces,
     profileConfig,
   };

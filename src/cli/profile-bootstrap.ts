@@ -2,8 +2,8 @@ import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AgentPreflightError } from '../agent/preflight';
 import {
-  createDefaultProfileConfig,
   type AgentKind,
+  createDefaultProfileConfig,
   type ProfileConfig,
 } from '../config/profile-schema';
 import type { AppConfig } from '../config/schema';
@@ -40,6 +40,10 @@ export async function createBootstrapProfileConfig(
     agentKind: input.agentKind,
     accounts: input.accounts,
     preferences: input.preferences,
+    access: {
+      ...input.preferences?.access,
+      requireMentionInGroup: input.preferences?.requireMentionInGroup,
+    },
     secrets: input.secrets,
     ...(codex ? { codex } : {}),
     ...(omp ? { omp } : {}),

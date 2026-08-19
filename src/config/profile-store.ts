@@ -4,8 +4,8 @@ import * as lockfile from 'proper-lockfile';
 import { writeFileAtomic } from '../platform/atomic-write';
 import { resolveAppPaths } from './app-paths';
 import {
-  normalizeProfileConfig,
   type AgentKind,
+  normalizeProfileConfig,
   type ProfileConfig,
   type RootConfig,
 } from './profile-schema';
@@ -26,13 +26,11 @@ function normalizeRootConfig(root: RootConfig): RootConfig {
   for (const [name, profile] of Object.entries(root.profiles)) {
     profiles[name] = normalizeProfileConfig(profile);
   }
-  const migrations = normalizeRootMigrations(root.migrations);
   return {
     schemaVersion: 2,
     activeProfile: root.activeProfile,
     preferences: {},
     ...(root.secrets ? { secrets: root.secrets } : {}),
-    ...(migrations ? { migrations } : {}),
     profiles,
   };
 }
@@ -58,7 +56,6 @@ type StoredProfileConfig = Pick<
   | 'permissions'
   | 'codex'
   | 'attachments'
-  | 'comments'
   | 'meeting'
   | 'larkCli'
 >;
@@ -73,13 +70,11 @@ function serializeRootConfig(root: RootConfig): StoredRootConfig {
   for (const [name, profile] of Object.entries(root.profiles)) {
     profiles[name] = serializeProfileConfig(profile);
   }
-  const migrations = normalizeRootMigrations(root.migrations);
   return {
     schemaVersion: 2,
     activeProfile: root.activeProfile,
     preferences: {},
     ...(root.secrets ? { secrets: root.secrets } : {}),
-    ...(migrations ? { migrations } : {}),
     profiles,
   };
 }
@@ -98,7 +93,6 @@ function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
     ...(profile.codex ? { codex: profile.codex } : {}),
     ...(profile.omp ? { omp: profile.omp } : {}),
     attachments: profile.attachments,
-    comments: {},
     meeting: profile.meeting,
     larkCli: profile.larkCli,
   };
@@ -167,7 +161,6 @@ export function createRootConfig(
     activeProfile: profile,
     preferences: {},
     ...(secrets ? { secrets } : {}),
-    migrations: { permissionDefaultsV1: [profile] },
     profiles: {
       [profile]: {
         ...cfg,
@@ -181,44 +174,6 @@ export function isRootConfig(value: unknown): value is RootConfig {
   if (!value || typeof value !== 'object') return false;
   const root = value as Partial<RootConfig>;
   return root.schemaVersion === 2 && Boolean(root.profiles && typeof root.profiles === 'object');
-}
-
-export function hasPermissionDefaultsMigration(root: RootConfig, profile: string): boolean {
-  return root.migrations?.permissionDefaultsV1?.includes(profile) ?? false;
-}
-
-export function markPermissionDefaultsMigration(root: RootConfig, profile: string): RootConfig {
-  const permissionDefaultsV1 = uniqueSortedStrings([
-    ...(root.migrations?.permissionDefaultsV1 ?? []),
-    profile,
-  ]);
-  return {
-    ...root,
-    migrations: {
-      ...root.migrations,
-      permissionDefaultsV1,
-    },
-  };
-}
-
-function normalizeRootMigrations(
-  input: RootConfig['migrations'] | undefined,
-): RootConfig['migrations'] | undefined {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
-  const permissionDefaultsV1 = uniqueSortedStrings(input.permissionDefaultsV1);
-  return permissionDefaultsV1.length > 0 ? { permissionDefaultsV1 } : undefined;
-}
-
-function uniqueSortedStrings(input: unknown): string[] {
-  if (!Array.isArray(input)) return [];
-  return [
-    ...new Set(
-      input
-        .filter((value): value is string => typeof value === 'string')
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0),
-    ),
-  ].sort();
 }
 
 export interface RemoveProfileOptions {

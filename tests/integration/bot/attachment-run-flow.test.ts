@@ -7,7 +7,6 @@ import { ProcessPool } from '../../../src/bot/process-pool.js';
 import { startRunFlow } from '../../../src/bot/run-flow.js';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 import { RunExecutor } from '../../../src/runtime/run-executor.js';
-import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
@@ -50,7 +49,6 @@ describe('attachment run flow', () => {
       access: { ok: true, reason: 'allowed-user' },
       capability: codexCapability(h.profileConfig),
       profileConfig: h.profileConfig,
-      sessions: h.sessions,
       workspaces: h.workspaces,
       executor: h.executor,
       now: 1000,
@@ -67,7 +65,6 @@ async function createHarness(): Promise<{
   tmp: TmpProfile;
   agent: FakeAgentAdapter;
   executor: RunExecutor;
-  sessions: SessionStore;
   workspaces: WorkspaceStore;
   profileConfig: ReturnType<typeof createDefaultProfileConfig>;
 }> {
@@ -99,9 +96,8 @@ async function createHarness(): Promise<{
   });
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   workspaces.setCwd('chat-1', tmp.workspace);
-  const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
   cleanups.push(async () => {
-    await Promise.all([sessions.flush(), workspaces.flush()]);
+    await workspaces.flush();
     await tmp.cleanup();
   });
   const workspaceRealpath = await realpath(tmp.workspace);
@@ -109,7 +105,6 @@ async function createHarness(): Promise<{
     tmp,
     agent,
     executor,
-    sessions,
     workspaces,
     profileConfig: {
       ...profileConfig,

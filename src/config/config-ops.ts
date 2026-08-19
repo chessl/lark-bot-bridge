@@ -1,17 +1,16 @@
 import { dirname } from 'node:path';
+import { log } from '../core/logger';
+import { applyLarkCliIdentityPolicy } from '../lark-cli/identity-policy';
 import { resolveAppPaths } from './app-paths';
 import { setSecret } from './keystore';
+import type { ProfileAccess, ProfileConfig, ProfileMode } from './profile-schema';
 import {
   loadRootConfig,
   runtimeProfileConfig,
   saveRootConfig,
   withConfigFileLock,
 } from './profile-store';
-import { saveConfig } from './store';
-import { secretKeyForApp, type AppConfig, type AppPreferences } from './schema';
-import type { ProfileAccess, ProfileConfig, ProfileMode } from './profile-schema';
-import { applyLarkCliIdentityPolicy } from '../lark-cli/identity-policy';
-import { log } from '../core/logger';
+import { type AppConfig, type AppPreferences, secretKeyForApp } from './schema';
 
 /**
  * The mutable per-profile runtime state these ops read and keep in sync. The
@@ -77,27 +76,7 @@ export async function saveAccessConfig(
 ): Promise<ProfileAccess> {
   return withConfigFileLock(state.configPath, async () => {
     const root = await loadRootConfig(state.configPath);
-    if (!root) {
-      const access = mutate(state.profileConfig.access);
-      state.profileConfig = {
-        ...state.profileConfig,
-        access,
-      };
-      state.cfg.preferences = {
-        ...(state.cfg.preferences ?? {}),
-        access: {
-          allowedUsers: access.allowedUsers,
-          allowedChats: access.allowedChats,
-          admins: access.admins,
-          ...(access.chatRequireMention && Object.keys(access.chatRequireMention).length > 0
-            ? { chatRequireMention: access.chatRequireMention }
-            : {}),
-        },
-        requireMentionInGroup: access.requireMentionInGroup,
-      };
-      await saveConfig(state.cfg, state.configPath);
-      return access;
-    }
+    if (!root) throw new Error('config not initialized');
 
     const profile = root.profiles[state.profile];
     if (!profile) throw new Error(`profile not found: ${state.profile}`);
@@ -133,11 +112,7 @@ export async function saveAccountConfig(
   await setSecret(secretKeyForApp(newCfg.accounts.app.id), plaintextSecret, appPaths);
 
   const root = await loadRootConfig(state.configPath);
-  if (!root) {
-    await saveConfig(newCfg, state.configPath);
-    state.cfg = newCfg;
-    return;
-  }
+  if (!root) throw new Error('config not initialized');
 
   const profile = root.profiles[state.profile];
   if (!profile) throw new Error(`profile not found: ${state.profile}`);
@@ -176,14 +151,7 @@ export async function savePreferencesConfig(
   };
   await withConfigFileLock(state.configPath, async () => {
     const root = await loadRootConfig(state.configPath);
-    if (!root) {
-      state.cfg.preferences = preferences;
-      state.profileConfig.larkCli = larkCli;
-      state.profileConfig.mode = mode;
-      if (meeting) state.profileConfig.meeting = meeting;
-      await saveConfig(state.cfg, state.configPath);
-      return;
-    }
+    if (!root) throw new Error('config not initialized');
 
     const profile = root.profiles[state.profile];
     if (!profile) throw new Error(`profile not found: ${state.profile}`);

@@ -62,9 +62,6 @@ export interface SecretsConfig {
  *   - `card`: full interactive card (tool panels, ⏹ button, footer status)
  *   - `markdown`: lightweight streaming markdown card (typewriter, no buttons)
  *   - `text`: plain markdown post sent once at run completion (no streaming)
- *
- * Pre-0.1.27 only had `card` and `text`, where `text` meant what's now called
- * `markdown`. See `messageReplyMigrated` for the auto-coercion logic.
  */
 export type MessageReplyMode = 'card' | 'markdown' | 'text';
 export type CotMessagesMode = 'off' | 'brief' | 'detailed';
@@ -80,27 +77,15 @@ export interface AppAccess {
   allowedUsers?: string[];
   /** chat_id allowlist for groups the bot responds in. Does not apply to p2p. */
   allowedChats?: string[];
-  /** open_id list with admin privileges. Gates sensitive commands
-   * (/account, /config, /exit, /reconnect, /doctor, /cd, /ws, /doc,
-   * /invite, /remove). */
+  /** open_id list with admin privileges. Gates sensitive commands. */
   admins?: string[];
-  /** Per-chat @-mention override (chat_id → bool); overrides the global
-   * requireMentionInGroup for the listed chats. */
+  /** Per-chat @-mention override (chat_id → bool). */
   chatRequireMention?: Record<string, boolean>;
 }
 
 export interface AppPreferences {
   /** Reply rendering mode for IM (group/p2p) messages. Default 'card'. */
   messageReply?: MessageReplyMode;
-  /**
-   * Internal marker: pre-0.1.27 the value `'text'` meant "lightweight
-   * streaming markdown card" (what's now called `'markdown'`). On upgrade
-   * we'd silently switch those users to true plain-text behavior unless we
-   * coerce; this flag is set the first time the user submits `/config`
-   * after the rename, indicating their `messageReply` value is in the
-   * new semantic.
-   */
-  messageReplyMigrated?: boolean;
   /**
    * Whether to render tool-call blocks (Bash / Read / Edit / ...) in the
    * output. Default true. Turn off if you only care about Claude's final
@@ -114,13 +99,8 @@ export interface AppPreferences {
    * CLI / account default applies. Default: unset.
    */
   model?: string;
-  /**
-   * Whether to send a separate Lark COT process message before the final
-   * answer. `brief` mirrors the lightweight tool/progress visibility from
-   * the legacy tool display; `detailed` also includes tool args/output.
-   * Legacy boolean/string `on` is accepted by the resolver for upgrades.
-   */
-  cotMessages?: CotMessagesMode | 'on' | 'simple';
+  /** Whether to send a separate Lark COT process message before the final answer. */
+  cotMessages?: CotMessagesMode;
   /**
    * Cap on concurrent claude runs across all chats / topics. Excess runs
    * queue FIFO. Default 10. Mostly relevant for topic groups where each
@@ -195,21 +175,9 @@ export function secretKeyForApp(appId: string): string {
   return `app-${appId}`;
 }
 
-/**
- * Resolve the message-reply preference with default fallback + legacy coerce.
- *
- * Pre-0.1.27 users with `messageReply: 'text'` actually wanted the streaming
- * markdown card (the new `'markdown'`). Until they re-submit `/config`
- * (which sets `messageReplyMigrated: true`), we map their `text` →
- * `markdown` so the behavior stays the same after upgrade.
- *
- * Default for fresh configs (no `messageReply` set) is `'markdown'`.
- */
+/** Resolve the message-reply preference with a markdown default. */
 export function getMessageReplyMode(cfg: AppConfig): MessageReplyMode {
   const raw = cfg.preferences?.messageReply;
-  if (raw === 'text' && cfg.preferences?.messageReplyMigrated !== true) {
-    return 'markdown';
-  }
   if (raw === 'card' || raw === 'markdown' || raw === 'text') return raw;
   return 'markdown';
 }
@@ -221,9 +189,7 @@ export function getShowToolCalls(cfg: AppConfig): boolean {
 
 export function getCotMessages(cfg: AppConfig): CotMessagesMode {
   const raw = cfg.preferences?.cotMessages;
-  if (raw === 'brief' || raw === 'simple') return 'brief';
-  if (raw === 'detailed' || raw === 'on') return 'detailed';
-  return 'off';
+  return raw === 'brief' || raw === 'detailed' ? raw : 'off';
 }
 
 /** Resolve the max-concurrent-runs preference with default + sanity clamp. */
@@ -235,11 +201,7 @@ export function getMaxConcurrentRuns(cfg: AppConfig): number {
   return Math.min(Math.floor(raw), 50);
 }
 
-/**
- * Resolve the require-mention-in-group preference. Default `true` — the
- * `!== false` check makes "undefined" (older configs that don't have the
- * field) inherit the new safer default automatically.
- */
+/** Resolve the require-mention-in-group preference. */
 export function getRequireMentionInGroup(cfg: AppConfig): boolean {
   if (cfg.preferences?.requireMentionInGroup !== undefined) {
     return cfg.preferences.requireMentionInGroup !== false;

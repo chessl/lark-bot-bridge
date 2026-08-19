@@ -137,8 +137,7 @@ export function createFakeChannel(): FakeChannel {
       content: unknown,
       options?: unknown,
     ): Promise<{ messageId: string }> {
-      // Resolve a `{ cardId }` reference back to the card JSON so assertions
-      // can read the rendered card content (matching the legacy send shape).
+      // Resolve a `{ cardId }` reference back to the card JSON for assertions.
       const cardId = (content as { cardId?: unknown } | undefined)?.cardId;
       const resolved =
         typeof cardId === 'string' && cardById.has(cardId)

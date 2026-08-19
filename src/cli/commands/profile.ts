@@ -2,12 +2,11 @@ import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { resolveAppPaths } from '../../config/app-paths';
 import { paths } from '../../config/paths';
+import type { RootConfig } from '../../config/profile-schema';
 import {
-  loadRootConfig,
   agentKindFromString,
   formatRootConfig,
-  hasPermissionDefaultsMigration,
-  markPermissionDefaultsMigration,
+  loadRootConfig,
   readActiveProfile,
   removeProfile,
   runtimeProfileConfig,
@@ -15,13 +14,12 @@ import {
   withConfigFileLock,
   writeActiveProfile,
 } from '../../config/profile-store';
-import type { RootConfig } from '../../config/profile-schema';
 import { resolveAppSecret } from '../../config/secret-resolver';
 import { writeFileAtomic } from '../../platform/atomic-write';
 import { acquireProfileRuntimeLock, checkRuntimeLock } from '../../runtime/locks';
-import { readAndPrune } from '../../runtime/registry';
 import { listAllProfiles } from '../../runtime/profile-discovery';
 import { resolveProfileRuntime } from '../../runtime/profile-runtime';
+import { readRegistry } from '../../runtime/registry';
 
 export interface ProfileCommandOptions {
   rootDir?: string;
@@ -60,7 +58,7 @@ export async function runProfileList(opts: ProfileCommandOptions = {}): Promise<
   }
 
   const registryFile = resolveAppPaths({ rootDir }).userRegistryFile;
-  const running = readAndPrune(registryFile);
+  const running = readRegistry(registryFile);
   const rows = profiles.map((profile) => {
     const holders = running
       .filter((entry) => entry.profileName === profile.name)
@@ -246,7 +244,7 @@ export async function runProfileExport(
       resolveAppPaths({ rootDir, profile: name }),
     );
   }
-  const exportedBase: RootConfig = {
+  const exported: RootConfig = {
     schemaVersion: 2,
     activeProfile: name,
     preferences: {},
@@ -255,9 +253,6 @@ export async function runProfileExport(
       [name]: profile,
     },
   };
-  const exported = hasPermissionDefaultsMigration(root, name)
-    ? markPermissionDefaultsMigration(exportedBase, name)
-    : exportedBase;
   if (!opts.includeSecrets) {
     delete profile.secrets;
     profile.accounts.app.secret = '[REDACTED]';

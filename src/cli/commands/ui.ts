@@ -1,12 +1,10 @@
 import { platform } from 'node:os';
 import { resolveAppPaths } from '../../config/app-paths';
-import { isAlive } from '../../runtime/registry';
 import { spawnProcess } from '../../platform/spawn';
+import { isAlive } from '../../runtime/registry';
 import { readUiSidecar } from '../../ui/sidecar';
 
 export interface RunUiOptions {
-  /** Accepted for compatibility; the console is a single machine-wide process. */
-  profile?: string;
   /** Print the URL instead of launching a browser. */
   print?: boolean;
 }

@@ -112,9 +112,8 @@ describe('comment run flow', () => {
     expect(h.agent.runOptions[1]?.sessionId).toBe('session-one');
     expect(h.agent.runOptions[2]?.sessionId).toBe('session-two');
     expect(
-      h.sessions.resumeFor(docSessionScope('doc-token'), await realpath(h.tmp.workspace)),
-    ).toBe('session-three');
-    expect(h.sessions.resumeFor('doc:doc-token', await realpath(h.tmp.workspace))).toBeUndefined();
+      h.sessionCatalog.entries().find((entry) => entry.scopeId === docSessionScope('doc-token')),
+    ).toMatchObject({ sessionId: 'session-three' });
   });
 
   it('shares Codex threads across different comment threads in the same document', async () => {
@@ -584,7 +583,7 @@ function profile(
     agentKind,
     accounts: { app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' } },
     access: { allowedUsers: ['ou-user'] },
-    sandbox: { defaultMode: 'read-only', maxMode: 'workspace-write' },
+    permissions: { defaultAccess: 'read-only', maxAccess: 'workspace' },
     ...(agentKind === 'codex' ? { codex: { binaryPath: 'codex' } } : {}),
   });
   config.workspaces.default = defaultWorkspace;

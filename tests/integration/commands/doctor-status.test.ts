@@ -39,9 +39,8 @@ describe('/status and /doctor diagnostics', () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
   });
 
-  it('shows passive status for active run, queue, stale session, and owner API state', async () => {
+  it('shows passive status for active run, queue, and owner API state', async () => {
     const h = await createHarness({ configuredWorkspace: true });
-    h.sessions.set('chat-1', 'sess-old', '/old');
     const activeRun = h.agent.run({ runId: 'run-active', prompt: 'running' }) as FakeAgentRun;
     h.activeRuns.register('chat-1', activeRun);
     const release = await h.pool.acquire();
@@ -51,7 +50,6 @@ describe('/status and /doctor diagnostics', () => {
     release();
     expect(h.agent.runOptions).toHaveLength(1);
     const status = JSON.stringify(lastContent(h.channel));
-    expect(status).toContain('旧 cwd');
     expect(status).toContain('active run');
     expect(status).toContain('active scopes');
     expect(status).toContain('1/1 active');
@@ -205,7 +203,7 @@ function appConfig(defaultWorkspace: string | undefined): ProfileConfig {
     agentKind: 'claude',
     accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
     access: { admins: ['ou-admin'] },
-    sandbox: { defaultMode: 'read-only', maxMode: 'workspace-write' },
+    permissions: { defaultAccess: 'read-only', maxAccess: 'workspace' },
   });
   if (defaultWorkspace) config.workspaces.default = defaultWorkspace;
   return config;

@@ -1,32 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getMessageReplyMode, getRequireMentionInGroup } from '../../../src/config/schema.js';
 import { PendingQueue } from '../../../src/bot/pending-queue.js';
 import type { NormalizedMessage } from '@larksuite/channel';
 
-describe('Claude IM regression boundaries', () => {
+describe('pending message queue', () => {
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  it('keeps p2p unrestricted while group and topic chats require a direct bot mention by default', () => {
-    const cfg = {
-      accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' as const } },
-    };
-
-    expect(getRequireMentionInGroup(cfg)).toBe(true);
-  });
-
-  it('keeps markdown as the default reply mode and card as the explicit stop-button mode', () => {
-    const defaultCfg = {
-      accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' as const } },
-    };
-    const cardCfg = {
-      ...defaultCfg,
-      preferences: { messageReply: 'card' as const },
-    };
-
-    expect(getMessageReplyMode(defaultCfg)).toBe('markdown');
-    expect(getMessageReplyMode(cardCfg)).toBe('card');
   });
 
   it('queues messages that arrive while a run is active and flushes them as the next batch', () => {

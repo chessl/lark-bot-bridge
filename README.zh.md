@@ -83,9 +83,9 @@ lark-bot-bridge unregister [--profile <name>]
 ```
 
 平台映射：
-- **macOS**：launchd 用户代理 `ai.lark-channel-bridge.bot.<profile>`（为兼容现有安装保留的稳定 service id）
-- **Linux**：systemd 用户单元 `lark-channel-bridge.bot.<profile>.service`（为兼容现有安装保留的稳定 service id）
-- **Windows**：Task Scheduler 任务 `LarkChannelBridge.Bot.<profile>`（为兼容现有安装保留的稳定 service id），launcher 是 `.cmd`
+- **macOS**：launchd 用户代理 `ai.lark-bot-bridge.bot.<profile>`
+- **Linux**：systemd 用户单元 `lark-bot-bridge.bot.<profile>.service`
+- **Windows**：Task Scheduler 任务 `LarkBotBridge.Bot.<profile>`，launcher 是 `.cmd`
 
 daemon 日志在 `~/.lark-bot-bridge/profiles/<profile>/logs/daemon/`。
 
@@ -112,7 +112,6 @@ lark-bot-bridge status --profile codex
 
 ```text
 lark-bot-bridge run [--profile <name>] [--agent claude|codex|omp] [--workspace <path>] [-c <config>]
-lark-bot-bridge migrate [--profile <name>] [--agent claude|codex|omp]
 lark-bot-bridge ps
 lark-bot-bridge kill <id|#>
 lark-bot-bridge --help
@@ -219,7 +218,6 @@ bridge 会检查所选目录存在、是目录，并且不是 `/`、Home 根、�
 | `workspace` | `acceptEdits` | `workspace-write` | 不支持 |
 | `read-only` | `plan` | `read-only` | 不支持 |
 
-旧版 `sandbox` 字段仍可读取。bridge 保存 profile 后，会把该设置迁移为 canonical `permissions`。
 
 OMP profile 当前必须使用 `defaultAccess: "full"`，因为 OMP RPC 尚未提供可强制执行的 workspace sandbox。bridge 会拒绝受限权限的 OMP 运行，不会静默放宽策略。
 
