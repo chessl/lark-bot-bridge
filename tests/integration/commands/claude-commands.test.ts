@@ -4,8 +4,15 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { NormalizedMessage } from '@larksuite/channel';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
-import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index.js';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import {
+  tryHandleCommand,
+  type CommandContext,
+  type Controls,
+} from '../../../src/commands/index.js';
+import {
+  createDefaultProfileConfig,
+  type ProfileConfig,
+} from '../../../src/config/profile-schema.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { createFakeAgent, type FakeAgentRun } from '../../helpers/fake-agent.js';

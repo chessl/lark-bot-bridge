@@ -26,16 +26,30 @@ export function App() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
-  if (error) return <Shell><p className="text-destructive text-sm">加载失败：{error}</p></Shell>;
-  if (!onboard) return <Shell><p className="text-muted-foreground text-sm">加载中…</p></Shell>;
+  if (error)
+    return (
+      <Shell>
+        <p className="text-destructive text-sm">加载失败：{error}</p>
+      </Shell>
+    );
+  if (!onboard)
+    return (
+      <Shell>
+        <p className="text-muted-foreground text-sm">加载中…</p>
+      </Shell>
+    );
 
   if (!onboard.hasConfig) {
     return (
       <Shell>
         <Card>
-          <CardHeader><CardTitle>初始化 AI 助手</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>初始化 AI 助手</CardTitle>
+          </CardHeader>
           <CardContent>
             <OnboardWizard onCreated={() => void refresh()} />
           </CardContent>
@@ -48,13 +62,20 @@ export function App() {
   return (
     <Shell>
       {selected ? (
-        <ProfileDetail profile={selected} onBack={() => { setSelected(null); void refresh(); }} />
+        <ProfileDetail
+          profile={selected}
+          onBack={() => {
+            setSelected(null);
+            void refresh();
+          }}
+        />
       ) : (
         <>
           <ProfilesView onOpen={setSelected} />
           {status && (
             <p className="mt-6 text-xs text-muted-foreground">
-              单主进程托管所有 profile · v{status.version} · {status.online} 个在线 · 改在线 profile 的配置即时生效
+              单主进程托管所有 profile · v{status.version} · {status.online} 个在线 · 改在线 profile
+              的配置即时生效
             </p>
           )}
         </>

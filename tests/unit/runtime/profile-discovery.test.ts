@@ -72,7 +72,9 @@ describe('listAllProfiles', () => {
     });
     await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
 
-    await expect(listAllProfiles(root)).rejects.toThrow('profile state directory missing: codex-dev');
+    await expect(listAllProfiles(root)).rejects.toThrow(
+      'profile state directory missing: codex-dev',
+    );
   });
 
   it('fails when a state directory has no matching config profile', async () => {

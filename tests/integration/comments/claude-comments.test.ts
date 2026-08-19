@@ -139,7 +139,11 @@ describe('Claude cloud-doc comment regression', () => {
 
   it('posts whole-document comments as top-level replies without an in-thread probe', async () => {
     const h = await createCommentHarness({
-      getResponse: commentGet({ replyId: 'reply-3', question: 'whole doc question', isWhole: true }),
+      getResponse: commentGet({
+        replyId: 'reply-3',
+        question: 'whole doc question',
+        isWhole: true,
+      }),
       agentText: '**bold** _italic_ `code`\n- item\n> quote',
     });
 
@@ -216,43 +220,43 @@ async function createCommentHarness(options: {
   const listResponses = [...(options.listResponses ?? [])];
 
   const rawClient: FakeCommentChannel['rawClient'] = {
-      async request(input) {
-        requests.push(input);
-        if (input.url.includes('/comments/reaction')) return {};
-        if (input.url.includes('/replies?')) {
-          inThreadReplies.push(extractText(input.data));
-          return {};
-        }
+    async request(input) {
+      requests.push(input);
+      if (input.url.includes('/comments/reaction')) return {};
+      if (input.url.includes('/replies?')) {
+        inThreadReplies.push(extractText(input.data));
         return {};
-      },
-      wiki: {
-        v2: {
-          space: {
-            async getNode() {
-              if (!options.wikiNode) throw apiError(131005);
-              return { data: { node: options.wikiNode } };
-            },
+      }
+      return {};
+    },
+    wiki: {
+      v2: {
+        space: {
+          async getNode() {
+            if (!options.wikiNode) throw apiError(131005);
+            return { data: { node: options.wikiNode } };
           },
         },
       },
-      drive: {
-        v1: {
-          fileComment: {
-            async get() {
-              if (options.getErrorCode) throw apiError(options.getErrorCode);
-              return options.getResponse;
-            },
-            async list() {
-              listCalls++;
-              return listResponses.shift() ?? { data: { items: [] } };
-            },
-            async create(input) {
-              createdTopLevelReplies.push(extractText(input));
-              return {};
-            },
+    },
+    drive: {
+      v1: {
+        fileComment: {
+          async get() {
+            if (options.getErrorCode) throw apiError(options.getErrorCode);
+            return options.getResponse;
+          },
+          async list() {
+            listCalls++;
+            return listResponses.shift() ?? { data: { items: [] } };
+          },
+          async create(input) {
+            createdTopLevelReplies.push(extractText(input));
+            return {};
           },
         },
       },
+    },
   };
   const channel: FakeCommentChannel = {
     requests,
@@ -412,8 +416,10 @@ function readContentText(value: unknown): string | undefined {
 }
 
 function readReplyText(value: unknown): string | undefined {
-  const replyList = value as {
-    replies?: Array<{ content?: { elements?: Array<{ text_run?: { text?: string } }> } }>;
-  } | undefined;
+  const replyList = value as
+    | {
+        replies?: Array<{ content?: { elements?: Array<{ text_run?: { text?: string } }> } }>;
+      }
+    | undefined;
   return replyList?.replies?.[0]?.content?.elements?.[0]?.text_run?.text;
 }

@@ -294,6 +294,8 @@ function writeSystemPromptFile(content: string): { path: string; cleanup: () => 
 function isWindowsCommandNotFoundLine(line: string): boolean {
   return (
     process.platform === 'win32' &&
-    /is not recognized as an internal or external command|operable program or batch file/i.test(line)
+    /is not recognized as an internal or external command|operable program or batch file/i.test(
+      line,
+    )
   );
 }

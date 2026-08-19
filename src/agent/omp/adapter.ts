@@ -183,7 +183,8 @@ async function* createEventStream(
     for await (const line of rl) {
       if (!line.trim()) continue;
       const frame = decoder.decode(line);
-      if (frame === undefined || !frame || typeof frame !== 'object' || Array.isArray(frame)) continue;
+      if (frame === undefined || !frame || typeof frame !== 'object' || Array.isArray(frame))
+        continue;
       const rpcFrame = frame as Record<string, unknown>;
 
       if (rpcFrame.type === 'ready') {
@@ -217,7 +218,11 @@ async function* createEventStream(
         const id = rpcFrame.id;
         if (
           typeof id === 'string' &&
-          (method === 'select' || method === 'confirm' || method === 'input' || method === 'editor' || method === 'open_url')
+          (method === 'select' ||
+            method === 'confirm' ||
+            method === 'input' ||
+            method === 'editor' ||
+            method === 'open_url')
         ) {
           writeFrame(child, { type: 'extension_ui_response', id, cancelled: true });
         }
@@ -232,7 +237,9 @@ async function* createEventStream(
     }
   } catch (err) {
     child.stdin.end();
-    yield* translator.fail(`OMP RPC stream failed: ${err instanceof Error ? err.message : String(err)}`);
+    yield* translator.fail(
+      `OMP RPC stream failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return;
   }
 

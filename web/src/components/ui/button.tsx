@@ -4,7 +4,8 @@ import { cn } from "@/lib/utils";
 type ButtonVariant = "default" | "destructive" | "outline" | "secondary" | "ghost" | "link";
 type ButtonSize = "default" | "sm" | "lg" | "icon";
 
-const BASE_CLASS = "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer";
+const BASE_CLASS =
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer";
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
   default: "bg-primary text-primary-foreground hover:bg-primary/90",
   destructive: "bg-destructive text-white hover:bg-destructive/90",

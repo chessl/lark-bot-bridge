@@ -7,7 +7,10 @@ import { CallbackAuth } from '../../../src/card/callback-auth.js';
 import { CallbackNonceStore } from '../../../src/card/callback-store.js';
 import { handleCardAction } from '../../../src/card/dispatcher.js';
 import type { Controls } from '../../../src/commands/index.js';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import {
+  createDefaultProfileConfig,
+  type ProfileConfig,
+} from '../../../src/config/profile-schema.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { createFakeAgent } from '../../helpers/fake-agent.js';

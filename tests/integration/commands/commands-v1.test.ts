@@ -3,9 +3,20 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizedMessage } from '@larksuite/channel';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
-import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index.js';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
-import { createRootConfig, loadRootConfig, saveRootConfig } from '../../../src/config/profile-store.js';
+import {
+  tryHandleCommand,
+  type CommandContext,
+  type Controls,
+} from '../../../src/commands/index.js';
+import {
+  createDefaultProfileConfig,
+  type ProfileConfig,
+} from '../../../src/config/profile-schema.js';
+import {
+  createRootConfig,
+  loadRootConfig,
+  saveRootConfig,
+} from '../../../src/config/profile-store.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { createFakeAgent } from '../../helpers/fake-agent.js';
@@ -204,7 +215,9 @@ describe('Bridge command contracts', () => {
     const target = join(h.tmp.root, 'sensitive-doc-root');
     await mkdir(target, { recursive: true });
 
-    await expect(h.run(`/doc ws bind doc-token ${target}`, { chatMode: 'group' })).resolves.toBe(true);
+    await expect(h.run(`/doc ws bind doc-token ${target}`, { chatMode: 'group' })).resolves.toBe(
+      true,
+    );
     expect(lastMarkdown(h.channel)).toContain('不需要绑定工作区');
     expect(lastMarkdown(h.channel)).not.toContain(target);
   });
@@ -251,9 +264,7 @@ describe('Bridge command contracts', () => {
   it('rejects admin-only commands for non owner/admin users', async () => {
     const h = await createHarness();
 
-    await expect(
-      h.run('/ps', { senderId: 'ou-not-admin' }),
-    ).resolves.toBe(true);
+    await expect(h.run('/ps', { senderId: 'ou-not-admin' })).resolves.toBe(true);
 
     expect(lastMarkdown(h.channel)).toContain('仅管理员可用');
   });

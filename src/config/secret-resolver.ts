@@ -233,7 +233,9 @@ async function spawnExecProvider(pc: ProviderConfig, ref: SecretRef): Promise<st
           return;
         }
         const err = parsed.errors?.[ref.id]?.message;
-        reject(new Error(`exec provider did not return secret for ${ref.id}${err ? `: ${err}` : ''}`));
+        reject(
+          new Error(`exec provider did not return secret for ${ref.id}${err ? `: ${err}` : ''}`),
+        );
       } catch (err) {
         reject(new Error(`exec provider returned invalid JSON: ${(err as Error).message}`));
       }

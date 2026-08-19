@@ -150,7 +150,10 @@ export async function register(args: RegisterArgs): Promise<ProcessEntry> {
 }
 
 /** Remove an entry by id. Atomic + prunes dead in same write. Async. */
-export async function unregister(id: string, registryFile: string = paths.processesFile): Promise<void> {
+export async function unregister(
+  id: string,
+  registryFile: string = paths.processesFile,
+): Promise<void> {
   await withRegistryFileLock(registryFile, async () => {
     const { entries: live, pruned } = await readForWriteState(registryFile);
     const next = live.filter((e) => e.id !== id);
@@ -327,7 +330,9 @@ async function isEntryStale(entry: ProcessEntry, registryFile: string): Promise<
     checkRuntimeLock(appPaths.profileLockFile),
     checkRuntimeLock(appPaths.appLockFile(entry.appId)),
   ]);
-  return !lockMatchesEntry(profileLock, entry, 'profile') || !lockMatchesEntry(appLock, entry, 'app');
+  return (
+    !lockMatchesEntry(profileLock, entry, 'profile') || !lockMatchesEntry(appLock, entry, 'app')
+  );
 }
 
 function lockMatchesEntry(

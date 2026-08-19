@@ -29,9 +29,9 @@ describe('CodexAdapter process contract', () => {
       process.env.APP_SECRET = oldAppSecret;
     }
     await Promise.all(
-      cleanup.splice(0).map((dir) =>
-        rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 }),
-      ),
+      cleanup
+        .splice(0)
+        .map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })),
     );
   });
 
@@ -95,7 +95,13 @@ describe('CodexAdapter process contract', () => {
     const rootDir = join(fake.dir, 'channel-home');
     const configPath = join(rootDir, 'config.custom.json');
     const larkCliConfigDir = join(rootDir, 'profiles', 'codex-dev', 'lark-cli');
-    const larkCliSourceConfigFile = join(rootDir, 'profiles', 'codex-dev', 'lark-cli-source', 'config.json');
+    const larkCliSourceConfigFile = join(
+      rootDir,
+      'profiles',
+      'codex-dev',
+      'lark-cli-source',
+      'config.json',
+    );
 
     const run = new CodexAdapter({
       binary: fake.path,
@@ -167,9 +173,7 @@ describe('CodexAdapter process contract', () => {
       images: [image],
     });
 
-    expect(await collect(run.events)).toEqual([
-      { type: 'done', terminationReason: 'normal' },
-    ]);
+    expect(await collect(run.events)).toEqual([{ type: 'done', terminationReason: 'normal' }]);
     const record = await readRecord(fake.recordPath);
     expect(record.argv).toEqual(
       buildCodexArgs({
@@ -462,7 +466,9 @@ async function createFakeCodex(options: {
       options.stderr ? `  process.stderr.write(${JSON.stringify(options.stderr)});` : '',
       `  setTimeout(() => process.exit(${options.exitCode ?? 0}), ${options.exitDelayMs ?? 0});`,
       '});',
-    ].filter(Boolean).join('\n'),
+    ]
+      .filter(Boolean)
+      .join('\n'),
     'utf8',
   );
   await chmod(path, 0o755);

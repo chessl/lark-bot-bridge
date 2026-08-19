@@ -42,17 +42,31 @@ beforeEach(async () => {
   // claude (cli_a), work (cli_b), dup (cli_b — same app as work).
   await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
   await saveRootConfig(
-    createRootConfig('claude', createDefaultProfileConfig({ agentKind: 'claude', accounts: { app: app('cli_a') } })),
+    createRootConfig(
+      'claude',
+      createDefaultProfileConfig({ agentKind: 'claude', accounts: { app: app('cli_a') } }),
+    ),
     configPath,
   );
   const rc = (await loadRootConfig(configPath))!;
-  for (const [name, id] of [['work', 'cli_b'], ['dup', 'cli_b']] as const) {
+  for (const [name, id] of [
+    ['work', 'cli_b'],
+    ['dup', 'cli_b'],
+  ] as const) {
     await mkdir(join(root, 'profiles', name), { recursive: true });
-    rc.profiles[name] = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app: app(id) } });
+    rc.profiles[name] = createDefaultProfileConfig({
+      agentKind: 'claude',
+      accounts: { app: app(id) },
+    });
   }
   await saveRootConfig(rc, configPath);
 
-  sup = new Supervisor({ configPath, rootDir: root, runPreflight: false, startChannelFn: stubStartChannel });
+  sup = new Supervisor({
+    configPath,
+    rootDir: root,
+    runPreflight: false,
+    startChannelFn: stubStartChannel,
+  });
 });
 
 afterEach(async () => {
@@ -67,13 +81,23 @@ describe('Supervisor', () => {
     expect(started).toContain('claude');
     const list = sup.list();
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ profile: 'claude', online: true, pid: process.pid, botName: 'bot-claude' });
+    expect(list[0]).toMatchObject({
+      profile: 'claude',
+      online: true,
+      pid: process.pid,
+      botName: 'bot-claude',
+    });
   });
 
   it('hosts multiple profiles at once', async () => {
     await sup.startProfile('claude');
     await sup.startProfile('work');
-    expect(sup.list().map((s) => s.profile).sort()).toEqual(['claude', 'work']);
+    expect(
+      sup
+        .list()
+        .map((s) => s.profile)
+        .sort(),
+    ).toEqual(['claude', 'work']);
   });
 
   it('stops one profile without affecting others or the process', async () => {

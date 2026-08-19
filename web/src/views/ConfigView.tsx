@@ -25,9 +25,11 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/sonner";
 
-const SELECT_CLASS = "h-9 w-full cursor-pointer rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
+const SELECT_CLASS =
+  "h-9 w-full cursor-pointer rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
 const CHECKBOX_CLASS = "size-4 cursor-pointer accent-primary";
-const LINK_BUTTON_CLASS = "inline-flex h-8 cursor-pointer items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
+const LINK_BUTTON_CLASS =
+  "inline-flex h-8 cursor-pointer items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
 
 export function ConfigView({ profile }: { profile: string }) {
   const [cfg, setCfg] = useState<ConfigData | null>(null);
@@ -46,8 +48,12 @@ export function ConfigView({ profile }: { profile: string }) {
       .catch((e) => setError(String(e.message ?? e)));
 
   const loadChatNames = () =>
-    apiGet<{ chats: { id: string; name: string }[] }>(`/api/chats?profile=${encodeURIComponent(profile)}`)
-      .then((r) => setChatNames((m) => ({ ...m, ...Object.fromEntries(r.chats.map((c) => [c.id, c.name])) })))
+    apiGet<{ chats: { id: string; name: string }[] }>(
+      `/api/chats?profile=${encodeURIComponent(profile)}`,
+    )
+      .then((r) =>
+        setChatNames((m) => ({ ...m, ...Object.fromEntries(r.chats.map((c) => [c.id, c.name])) })),
+      )
       .catch(() => {});
 
   useEffect(() => {
@@ -61,8 +67,7 @@ export function ConfigView({ profile }: { profile: string }) {
   if (error) return <p className="text-destructive text-sm">加载失败：{error}</p>;
   if (!cfg) return <p className="text-muted-foreground text-sm">加载中…</p>;
 
-  const set = <K extends keyof ConfigData>(k: K, v: ConfigData[K]) =>
-    setCfg({ ...cfg, [k]: v });
+  const set = <K extends keyof ConfigData>(k: K, v: ConfigData[K]) => setCfg({ ...cfg, [k]: v });
   const team = cfg.mode === "team";
 
   async function save() {
@@ -126,74 +131,133 @@ export function ConfigView({ profile }: { profile: string }) {
           </Badge>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Field label="个人版 / 团队版" hint="团队版：任何人 @ 即可使用（不做白名单）；CLI 强制只用应用身份。管理命令仍限 owner/管理员。">
-            <SelectRow value={cfg.mode} onChange={(v) => set("mode", v as ConfigData["mode"])}
-              options={[["personal", "个人版（默认）"], ["team", "团队版"]]} />
+          <Field
+            label="个人版 / 团队版"
+            hint="团队版：任何人 @ 即可使用（不做白名单）；CLI 强制只用应用身份。管理命令仍限 owner/管理员。"
+          >
+            <SelectRow
+              value={cfg.mode}
+              onChange={(v) => set("mode", v as ConfigData["mode"])}
+              options={[
+                ["personal", "个人版（默认）"],
+                ["team", "团队版"],
+              ]}
+            />
           </Field>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>回复与运行</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>回复与运行</CardTitle>
+        </CardHeader>
         <CardContent className="space-y-4">
           <Field label="模型">
-            <SelectRow value={cfg.model} onChange={(v) => set("model", v)}
-              options={cfg.models.map((m) => [m.value, m.label])} />
+            <SelectRow
+              value={cfg.model}
+              onChange={(v) => set("model", v)}
+              options={cfg.models.map((m) => [m.value, m.label])}
+            />
           </Field>
           <Field label="消息回复方式">
-            <SelectRow value={cfg.messageReply} onChange={(v) => set("messageReply", v as ConfigData["messageReply"])}
-              options={[["markdown", "消息卡片（默认）"], ["text", "纯文本"]]} />
+            <SelectRow
+              value={cfg.messageReply}
+              onChange={(v) => set("messageReply", v as ConfigData["messageReply"])}
+              options={[
+                ["markdown", "消息卡片（默认）"],
+                ["text", "纯文本"],
+              ]}
+            />
           </Field>
-          <ToggleRow label="工具调用显示" hint="显示 bot 执行的命令与文件读写过程" checked={cfg.showToolCalls}
-            onChange={(v) => set("showToolCalls", v)} />
+          <ToggleRow
+            label="工具调用显示"
+            hint="显示 bot 执行的命令与文件读写过程"
+            checked={cfg.showToolCalls}
+            onChange={(v) => set("showToolCalls", v)}
+          />
           <Field label="COT 过程消息">
-            <SelectRow value={cfg.cotMessages} onChange={(v) => set("cotMessages", v as ConfigData["cotMessages"])}
-              options={[["off", "关闭"], ["brief", "简略"], ["detailed", "详细"]]} />
+            <SelectRow
+              value={cfg.cotMessages}
+              onChange={(v) => set("cotMessages", v as ConfigData["cotMessages"])}
+              options={[
+                ["off", "关闭"],
+                ["brief", "简略"],
+                ["detailed", "详细"],
+              ]}
+            />
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="并发上限（1-50）">
-              <Input type="number" min={1} max={50} value={cfg.maxConcurrentRuns}
-                onChange={(e) => set("maxConcurrentRuns", Number(e.target.value))} />
+              <Input
+                type="number"
+                min={1}
+                max={50}
+                value={cfg.maxConcurrentRuns}
+                onChange={(e) => set("maxConcurrentRuns", Number(e.target.value))}
+              />
             </Field>
             <Field label="探活分钟（0=关闭）">
-              <Input type="number" min={0} max={120} value={cfg.runIdleTimeoutMinutes}
-                onChange={(e) => set("runIdleTimeoutMinutes", Number(e.target.value))} />
+              <Input
+                type="number"
+                min={0}
+                max={120}
+                value={cfg.runIdleTimeoutMinutes}
+                onChange={(e) => set("runIdleTimeoutMinutes", Number(e.target.value))}
+              />
             </Field>
           </div>
-          <ToggleRow label="群里需要 @ bot（全局默认）"
+          <ToggleRow
+            label="群里需要 @ bot（全局默认）"
             hint="关闭后群里任何消息都会触发（需 im:message.group_msg 权限）。可在下方「允许响应的群」为单个群单独设置，优先级高于此项。"
-            checked={cfg.requireMentionInGroup} onChange={(v) => set("requireMentionInGroup", v)} />
+            checked={cfg.requireMentionInGroup}
+            onChange={(v) => set("requireMentionInGroup", v)}
+          />
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>lark-cli 身份策略</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>lark-cli 身份策略</CardTitle>
+        </CardHeader>
         <CardContent className="space-y-2">
-          <SelectRow value={cfg.larkCliIdentity} onChange={(v) => set("larkCliIdentity", v as ConfigData["larkCliIdentity"])}
-            options={[["bot-only", "只允许应用身份"], ["user-default", "允许用户身份"]]} />
+          <SelectRow
+            value={cfg.larkCliIdentity}
+            onChange={(v) => set("larkCliIdentity", v as ConfigData["larkCliIdentity"])}
+            options={[
+              ["bot-only", "只允许应用身份"],
+              ["user-default", "允许用户身份"],
+            ]}
+          />
           <p className="text-xs text-muted-foreground">
             只允许应用身份：不访问个人资源。允许用户身份：可访问已授权用户的日历/邮箱/云盘等。
           </p>
           {team && (
-            <p className="text-xs text-primary">⚠️ 团队版已开启：本项被覆盖为「只允许应用身份」。切回个人版后恢复。</p>
+            <p className="text-xs text-primary">
+              ⚠️ 团队版已开启：本项被覆盖为「只允许应用身份」。切回个人版后恢复。
+            </p>
           )}
         </CardContent>
       </Card>
 
-      <MeetingCard
-        profile={profile}
-        cfg={cfg.meeting}
-        onChange={(next) => set("meeting", next)}
-      />
+      <MeetingCard profile={profile} cfg={cfg.meeting} onChange={(next) => set("meeting", next)} />
 
       <Card>
-        <CardHeader><CardTitle>访问控制</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>访问控制</CardTitle>
+        </CardHeader>
         <CardContent className="space-y-4">
           {team && (
-            <p className="text-xs text-primary">团队版下访问控制不生效（任何人可用）；以下配置保留，切回个人版后恢复。</p>
+            <p className="text-xs text-primary">
+              团队版下访问控制不生效（任何人可用）；以下配置保留，切回个人版后恢复。
+            </p>
           )}
-          <AccessList label="允许私聊的用户（open_id）" placeholder="ou_..." ids={cfg.access.allowedUsers}
-            onAdd={(id) => access("add", "user", id)} onRemove={(id) => access("remove", "user", id)} />
+          <AccessList
+            label="允许私聊的用户（open_id）"
+            placeholder="ou_..."
+            ids={cfg.access.allowedUsers}
+            onAdd={(id) => access("add", "user", id)}
+            onRemove={(id) => access("remove", "user", id)}
+          />
           <hr className="border-border" />
           <AllowedChats
             profile={profile}
@@ -209,14 +273,23 @@ export function ConfigView({ profile }: { profile: string }) {
             onSetMention={setMention}
           />
           <hr className="border-border" />
-          <AccessList label="管理员（open_id）" placeholder="ou_..." ids={cfg.access.admins}
-            onAdd={(id) => access("add", "admin", id)} onRemove={(id) => access("remove", "admin", id)} />
+          <AccessList
+            label="管理员（open_id）"
+            placeholder="ou_..."
+            ids={cfg.access.admins}
+            onAdd={(id) => access("add", "admin", id)}
+            onRemove={(id) => access("remove", "admin", id)}
+          />
         </CardContent>
       </Card>
 
       <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background/90 py-3 backdrop-blur">
-        <Button variant="outline" onClick={() => load()} disabled={saving}>重新加载</Button>
-        <Button onClick={save} disabled={saving}>{saving ? "保存中…" : "保存"}</Button>
+        <Button variant="outline" onClick={() => load()} disabled={saving}>
+          重新加载
+        </Button>
+        <Button onClick={save} disabled={saving}>
+          {saving ? "保存中…" : "保存"}
+        </Button>
       </div>
     </div>
   );
@@ -228,7 +301,11 @@ export function ConfigView({ profile }: { profile: string }) {
  * (for granting from a phone). The URL is opaque: linked/encoded as-is, never
  * rebuilt.
  */
-function MeetingPreflightPanel({ pre, checking, onRecheck }: {
+function MeetingPreflightPanel({
+  pre,
+  checking,
+  onRecheck,
+}: {
   pre: MeetingPreflight | null;
   checking: boolean;
   onRecheck: () => void;
@@ -241,7 +318,9 @@ function MeetingPreflightPanel({ pre, checking, onRecheck }: {
     return (
       <div className="flex items-center gap-2">
         <Badge variant="success">应用权限已就绪</Badge>
-        <Button variant="ghost" size="sm" disabled={checking} onClick={onRecheck}>重新检查</Button>
+        <Button variant="ghost" size="sm" disabled={checking} onClick={onRecheck}>
+          重新检查
+        </Button>
       </div>
     );
   }
@@ -253,7 +332,9 @@ function MeetingPreflightPanel({ pre, checking, onRecheck }: {
         <Badge variant="destructive">
           {isScope ? "缺少应用权限" : pre.status === "not-in-beta" ? "内测未开通" : "权限状态未知"}
         </Badge>
-        <Button variant="ghost" size="sm" disabled={checking} onClick={onRecheck}>重新检查</Button>
+        <Button variant="ghost" size="sm" disabled={checking} onClick={onRecheck}>
+          重新检查
+        </Button>
       </div>
       <p className="text-xs text-muted-foreground">{pre.message}</p>
 
@@ -268,9 +349,13 @@ function MeetingPreflightPanel({ pre, checking, onRecheck }: {
               const missing = pre.missingScopes.includes(r.scope);
               return (
                 <li key={r.scope} className="text-xs">
-                  <span className={missing ? "font-mono text-destructive" : "font-mono"}>{r.scope}</span>
+                  <span className={missing ? "font-mono text-destructive" : "font-mono"}>
+                    {r.scope}
+                  </span>
                   <span className="text-muted-foreground">
-                    {" — "}{r.purpose}{missing ? "（已确认缺失）" : ""}
+                    {" — "}
+                    {r.purpose}
+                    {missing ? "（已确认缺失）" : ""}
                   </span>
                 </li>
               );
@@ -282,8 +367,12 @@ function MeetingPreflightPanel({ pre, checking, onRecheck }: {
       {pre.consoleUrl && (
         <div className="flex items-start gap-4">
           <div className="space-y-2">
-            <a className={LINK_BUTTON_CLASS} href={pre.consoleUrl} target="_blank" rel="noreferrer">去开通权限</a>
-            <p className="text-xs text-muted-foreground">开通后点「重新检查」；生效后需重启该 profile。</p>
+            <a className={LINK_BUTTON_CLASS} href={pre.consoleUrl} target="_blank" rel="noreferrer">
+              去开通权限
+            </a>
+            <p className="text-xs text-muted-foreground">
+              开通后点「重新检查」；生效后需重启该 profile。
+            </p>
           </div>
           <div className="rounded-md border bg-white p-2">
             <QRCodeSVG value={pre.consoleUrl} size={96} />
@@ -294,7 +383,14 @@ function MeetingPreflightPanel({ pre, checking, onRecheck }: {
       {pre.betaChatUrl && (
         <div className="flex items-start gap-4">
           <div className="space-y-2">
-            <a className={LINK_BUTTON_CLASS} href={pre.betaChatUrl} target="_blank" rel="noreferrer">加入内测群申请开通</a>
+            <a
+              className={LINK_BUTTON_CLASS}
+              href={pre.betaChatUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              加入内测群申请开通
+            </a>
             <p className="text-xs text-muted-foreground">开通后点「重新检查」。</p>
           </div>
           <div className="rounded-md border bg-white p-2">
@@ -304,13 +400,19 @@ function MeetingPreflightPanel({ pre, checking, onRecheck }: {
       )}
 
       <div className="space-y-1 border-t pt-2">
-        <p className="text-xs">另外需在开发者后台以「长连接」模式订阅事件（无查询接口，只能人工确认）：</p>
+        <p className="text-xs">
+          另外需在开发者后台以「长连接」模式订阅事件（无查询接口，只能人工确认）：
+        </p>
         <ul className="space-y-0.5">
           {pre.requiredEvents.map((e) => (
-            <li key={e} className="font-mono text-xs text-muted-foreground">{e}</li>
+            <li key={e} className="font-mono text-xs text-muted-foreground">
+              {e}
+            </li>
           ))}
         </ul>
-        <p className="text-xs text-muted-foreground">未订阅也可用：会自动降级为轮询，只是字幕慢几秒。</p>
+        <p className="text-xs text-muted-foreground">
+          未订阅也可用：会自动降级为轮询，只是字幕慢几秒。
+        </p>
       </div>
     </div>
   );
@@ -321,7 +423,11 @@ function MeetingPreflightPanel({ pre, checking, onRecheck }: {
  * meetings — including whether `vc.bot.*` pushes are actually arriving, which
  * is the one thing that can't be verified from code alone.
  */
-function MeetingCard({ profile, cfg, onChange }: {
+function MeetingCard({
+  profile,
+  cfg,
+  onChange,
+}: {
   profile: string;
   cfg: MeetingConfig;
   onChange: (next: MeetingConfig) => void;
@@ -332,7 +438,8 @@ function MeetingCard({ profile, cfg, onChange }: {
   const [joinNo, setJoinNo] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const set = <K extends keyof MeetingConfig>(k: K, v: MeetingConfig[K]) => onChange({ ...cfg, [k]: v });
+  const set = <K extends keyof MeetingConfig>(k: K, v: MeetingConfig[K]) =>
+    onChange({ ...cfg, [k]: v });
 
   const load = () =>
     apiGet<MeetingsView>(`/api/meetings?profile=${encodeURIComponent(profile)}`)
@@ -342,10 +449,16 @@ function MeetingCard({ profile, cfg, onChange }: {
   async function preflight() {
     setChecking(true);
     try {
-      setPre(await apiGet<MeetingPreflight>(`/api/meetings/preflight?profile=${encodeURIComponent(profile)}`));
+      setPre(
+        await apiGet<MeetingPreflight>(
+          `/api/meetings/preflight?profile=${encodeURIComponent(profile)}`,
+        ),
+      );
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
-    } finally { setChecking(false); }
+    } finally {
+      setChecking(false);
+    }
   }
 
   useEffect(() => {
@@ -372,7 +485,9 @@ function MeetingCard({ profile, cfg, onChange }: {
       await load();
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function leave(meetingId: string) {
@@ -383,19 +498,28 @@ function MeetingCard({ profile, cfg, onChange }: {
       await load();
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle>会议智能体</CardTitle>
-        <input aria-label="启用会议智能体" className={CHECKBOX_CLASS} type="checkbox" checked={cfg.enabled} onChange={(e) => set("enabled", e.target.checked)} />
+        <input
+          aria-label="启用会议智能体"
+          className={CHECKBOX_CLASS}
+          type="checkbox"
+          checked={cfg.enabled}
+          onChange={(e) => set("enabled", e.target.checked)}
+        />
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground">
           让 bot 作为参会人加入飞书会议，读字幕/弹幕并作答。需要应用已开通内测与
-          <span className="font-mono"> vc:meeting.bot.join:write</span>。开关变更后需重启该 profile 生效。
+          <span className="font-mono"> vc:meeting.bot.join:write</span>。开关变更后需重启该 profile
+          生效。
         </p>
 
         {cfg.enabled && (
@@ -407,7 +531,11 @@ function MeetingCard({ profile, cfg, onChange }: {
                 <SelectRow
                   value={cfg.respondIn}
                   onChange={(v) => set("respondIn", v as MeetingConfig["respondIn"])}
-                  options={[["meeting", "会中消息"], ["im", "IM 私聊"], ["both", "两者"]]}
+                  options={[
+                    ["meeting", "会中消息"],
+                    ["im", "IM 私聊"],
+                    ["both", "两者"],
+                  ]}
                 />
               </Field>
               <Field
@@ -419,18 +547,39 @@ function MeetingCard({ profile, cfg, onChange }: {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Field label="字幕上下文条数（10-2000）">
-                <Input type="number" min={10} max={2000} value={cfg.transcript.keep}
-                  onChange={(e) => set("transcript", { ...cfg.transcript, keep: Number(e.target.value) })} />
+                <Input
+                  type="number"
+                  min={10}
+                  max={2000}
+                  value={cfg.transcript.keep}
+                  onChange={(e) =>
+                    set("transcript", { ...cfg.transcript, keep: Number(e.target.value) })
+                  }
+                />
               </Field>
               <Field label="字幕定稿防抖 ms（0=不防抖）">
-                <Input type="number" min={0} max={30000} value={cfg.transcript.stabilizeMs}
-                  onChange={(e) => set("transcript", { ...cfg.transcript, stabilizeMs: Number(e.target.value) })} />
+                <Input
+                  type="number"
+                  min={0}
+                  max={30000}
+                  value={cfg.transcript.stabilizeMs}
+                  onChange={(e) =>
+                    set("transcript", { ...cfg.transcript, stabilizeMs: Number(e.target.value) })
+                  }
+                />
               </Field>
             </div>
-            <ToggleRow label="被邀请时自动入会" hint="依赖 vc.bot.meeting_invited_v1 推送（需在开发者后台订阅）"
-              checked={cfg.autoJoinOnInvite} onChange={(v) => set("autoJoinOnInvite", v)} />
-            <ToggleRow label="会议结束自动出纪要" checked={cfg.summaryOnEnd}
-              onChange={(v) => set("summaryOnEnd", v)} />
+            <ToggleRow
+              label="被邀请时自动入会"
+              hint="依赖 vc.bot.meeting_invited_v1 推送（需在开发者后台订阅）"
+              checked={cfg.autoJoinOnInvite}
+              onChange={(v) => set("autoJoinOnInvite", v)}
+            />
+            <ToggleRow
+              label="会议结束自动出纪要"
+              checked={cfg.summaryOnEnd}
+              onChange={(v) => set("summaryOnEnd", v)}
+            />
             {cfg.summaryOnEnd && (
               <Field
                 label="纪要发到哪"
@@ -455,8 +604,18 @@ function MeetingCard({ profile, cfg, onChange }: {
             ) : (
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium leading-none">在会会议（{live.sessions.length}）</label>
-                  <Badge variant={live.push.hooked ? (live.push.received > 0 ? "success" : "secondary") : "destructive"}>
+                  <label className="text-sm font-medium leading-none">
+                    在会会议（{live.sessions.length}）
+                  </label>
+                  <Badge
+                    variant={
+                      live.push.hooked
+                        ? live.push.received > 0
+                          ? "success"
+                          : "secondary"
+                        : "destructive"
+                    }
+                  >
                     {live.push.hooked
                       ? live.push.received > 0
                         ? `推送正常 · ${live.push.received} 条`
@@ -466,7 +625,8 @@ function MeetingCard({ profile, cfg, onChange }: {
                 </div>
                 {live.push.hooked && live.push.received === 0 && (
                   <p className="text-xs text-muted-foreground">
-                    钩子已装好但还没收到事件。确认开发者后台已用「长连接」模式订阅 vc.bot.* 三个事件；期间靠轮询兜底，功能可用。
+                    钩子已装好但还没收到事件。确认开发者后台已用「长连接」模式订阅 vc.bot.*
+                    三个事件；期间靠轮询兜底，功能可用。
                   </p>
                 )}
                 {!live.push.hooked && live.push.reason && (
@@ -481,24 +641,43 @@ function MeetingCard({ profile, cfg, onChange }: {
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm">{s.topic ?? s.meetingNo}</div>
                         <div className="truncate text-xs text-muted-foreground">
-                          {s.meetingNo} · {s.source === "push" ? "推送" : "轮询"} · 字幕 {s.transcriptLines} 条 · 参会 {s.participants} 人
+                          {s.meetingNo} · {s.source === "push" ? "推送" : "轮询"} · 字幕{" "}
+                          {s.transcriptLines} 条 · 参会 {s.participants} 人
                         </div>
                         {/* Which activity types actually arrived — tells apart
                             "nothing was sent" from "sent but unparsed" (`?`). */}
                         <div className="truncate text-xs text-muted-foreground">
-                          收到事件：{Object.keys(s.eventCounts).length === 0
+                          收到事件：
+                          {Object.keys(s.eventCounts).length === 0
                             ? "无"
-                            : Object.entries(s.eventCounts).map(([k, v]) => `${k}×${v}`).join(" · ")}
+                            : Object.entries(s.eventCounts)
+                                .map(([k, v]) => `${k}×${v}`)
+                                .join(" · ")}
                         </div>
                       </div>
-                      <Button variant="ghost" size="sm" disabled={busy} onClick={() => leave(s.meetingId)}>离会</Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => leave(s.meetingId)}
+                      >
+                        离会
+                      </Button>
                     </div>
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <Input placeholder="9 位会议号" value={joinNo} onChange={(e) => setJoinNo(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void join(); }} />
-                  <Button variant="outline" disabled={busy} onClick={join}>入会</Button>
+                  <Input
+                    placeholder="9 位会议号"
+                    value={joinNo}
+                    onChange={(e) => setJoinNo(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void join();
+                    }}
+                  />
+                  <Button variant="outline" disabled={busy} onClick={join}>
+                    入会
+                  </Button>
                 </div>
               </div>
             )}
@@ -519,8 +698,16 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function ToggleRow({ label, hint, checked, onChange }: {
-  label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void;
+function ToggleRow({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-4">
@@ -528,17 +715,33 @@ function ToggleRow({ label, hint, checked, onChange }: {
         <label className="text-sm font-medium leading-none">{label}</label>
         {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       </div>
-      <input aria-label={label} className={CHECKBOX_CLASS} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <input
+        aria-label={label}
+        className={CHECKBOX_CLASS}
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
     </div>
   );
 }
 
-function SelectRow({ value, onChange, options }: {
-  value: string; onChange: (v: string) => void; options: [string, string][];
+function SelectRow({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: [string, string][];
 }) {
   return (
     <select className={SELECT_CLASS} value={value} onChange={(e) => onChange(e.target.value)}>
-      {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      {options.map(([v, l]) => (
+        <option key={v} value={v}>
+          {l}
+        </option>
+      ))}
     </select>
   );
 }
@@ -583,21 +786,39 @@ function AllowedChats({
                 aria-label={`${id} 的 @ 设置`}
                 className="h-8 w-[150px] cursor-pointer rounded-md border bg-transparent px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
                 value={value}
-                onChange={(e) => onSetMention(id, e.target.value === "global" ? null : e.target.value === "on")}
+                onChange={(e) =>
+                  onSetMention(id, e.target.value === "global" ? null : e.target.value === "on")
+                }
               >
                 <option value="global">@：跟随全局（{globalRequire ? "需@" : "无需@"}）</option>
                 <option value="on">需要 @</option>
                 <option value="off">无需 @</option>
               </select>
-              <Button variant="ghost" size="sm" onClick={() => onRemove(id)}>移除</Button>
+              <Button variant="ghost" size="sm" onClick={() => onRemove(id)}>
+                移除
+              </Button>
             </div>
           );
         })}
       </div>
       <div className="flex gap-2">
-        <Button variant="outline" onClick={() => setPickerOpen(true)}>选择群</Button>
-        <Input placeholder="或手动输入 oc_..." value={draft} onChange={(e) => setDraft(e.target.value)} />
-        <Button variant="outline" onClick={() => { onAdd(draft); setDraft(""); }}>添加</Button>
+        <Button variant="outline" onClick={() => setPickerOpen(true)}>
+          选择群
+        </Button>
+        <Input
+          placeholder="或手动输入 oc_..."
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <Button
+          variant="outline"
+          onClick={() => {
+            onAdd(draft);
+            setDraft("");
+          }}
+        >
+          添加
+        </Button>
       </div>
       <p className="text-xs text-muted-foreground">
         每个群可单独设置是否需要 @ bot；「跟随全局」时用上面「回复与运行」里的默认值。
@@ -613,7 +834,13 @@ function AllowedChats({
   );
 }
 
-function GroupPicker({ profile, open, onOpenChange, added, onPick }: {
+function GroupPicker({
+  profile,
+  open,
+  onOpenChange,
+  added,
+  onPick,
+}: {
   profile: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -646,7 +873,12 @@ function GroupPicker({ profile, open, onOpenChange, added, onPick }: {
   );
 }
 
-function BotChatsPane({ profile, open, added, onPick }: {
+function BotChatsPane({
+  profile,
+  open,
+  added,
+  onPick,
+}: {
   profile: string;
   open: boolean;
   added: string[];
@@ -668,11 +900,15 @@ function BotChatsPane({ profile, open, added, onPick }: {
   const addedSet = new Set(added);
   return (
     <div className="space-y-2 py-2">
-      <p className="text-xs text-muted-foreground">只列出 bot 已加入的群（需要该 profile 在线）。</p>
+      <p className="text-xs text-muted-foreground">
+        只列出 bot 已加入的群（需要该 profile 在线）。
+      </p>
       {error && <p className="text-sm text-destructive">加载失败：{error}</p>}
       {!error && chats === null && <p className="text-sm text-muted-foreground">加载中…</p>}
       {chats && chats.length === 0 && (
-        <p className="text-sm text-muted-foreground">没有找到群。确认该 profile 在线，且 bot 已被拉进群聊。</p>
+        <p className="text-sm text-muted-foreground">
+          没有找到群。确认该 profile 在线，且 bot 已被拉进群聊。
+        </p>
       )}
       {chats && chats.length > 0 && (
         <div className="max-h-[46vh] divide-y overflow-y-auto rounded-md border">
@@ -685,7 +921,16 @@ function BotChatsPane({ profile, open, added, onPick }: {
               {addedSet.has(c.id) ? (
                 <Badge variant="secondary">已添加</Badge>
               ) : (
-                <Button size="sm" variant="outline" onClick={() => { onPick(c.id, c.name); toast.success("添加成功"); }}>添加</Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onPick(c.id, c.name);
+                    toast.success("添加成功");
+                  }}
+                >
+                  添加
+                </Button>
               )}
             </div>
           ))}
@@ -700,7 +945,12 @@ function BotChatsPane({ profile, open, added, onPick }: {
 const LIST_SCOPES = ["im:chat:read"];
 const ADD_BOT_SCOPES = ["im:chat:read", "im:chat.members:write_only"];
 
-function MyChatsPane({ profile, open, added, onPick }: {
+function MyChatsPane({
+  profile,
+  open,
+  added,
+  onPick,
+}: {
   profile: string;
   open: boolean;
   added: string[];
@@ -723,8 +973,14 @@ function MyChatsPane({ profile, open, added, onPick }: {
 
   const loadStatus = () =>
     apiGet<UserAuthStatus>(`/api/auth/status?profile=${encodeURIComponent(profile)}`)
-      .then((s) => { setStatus(s); return s; })
-      .catch((e) => { setError(String((e as Error).message ?? e)); return null; });
+      .then((s) => {
+        setStatus(s);
+        return s;
+      })
+      .catch((e) => {
+        setError(String((e as Error).message ?? e));
+        return null;
+      });
 
   // Fetch a page of chats (8 at a time). reset=true starts over with the current
   // search query; otherwise it appends the next page via the pagination token.
@@ -736,7 +992,9 @@ function MyChatsPane({ profile, open, added, onPick }: {
       const params = new URLSearchParams({ profile });
       if (query.trim()) params.set("query", query.trim());
       if (!reset && nextToken) params.set("pageToken", nextToken);
-      const r = await apiGet<{ chats: UserChat[]; nextPageToken?: string }>(`/api/user-chats?${params.toString()}`);
+      const r = await apiGet<{ chats: UserChat[]; nextPageToken?: string }>(
+        `/api/user-chats?${params.toString()}`,
+      );
       setChats((prev) => (reset || !prev ? r.chats : [...prev, ...r.chats]));
       setNextToken(r.nextPageToken);
     } catch (e) {
@@ -748,8 +1006,13 @@ function MyChatsPane({ profile, open, added, onPick }: {
 
   useEffect(() => {
     if (!open) return;
-    setChats(null); setNextToken(undefined); setQuery("");
-    setLogin(null); setError(null); setStatus(null); setPendingPull(null);
+    setChats(null);
+    setNextToken(undefined);
+    setQuery("");
+    setLogin(null);
+    setError(null);
+    setStatus(null);
+    setPendingPull(null);
     void loadStatus().then((s) => {
       if (s?.loggedIn && s.scopes.includes("im:chat:read")) void fetchChats(true);
     });
@@ -757,12 +1020,15 @@ function MyChatsPane({ profile, open, added, onPick }: {
   }, [open, profile]);
 
   async function startAuth(scopes: string[]) {
-    setBusy(true); setError(null);
+    setBusy(true);
+    setError(null);
     try {
       setLogin(await apiPost<DeviceLogin>("/api/auth/login/start", { profile, scopes }));
     } catch (e) {
       setError(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function completeAuth() {
@@ -782,16 +1048,20 @@ function MyChatsPane({ profile, open, added, onPick }: {
       }
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function pullBot(id: string) {
     setBusy(true);
     try {
-      const r = await apiPost<{ ok: boolean; pending?: boolean; needAuth?: boolean; message?: string }>(
-        "/api/chats/add-bot",
-        { profile, chatId: id },
-      );
+      const r = await apiPost<{
+        ok: boolean;
+        pending?: boolean;
+        needAuth?: boolean;
+        message?: string;
+      }>("/api/chats/add-bot", { profile, chatId: id });
       if (r.needAuth) {
         // Missing the add-member scope → grant it, then retry this pull.
         setPendingPull(id);
@@ -813,7 +1083,9 @@ function MyChatsPane({ profile, open, added, onPick }: {
       setChats((prev) => prev?.map((c) => (c.id === id ? { ...c, botInIt: true } : c)) ?? prev);
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Device flow in progress (either the initial view-groups grant, or the
@@ -822,21 +1094,43 @@ function MyChatsPane({ profile, open, added, onPick }: {
     return (
       <div className="space-y-3 py-2">
         <p className="text-sm text-muted-foreground">
-          {pendingPull ? "把 bot 拉进群需要授权「添加群成员」权限。" : "列出「我的群」需要授权「查看群」权限。"}
+          {pendingPull
+            ? "把 bot 拉进群需要授权「添加群成员」权限。"
+            : "列出「我的群」需要授权「查看群」权限。"}
         </p>
         <div className="flex flex-col items-center gap-2">
-          <div className="rounded-lg border bg-white p-3"><QRCodeSVG value={login.verificationUrl} size={160} /></div>
-          <a href={login.verificationUrl} target="_blank" rel="noreferrer" className="break-all text-sm text-primary underline">
+          <div className="rounded-lg border bg-white p-3">
+            <QRCodeSVG value={login.verificationUrl} size={160} />
+          </div>
+          <a
+            href={login.verificationUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="break-all text-sm text-primary underline"
+          >
             在浏览器打开授权
           </a>
           {login.userCode && (
-            <p className="text-xs text-muted-foreground">验证码：<span className="font-mono">{login.userCode}</span></p>
+            <p className="text-xs text-muted-foreground">
+              验证码：<span className="font-mono">{login.userCode}</span>
+            </p>
           )}
         </div>
         <p className="text-xs text-muted-foreground">在浏览器里同意授权后，点下面按钮完成。</p>
         <div className="flex gap-2">
-          <Button className="flex-1" onClick={completeAuth} disabled={busy}>{busy ? "确认中…" : "我已完成授权"}</Button>
-          <Button variant="outline" onClick={() => { setLogin(null); setPendingPull(null); }} disabled={busy}>取消</Button>
+          <Button className="flex-1" onClick={completeAuth} disabled={busy}>
+            {busy ? "确认中…" : "我已完成授权"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setLogin(null);
+              setPendingPull(null);
+            }}
+            disabled={busy}
+          >
+            取消
+          </Button>
         </div>
       </div>
     );
@@ -846,29 +1140,43 @@ function MyChatsPane({ profile, open, added, onPick }: {
   if (status && !canList) {
     return (
       <div className="space-y-3 py-2">
-        <p className="text-sm text-muted-foreground">列出「我的群」需要用你的飞书身份授权一次（只需「查看群」权限）。</p>
+        <p className="text-sm text-muted-foreground">
+          列出「我的群」需要用你的飞书身份授权一次（只需「查看群」权限）。
+        </p>
         {error && <p className="text-sm text-destructive">{error}</p>}
-        <Button onClick={() => startAuth(LIST_SCOPES)} disabled={busy}>{busy ? "请稍候…" : "去授权（查看群）"}</Button>
+        <Button onClick={() => startAuth(LIST_SCOPES)} disabled={busy}>
+          {busy ? "请稍候…" : "去授权（查看群）"}
+        </Button>
       </div>
     );
   }
 
   return (
     <div className="space-y-2 py-2">
-      {status?.userName && <p className="text-xs text-muted-foreground">已授权：{status.userName}</p>}
+      {status?.userName && (
+        <p className="text-xs text-muted-foreground">已授权：{status.userName}</p>
+      )}
       <div className="flex gap-2">
         <Input
           placeholder="按群名搜索…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") void fetchChats(true); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void fetchChats(true);
+          }}
         />
-        <Button variant="outline" disabled={listing} onClick={() => void fetchChats(true)}>搜索</Button>
+        <Button variant="outline" disabled={listing} onClick={() => void fetchChats(true)}>
+          搜索
+        </Button>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {!error && chats === null && listing && <p className="text-sm text-muted-foreground">加载中…</p>}
+      {!error && chats === null && listing && (
+        <p className="text-sm text-muted-foreground">加载中…</p>
+      )}
       {chats && chats.length === 0 && (
-        <p className="text-sm text-muted-foreground">{query.trim() ? "没搜到匹配的群。" : "没找到你所在的群。"}</p>
+        <p className="text-sm text-muted-foreground">
+          {query.trim() ? "没搜到匹配的群。" : "没找到你所在的群。"}
+        </p>
       )}
       {chats && chats.length > 0 && (
         <div className="max-h-[46vh] divide-y overflow-y-auto rounded-md border">
@@ -879,19 +1187,36 @@ function MyChatsPane({ profile, open, added, onPick }: {
                 <div className="truncate font-mono text-xs text-muted-foreground">{c.id}</div>
               </div>
               {!c.botInIt && (
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => pullBot(c.id)}>拉bot进群</Button>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => pullBot(c.id)}>
+                  拉bot进群
+                </Button>
               )}
               {addedSet.has(c.id) ? (
                 <Badge variant="secondary">已添加</Badge>
               ) : (
-                <Button size="sm" variant="outline" onClick={() => { onPick(c.id, c.name); toast.success("添加成功"); }}>添加</Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onPick(c.id, c.name);
+                    toast.success("添加成功");
+                  }}
+                >
+                  添加
+                </Button>
               )}
             </div>
           ))}
         </div>
       )}
       {nextToken && (
-        <Button variant="ghost" size="sm" className="w-full" disabled={listing} onClick={() => void fetchChats(false)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full"
+          disabled={listing}
+          onClick={() => void fetchChats(false)}
+        >
           {listing ? "加载中…" : "加载更多"}
         </Button>
       )}
@@ -902,26 +1227,47 @@ function MyChatsPane({ profile, open, added, onPick }: {
   );
 }
 
-function AccessList({ label, placeholder, ids, onAdd, onRemove }: {
-  label: string; placeholder: string; ids: string[];
-  onAdd: (id: string) => void; onRemove: (id: string) => void;
+function AccessList({
+  label,
+  placeholder,
+  ids,
+  onAdd,
+  onRemove,
+}: {
+  label: string;
+  placeholder: string;
+  ids: string[];
+  onAdd: (id: string) => void;
+  onRemove: (id: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   return (
     <div className="space-y-2">
-      <label className="text-sm font-medium leading-none">{label}（{ids.length}）</label>
+      <label className="text-sm font-medium leading-none">
+        {label}（{ids.length}）
+      </label>
       <div className="rounded-md border divide-y">
         {ids.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">（暂无）</p>}
         {ids.map((id) => (
           <div key={id} className="flex items-center gap-2 px-3 py-2">
             <span className="flex-1 truncate font-mono text-xs">{id}</span>
-            <Button variant="ghost" size="sm" onClick={() => onRemove(id)}>移除</Button>
+            <Button variant="ghost" size="sm" onClick={() => onRemove(id)}>
+              移除
+            </Button>
           </div>
         ))}
       </div>
       <div className="flex gap-2">
         <Input placeholder={placeholder} value={draft} onChange={(e) => setDraft(e.target.value)} />
-        <Button variant="outline" onClick={() => { onAdd(draft); setDraft(""); }}>添加</Button>
+        <Button
+          variant="outline"
+          onClick={() => {
+            onAdd(draft);
+            setDraft("");
+          }}
+        >
+          添加
+        </Button>
       </div>
     </div>
   );

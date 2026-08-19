@@ -40,22 +40,28 @@ describe('profile-aware secrets commands', () => {
     const root = await makeRoot();
     await writeProfiles(root, 'codex-dev', ['alpha', 'codex-dev', 'zeta']);
     const duplicate = secretKeyForApp('cli_duplicate');
-    await setSecret(duplicate, 'from-active', resolveAppPaths({ rootDir: root, profile: 'codex-dev' }));
+    await setSecret(
+      duplicate,
+      'from-active',
+      resolveAppPaths({ rootDir: root, profile: 'codex-dev' }),
+    );
     await setSecret(duplicate, 'from-alpha', resolveAppPaths({ rootDir: root, profile: 'alpha' }));
     const fallback = secretKeyForApp('cli_fallback');
     await setSecret(fallback, 'from-zeta', resolveAppPaths({ rootDir: root, profile: 'zeta' }));
     await setSecret(fallback, 'from-alpha', resolveAppPaths({ rootDir: root, profile: 'alpha' }));
     const warnings: string[] = [];
 
-    await expect(resolveSecretAcrossProfiles(duplicate, root, (msg) => warnings.push(msg))).resolves.toBe(
-      'from-active',
-    );
-    await expect(resolveSecretAcrossProfiles(fallback, root, (msg) => warnings.push(msg))).resolves.toBe(
-      'from-alpha',
-    );
+    await expect(
+      resolveSecretAcrossProfiles(duplicate, root, (msg) => warnings.push(msg)),
+    ).resolves.toBe('from-active');
+    await expect(
+      resolveSecretAcrossProfiles(fallback, root, (msg) => warnings.push(msg)),
+    ).resolves.toBe('from-alpha');
 
     expect(warnings).toEqual([
-      expect.stringContaining('secret app-cli_duplicate exists in multiple profiles; using codex-dev'),
+      expect.stringContaining(
+        'secret app-cli_duplicate exists in multiple profiles; using codex-dev',
+      ),
       expect.stringContaining('secret app-cli_fallback exists in multiple profiles; using alpha'),
     ]);
   });
@@ -71,10 +77,15 @@ describe('profile-aware secrets commands', () => {
       getSecret(secretKeyForApp('cli_alpha'), resolveAppPaths({ rootDir: root, profile: 'alpha' })),
     ).resolves.toBe('alpha-secret');
     await expect(
-      getSecret(secretKeyForApp('cli_active'), resolveAppPaths({ rootDir: root, profile: 'codex-dev' })),
+      getSecret(
+        secretKeyForApp('cli_active'),
+        resolveAppPaths({ rootDir: root, profile: 'codex-dev' }),
+      ),
     ).resolves.toBe('active-secret');
 
-    await expect(removeAppSecret('cli_alpha', { rootDir: root, profile: 'alpha' })).resolves.toBe(true);
+    await expect(removeAppSecret('cli_alpha', { rootDir: root, profile: 'alpha' })).resolves.toBe(
+      true,
+    );
     await expect(
       getSecret(secretKeyForApp('cli_alpha'), resolveAppPaths({ rootDir: root, profile: 'alpha' })),
     ).resolves.toBeUndefined();
@@ -84,7 +95,11 @@ describe('profile-aware secrets commands', () => {
     const root = await makeRoot();
     await writeProfiles(root, 'codex-dev', ['alpha', 'codex-dev']);
     const duplicate = secretKeyForApp('cli_duplicate');
-    await setSecret(duplicate, 'from-codex', resolveAppPaths({ rootDir: root, profile: 'codex-dev' }));
+    await setSecret(
+      duplicate,
+      'from-codex',
+      resolveAppPaths({ rootDir: root, profile: 'codex-dev' }),
+    );
     await setSecret(duplicate, 'from-alpha', resolveAppPaths({ rootDir: root, profile: 'alpha' }));
     const warnings: string[] = [];
 

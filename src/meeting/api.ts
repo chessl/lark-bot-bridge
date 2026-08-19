@@ -76,8 +76,10 @@ function asVcApiError(err: unknown, endpoint: string): VcApiError | undefined {
   if (!isRecord(data)) return undefined;
   const code = typeof data.code === 'number' ? data.code : undefined;
   if (code === undefined) return undefined;
-  const msg = typeof data.msg === 'string' && data.msg ? data.msg : `VC API failed with code ${code}`;
-  const status = isRecord(response) && typeof response.status === 'number' ? response.status : undefined;
+  const msg =
+    typeof data.msg === 'string' && data.msg ? data.msg : `VC API failed with code ${code}`;
+  const status =
+    isRecord(response) && typeof response.status === 'number' ? response.status : undefined;
   return new VcApiError(code, status ? `${msg}（HTTP ${status}）` : msg, endpoint);
 }
 

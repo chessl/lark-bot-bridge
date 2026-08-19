@@ -48,7 +48,9 @@ describe('profile-scoped daemon paths and arguments', () => {
     expect(buildPlist(inputs)).toContain('<string>run</string>');
     expect(buildPlist(inputs)).toContain('<string>--profile</string>');
     expect(buildPlist(inputs)).toContain('<string>codex-dev</string>');
-    expect(buildPlist(inputs)).toContain('<key>LARK_CHANNEL_HOME</key>\n        <string>/tmp/lark-channel-home</string>');
+    expect(buildPlist(inputs)).toContain(
+      '<key>LARK_CHANNEL_HOME</key>\n        <string>/tmp/lark-channel-home</string>',
+    );
     expect(buildUnit(inputs)).toContain('run --profile codex-dev');
     expect(buildUnit(inputs)).toContain('Environment="LARK_CHANNEL_HOME=/tmp/lark-channel-home"');
     expect(buildLauncherCmd(inputs)).toContain('run --profile codex-dev');

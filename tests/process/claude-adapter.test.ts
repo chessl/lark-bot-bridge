@@ -16,9 +16,9 @@ describe('ClaudeAdapter process contract', () => {
 
   afterEach(async () => {
     await Promise.all(
-      cleanup.splice(0).map((dir) =>
-        rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 }),
-      ),
+      cleanup
+        .splice(0)
+        .map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })),
     );
   });
 
@@ -74,7 +74,13 @@ describe('ClaudeAdapter process contract', () => {
     const rootDir = join(fake.dir, 'channel-home');
     const configPath = join(rootDir, 'config.custom.json');
     const larkCliConfigDir = join(rootDir, 'profiles', 'codex-dev', 'lark-cli');
-    const larkCliSourceConfigFile = join(rootDir, 'profiles', 'codex-dev', 'lark-cli-source', 'config.json');
+    const larkCliSourceConfigFile = join(
+      rootDir,
+      'profiles',
+      'codex-dev',
+      'lark-cli-source',
+      'config.json',
+    );
 
     const run = new ClaudeAdapter({
       binary: fake.path,
@@ -128,7 +134,9 @@ describe('ClaudeAdapter process contract', () => {
 
   it('includes stderr when the process exits non-zero', async () => {
     const fake = await createFakeClaude({
-      lines: [{ type: 'assistant', message: { content: [{ type: 'text', text: 'before failure' }] } }],
+      lines: [
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'before failure' }] } },
+      ],
       stderr: 'boom\n',
       exitCode: 42,
     });
@@ -256,7 +264,9 @@ async function createFakeClaude(options: {
       options.stderr ? `  process.stderr.write(${JSON.stringify(options.stderr)});` : '',
       `  setTimeout(() => process.exit(${options.exitCode ?? 0}), ${options.exitDelayMs ?? 0});`,
       '});',
-    ].filter(Boolean).join('\n'),
+    ]
+      .filter(Boolean)
+      .join('\n'),
     'utf8',
   );
   await chmod(path, 0o755);

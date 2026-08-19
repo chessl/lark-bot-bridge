@@ -42,7 +42,6 @@ describe('/reconnect profile lifecycle', () => {
     expect(run.waitForExitCalls).toBe(1);
     expect(h.restart).toHaveBeenCalledWith({ wait: true });
   });
-
 });
 
 async function createHarness(): Promise<{

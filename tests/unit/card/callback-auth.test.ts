@@ -103,7 +103,9 @@ describe('CallbackAuth', () => {
     });
 
     const token = h.auth.sign(baseSignInput());
-    expect(JSON.parse(Buffer.from(token.split('.')[2]!, 'base64url').toString('utf8'))).toMatchObject({
+    expect(
+      JSON.parse(Buffer.from(token.split('.')[2]!, 'base64url').toString('utf8')),
+    ).toMatchObject({
       kv: 2,
     });
     expect(h.auth.verify(token, baseExpected())).toMatchObject({ ok: true });
@@ -152,11 +154,13 @@ function baseExpected() {
   };
 }
 
-async function harness(options: {
-  now?: number;
-  nonce?: string;
-  keys?: Array<{ version: number; secret: string; retired?: boolean }>;
-} = {}) {
+async function harness(
+  options: {
+    now?: number;
+    nonce?: string;
+    keys?: Array<{ version: number; secret: string; retired?: boolean }>;
+  } = {},
+) {
   let now = options.now ?? 1000;
   const storePath = await path();
   const store = new CallbackNonceStore(storePath);

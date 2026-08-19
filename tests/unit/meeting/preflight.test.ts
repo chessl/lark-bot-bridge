@@ -49,7 +49,10 @@ describe('classifyPreflight', () => {
   });
 
   it('detects the allowlisted beta gate and offers the sign-up link', () => {
-    const byCode = classifyPreflight({ ok: false, error: { code: 20017, message: 'ErrNotInGray' } });
+    const byCode = classifyPreflight({
+      ok: false,
+      error: { code: 20017, message: 'ErrNotInGray' },
+    });
     expect(byCode.status).toBe('not-in-beta');
     expect(byCode.betaChatUrl).toMatch(/join-chat/);
 
@@ -80,7 +83,13 @@ describe('checkMeetingPreflight', () => {
     const r = await checkMeetingPreflight({ profile: 'claude', probeUserId: 'ou_owner' }, exec);
 
     expect(calls[0]).toEqual([
-      'vc', '+meeting-list-active', '--as', 'bot', '--json', '--user-id', 'ou_owner',
+      'vc',
+      '+meeting-list-active',
+      '--as',
+      'bot',
+      '--json',
+      '--user-id',
+      'ou_owner',
     ]);
     expect(r.status).toBe('scope-missing');
     expect(r.consoleUrl).toBe(SCOPE_ERROR.error.console_url);

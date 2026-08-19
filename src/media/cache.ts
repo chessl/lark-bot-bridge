@@ -125,10 +125,7 @@ export class MediaCache {
 }
 
 /** Delete files under the media cache whose mtime is older than maxAgeMs. */
-export async function gcMediaCache(
-  maxAgeMs: number,
-  root: string = paths.mediaDir,
-): Promise<void> {
+export async function gcMediaCache(maxAgeMs: number, root: string = paths.mediaDir): Promise<void> {
   try {
     await stat(root);
   } catch {
@@ -170,7 +167,7 @@ async function listFiles(root: string): Promise<string[]> {
   for (const entry of entries) {
     const full = join(root, entry.name);
     if (entry.isDirectory()) {
-      out.push(...await listFiles(full));
+      out.push(...(await listFiles(full)));
     } else if (entry.isFile()) {
       out.push(full);
     }
@@ -208,7 +205,9 @@ async function enforceCacheMaxBytes(
   }
 }
 
-async function removeRejectedResolvedFiles(attachments: readonly NormalizedAttachment[]): Promise<void> {
+async function removeRejectedResolvedFiles(
+  attachments: readonly NormalizedAttachment[],
+): Promise<void> {
   await Promise.all(
     attachments
       .filter((attachment) => attachment.decision !== 'accepted')

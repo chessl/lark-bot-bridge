@@ -77,12 +77,17 @@ export async function runProfileList(opts: ProfileCommandOptions = {}): Promise<
     profile: Math.max('PROFILE'.length, ...rows.map((row) => row.profile.length)),
     agent: Math.max('AGENT'.length, ...rows.map((row) => row.agent.length)),
   };
-  console.log(formatProfileListRow({
-    active: 'ACTIVE',
-    profile: 'PROFILE',
-    agent: 'AGENT',
-    status: 'STATUS',
-  }, widths));
+  console.log(
+    formatProfileListRow(
+      {
+        active: 'ACTIVE',
+        profile: 'PROFILE',
+        agent: 'AGENT',
+        status: 'STATUS',
+      },
+      widths,
+    ),
+  );
   for (const row of rows) {
     console.log(formatProfileListRow(row, widths));
   }
@@ -136,10 +141,7 @@ export async function runProfileCreate(
   console.log(`已创建 profile: ${name}`);
 }
 
-export async function runProfileUse(
-  name: string,
-  opts: ProfileCommandOptions = {},
-): Promise<void> {
+export async function runProfileUse(name: string, opts: ProfileCommandOptions = {}): Promise<void> {
   const rootDir = opts.rootDir ?? paths.rootDir;
   const configFile = resolveAppPaths({ rootDir }).configFile;
   await withConfigFileLock(configFile, async () => {
@@ -169,7 +171,9 @@ export async function runProfileRemove(
     const activeProfile = await readActiveProfile(rootDir);
     if (activeProfile) {
       if (!root.profiles[activeProfile]) {
-        throw new Error(`active profile not found: ${activeProfile}; run profile use <name> to repair`);
+        throw new Error(
+          `active profile not found: ${activeProfile}; run profile use <name> to repair`,
+        );
       }
       root.activeProfile = activeProfile;
     }

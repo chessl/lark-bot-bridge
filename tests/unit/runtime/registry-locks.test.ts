@@ -49,7 +49,9 @@ describe('registry and runtime lock integration', () => {
       registryFile,
     });
 
-    const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as { entries: ProcessEntry[] };
+    const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as {
+      entries: ProcessEntry[];
+    };
     expect(persisted.entries.map((item) => item.id)).toEqual([registered.id]);
     expect(persisted.entries[0]).toMatchObject({
       appId: 'cli_new',
@@ -83,7 +85,9 @@ describe('registry and runtime lock integration', () => {
         registryFile,
       });
 
-      const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as { entries: ProcessEntry[] };
+      const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as {
+        entries: ProcessEntry[];
+      };
       expect(persisted.entries.map((item) => item.id)).toEqual(['locked', registered.id]);
     });
   });
@@ -115,7 +119,9 @@ describe('registry and runtime lock integration', () => {
         registryFile,
       });
 
-      const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as { entries: ProcessEntry[] };
+      const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as {
+        entries: ProcessEntry[];
+      };
       expect(persisted.entries.map((item) => item.id)).toEqual([registered.id]);
     });
   });
@@ -137,7 +143,9 @@ describe('registry and runtime lock integration', () => {
 
     const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'claude' });
     await withProfileAndAppLocks(lockedPaths, 'cli_existing', 'claude', async () => {
-      await expect(sameAppLiveOthers('cli_existing', process.pid, registryFile)).resolves.toEqual([]);
+      await expect(sameAppLiveOthers('cli_existing', process.pid, registryFile)).resolves.toEqual(
+        [],
+      );
     });
   });
 
@@ -163,7 +171,9 @@ describe('registry and runtime lock integration', () => {
     });
 
     expect(await readFile(legacyRegistryFile, 'utf8')).toBe(legacyBefore);
-    const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as { entries: ProcessEntry[] };
+    const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as {
+      entries: ProcessEntry[];
+    };
     expect(persisted.entries.map((item) => item.id)).toEqual([registered.id]);
   });
 
@@ -206,7 +216,9 @@ describe('registry and runtime lock integration', () => {
         }),
       ).rejects.toThrow(/runtime lock state unknown/);
 
-      const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as { entries: ProcessEntry[] };
+      const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as {
+        entries: ProcessEntry[];
+      };
       expect(persisted.entries.map((item) => item.id)).toEqual(['locked']);
     });
   });
@@ -218,7 +230,9 @@ describe('registry and runtime lock integration', () => {
 
     unregisterSync('remove-me', registryFile);
 
-    const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as { entries: ProcessEntry[] };
+    const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as {
+      entries: ProcessEntry[];
+    };
     expect(persisted.entries).toEqual([]);
   });
 });

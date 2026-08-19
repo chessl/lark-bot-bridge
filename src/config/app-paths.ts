@@ -43,7 +43,8 @@ export interface AppPaths {
 const DEFAULT_PROFILE = 'claude';
 
 export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
-  const rootDir = opts.rootDir ?? process.env.LARK_CHANNEL_HOME ?? join(homedir(), '.lark-bot-bridge');
+  const rootDir =
+    opts.rootDir ?? process.env.LARK_CHANNEL_HOME ?? join(homedir(), '.lark-bot-bridge');
   const profile = normalizeProfileName(opts.profile ?? DEFAULT_PROFILE);
   const profileDir = join(rootDir, 'profiles', profile);
   const registryDir = join(rootDir, 'registry');

@@ -118,7 +118,10 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
   }
   const target = await resolveCommentTarget(channel, evt);
   if (!target) {
-    log.info('comment', 'skip', { reason: 'unsupported-target', commentScopeId: eventCommentScopeId });
+    log.info('comment', 'skip', {
+      reason: 'unsupported-target',
+      commentScopeId: eventCommentScopeId,
+    });
     return;
   }
   const targetDocScopeId = commentDocumentScopeId(target.fileToken);
@@ -191,7 +194,10 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
     const threadTimeoutMs = commentRunTimeoutMs(sessions, commentThreadScopeId);
     const commentTimeoutMs = runTimeoutMs !== undefined ? runTimeoutMs : threadTimeoutMs;
     if (typeof commentTimeoutMs === 'number') {
-      log.info('comment', 'timeout-watchdog', { commentScopeId: runScopeId, timeoutMs: commentTimeoutMs });
+      log.info('comment', 'timeout-watchdog', {
+        commentScopeId: runScopeId,
+        timeoutMs: commentTimeoutMs,
+      });
     }
     const policy = evaluateRunPolicy({
       scope: {
@@ -226,7 +232,7 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
     try {
       const canResumeAgentSession = !agentSessionRun.wasActive;
       const catalogEntry = canResumeAgentSession
-        ? sessionCatalog?.activeFor({
+        ? (sessionCatalog?.activeFor({
             scopeId: agentSessionScopeId,
             agentId: capability.agentId,
             cwdRealpath,
@@ -237,13 +243,13 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
             agentId: capability.agentId,
             cwdRealpath,
             policyFingerprint: policy.policyFingerprint,
-          })
+          }))
         : undefined;
       const sessionId =
         canResumeAgentSession && capability.sessionKind !== 'codex-thread'
-          ? catalogEntry?.sessionId ??
+          ? (catalogEntry?.sessionId ??
             sessions.resumeFor(docSessionScopeId, cwdRealpath) ??
-            sessions.resumeFor(legacyDocSessionScopeId, cwdRealpath)
+            sessions.resumeFor(legacyDocSessionScopeId, cwdRealpath))
           : undefined;
       const threadId =
         capability.sessionKind === 'codex-thread' ? catalogEntry?.threadId : undefined;
@@ -255,34 +261,38 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
         cwd: cwdRealpath,
       });
 
-      const execution = await deps.executor.submit({
-        scopeId: runScopeId,
-        policy,
-        sessionId,
-        threadId,
-        stopGraceMs: getAgentStopGraceMs(controls.cfg),
-        observability: {
-          profile: controls.profile,
-          agent: capability.agentId,
-          source: 'comment',
-          stage: 'submit',
-        },
-      }).catch(async (err: unknown) => {
-        if (err instanceof RunRejected) {
-          log.info('comment', 'skip', {
-            reason: err.code,
-            commentScopeId: runScopeId,
-          });
-          const reply = commentRunRejectedReply(err.code);
-          if (reply) {
-            await postCommentReply(channel, target, evt, reply, { isWhole: ctx.isWhole }).catch((replyErr) => {
-              log.fail('comment', replyErr, { step: 'postRunRejectedReply' });
+      const execution = await deps.executor
+        .submit({
+          scopeId: runScopeId,
+          policy,
+          sessionId,
+          threadId,
+          stopGraceMs: getAgentStopGraceMs(controls.cfg),
+          observability: {
+            profile: controls.profile,
+            agent: capability.agentId,
+            source: 'comment',
+            stage: 'submit',
+          },
+        })
+        .catch(async (err: unknown) => {
+          if (err instanceof RunRejected) {
+            log.info('comment', 'skip', {
+              reason: err.code,
+              commentScopeId: runScopeId,
             });
+            const reply = commentRunRejectedReply(err.code);
+            if (reply) {
+              await postCommentReply(channel, target, evt, reply, { isWhole: ctx.isWhole }).catch(
+                (replyErr) => {
+                  log.fail('comment', replyErr, { step: 'postRunRejectedReply' });
+                },
+              );
+            }
+            return undefined;
           }
-          return undefined;
-        }
-        throw err;
-      });
+          throw err;
+        });
       if (!execution) return;
       let answer = '';
       let errorMsg: string | undefined;
@@ -327,11 +337,7 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
             policy,
             event: e,
           });
-          if (
-            capability.sessionKind !== 'codex-thread' &&
-            e.type === 'system' &&
-            e.sessionId
-          ) {
+          if (capability.sessionKind !== 'codex-thread' && e.type === 'system' && e.sessionId) {
             sessions.set(docSessionScopeId, e.sessionId, policy.cwdRealpath);
           }
           switch (e.type) {
@@ -470,19 +476,14 @@ export function extractCommentQuestionFromReplies(
   return { question, targetReplyId: targetReply.reply_id };
 }
 
-export function buildCommentPrompt(
-  target: ResolvedTarget,
-  ctx: CommentContext,
-): string {
+export function buildCommentPrompt(target: ResolvedTarget, ctx: CommentContext): string {
   const docUrl = `https://feishu.cn/${target.fileType}/${target.fileToken}`;
   const parts: string[] = [];
   parts.push('我在飞书云文档里被 @了。文档信息：');
   parts.push(`- 链接：${docUrl}`);
   parts.push(`- file_token：${target.fileToken}`);
   parts.push(`- 类型：${target.fileType}`);
-  parts.push(
-    `- 评论范围：${ctx.isWhole ? '全文评论（针对整篇）' : '行内评论（针对选中文字）'}`,
-  );
+  parts.push(`- 评论范围：${ctx.isWhole ? '全文评论（针对整篇）' : '行内评论（针对选中文字）'}`);
   if (ctx.quote) {
     parts.push('');
     parts.push(`用户选中的原文：\n> ${ctx.quote.replace(/\n/g, '\n> ')}`);
@@ -509,13 +510,9 @@ export function buildCommentPrompt(
   return parts.join('\n');
 }
 
-function recordCommentSessionEvent(
-  input: Parameters<typeof recordRunSessionEvent>[0],
-): void {
+function recordCommentSessionEvent(input: Parameters<typeof recordRunSessionEvent>[0]): void {
   const event =
-    input.event.type === 'system'
-      ? { ...input.event, cwd: input.policy.cwdRealpath }
-      : input.event;
+    input.event.type === 'system' ? { ...input.event, cwd: input.policy.cwdRealpath } : input.event;
   recordRunSessionEvent({ ...input, event });
 }
 
@@ -610,7 +607,12 @@ async function resolveCommentWorkingDirectory(
         failures,
       );
     }
-    return resolveManagedCommentWorkingDirectory(managedFallbackCwd, 'document', configured.reason, failures);
+    return resolveManagedCommentWorkingDirectory(
+      managedFallbackCwd,
+      'document',
+      configured.reason,
+      failures,
+    );
   }
 
   if (!defaultCwd) {
@@ -624,7 +626,12 @@ async function resolveCommentWorkingDirectory(
   const workspace = await resolveWorkingDirectory(defaultCwd);
   if (workspace.ok) return workspace;
   failures.push(workspace.userVisible);
-  return resolveManagedCommentWorkingDirectory(managedFallbackCwd, 'profile-default', workspace.reason, failures);
+  return resolveManagedCommentWorkingDirectory(
+    managedFallbackCwd,
+    'profile-default',
+    workspace.reason,
+    failures,
+  );
 }
 
 async function resolveManagedCommentWorkingDirectory(
@@ -697,13 +704,9 @@ function commentReadInstruction(target: ResolvedTarget): string {
     );
   }
   if (target.fileType === 'sheet') {
-    return (
-      '读取表格内容：这是 sheet 类型，不要使用 docs +fetch。请按当前可用的表格读取工具或本机 lark-cli 支持的表格读取命令读取同一 file_token；如果命令参数不兼容，不要在同一错误上反复重试。'
-    );
+    return '读取表格内容：这是 sheet 类型，不要使用 docs +fetch。请按当前可用的表格读取工具或本机 lark-cli 支持的表格读取命令读取同一 file_token；如果命令参数不兼容，不要在同一错误上反复重试。';
   }
-  return (
-    '读取文件内容：这是 file 类型，不要使用 docs +fetch。请按当前可用的云空间文件工具或本机 lark-cli 支持的文件读取/下载命令处理同一 file_token；如果命令参数不兼容，不要在同一错误上反复重试。'
-  );
+  return '读取文件内容：这是 file 类型，不要使用 docs +fetch。请按当前可用的云空间文件工具或本机 lark-cli 支持的文件读取/下载命令处理同一 file_token；如果命令参数不兼容，不要在同一错误上反复重试。';
 }
 
 function isBridgeSelfReply(channel: LarkChannel, evt: CommentEvent): boolean {
@@ -731,29 +734,28 @@ function isBridgeSelfReply(channel: LarkChannel, evt: CommentEvent): boolean {
  * italic, headings, blockquote, list bullets, and inline code.
  */
 export function stripMarkdown(s: string): string {
-  return s
-    // headings: "# foo" -> "foo"
-    .replace(/^#{1,6}\s+/gm, '')
-    // bold/italic: **foo** / __foo__ / *foo* / _foo_
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/__([^_]+)__/g, '$1')
-    .replace(/(?<![*\w])\*([^*\n]+)\*(?!\w)/g, '$1')
-    .replace(/(?<![_\w])_([^_\n]+)_(?!\w)/g, '$1')
-    // inline code: `foo`
-    .replace(/`([^`]+)`/g, '$1')
-    // unordered list bullets: "- foo" / "* foo"
-    .replace(/^[-*]\s+/gm, '')
-    // blockquote
-    .replace(/^>\s?/gm, '')
-    // remove fenced code-block backticks but keep contents
-    .replace(/```[a-zA-Z]*\n?/g, '')
-    .replace(/```/g, '');
+  return (
+    s
+      // headings: "# foo" -> "foo"
+      .replace(/^#{1,6}\s+/gm, '')
+      // bold/italic: **foo** / __foo__ / *foo* / _foo_
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/(?<![*\w])\*([^*\n]+)\*(?!\w)/g, '$1')
+      .replace(/(?<![_\w])_([^_\n]+)_(?!\w)/g, '$1')
+      // inline code: `foo`
+      .replace(/`([^`]+)`/g, '$1')
+      // unordered list bullets: "- foo" / "* foo"
+      .replace(/^[-*]\s+/gm, '')
+      // blockquote
+      .replace(/^>\s?/gm, '')
+      // remove fenced code-block backticks but keep contents
+      .replace(/```[a-zA-Z]*\n?/g, '')
+      .replace(/```/g, '')
+  );
 }
 
-function commentRunTimeoutMs(
-  sessions: SessionStore,
-  scopeId: string,
-): number | null | undefined {
+function commentRunTimeoutMs(sessions: SessionStore, scopeId: string): number | null | undefined {
   const scopeOverride = sessions.getIdleTimeoutMinutes(scopeId);
   if (scopeOverride !== undefined) {
     return scopeOverride > 0 ? scopeOverride * 60_000 : null;

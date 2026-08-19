@@ -40,9 +40,7 @@ export function workspacesCard(current: string | undefined, named: Record<string
   if (entries.length === 0) {
     elements.push(HR);
     elements.push(divMd('暂无命名工作目录。'));
-    elements.push(
-      divMd('💡 发送 `/ws save <name>` 把当前 cwd 存为命名工作目录'),
-    );
+    elements.push(divMd('💡 发送 `/ws save <name>` 把当前 cwd 存为命名工作目录'));
   } else {
     elements.push(HR);
     entries.forEach(([name, path], i) => {

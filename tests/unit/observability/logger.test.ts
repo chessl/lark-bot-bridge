@@ -40,7 +40,9 @@ describe('profile logger observability', () => {
       profile: 'claude',
       agent: 'claude',
     });
-    expect(JSON.parse(text.trim()).ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/);
+    expect(JSON.parse(text.trim()).ts).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/,
+    );
   });
 
   it('prints topic scope, message id, run, COT, outbound, and fallback context on stdout', () => {
@@ -187,5 +189,4 @@ describe('profile logger observability', () => {
     expect(entry.trace.length).toBeLessThan(4200);
     expect(entry.trace).toContain('[truncated]');
   });
-
 });

@@ -217,7 +217,8 @@ export async function startDeviceLogin(
     ]) ??
     findString(json, /verification.*(uri|url)|url|uri/i) ??
     '';
-  const deviceCode = pickString(json, ['device_code', 'deviceCode']) ?? findString(json, /device.?code/i) ?? '';
+  const deviceCode =
+    pickString(json, ['device_code', 'deviceCode']) ?? findString(json, /device.?code/i) ?? '';
   const userCode = pickString(json, ['user_code', 'userCode']) ?? findString(json, /user.?code/i);
   if (!verificationUrl || !deviceCode) {
     throw new Error(
@@ -230,7 +231,12 @@ export async function startDeviceLogin(
       : isRecord(json) && typeof json.expires_in === 'number'
         ? json.expires_in
         : undefined;
-  return { verificationUrl, deviceCode, ...(userCode ? { userCode } : {}), ...(expiresIn ? { expiresIn } : {}) };
+  return {
+    verificationUrl,
+    deviceCode,
+    ...(userCode ? { userCode } : {}),
+    ...(expiresIn ? { expiresIn } : {}),
+  };
 }
 
 /** Complete the device flow after the user authorized in the browser. */
@@ -369,7 +375,8 @@ export async function addBotToChat(
     return {
       ok: false,
       pending: false,
-      message: '把 bot 拉进群失败：应用对该群不可用，或缺少 im:chat 权限（去开发者后台确认应用可见范围与权限）',
+      message:
+        '把 bot 拉进群失败：应用对该群不可用，或缺少 im:chat 权限（去开发者后台确认应用可见范围与权限）',
     };
   }
   if (r.code !== 0) {
@@ -389,7 +396,14 @@ export async function addBotToChat(
 function extractArray(v: unknown): unknown[] {
   if (Array.isArray(v)) return v;
   if (!isRecord(v)) return [];
-  const keys = ['items', 'chats', 'list', 'invalid_id_list', 'not_existed_id_list', 'pending_approval_id_list'];
+  const keys = [
+    'items',
+    'chats',
+    'list',
+    'invalid_id_list',
+    'not_existed_id_list',
+    'pending_approval_id_list',
+  ];
   for (const container of [v, v.data]) {
     if (Array.isArray(container)) return container;
     if (isRecord(container)) {
@@ -408,7 +422,10 @@ function cliError(r: ExecResult, prefix: string): string {
   const json = parseJson(r.stdout) ?? parseJson(r.stderr);
   const firstLine = (s: string): string | undefined => s.trim().split('\n')[0]?.trim() || undefined;
   const detail =
-    findString(json, /message|reason/i) ?? firstLine(r.stderr) ?? firstLine(r.stdout) ?? `退出码 ${r.code}`;
+    findString(json, /message|reason/i) ??
+    firstLine(r.stderr) ??
+    firstLine(r.stdout) ??
+    `退出码 ${r.code}`;
   log.warn('user-im', 'lark-cli-error', { detail });
   return `${prefix}：${detail}`;
 }

@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  accessToClaudePermissionMode,
-  clampAccess,
-} from '../../../src/config/permissions';
+import { accessToClaudePermissionMode, clampAccess } from '../../../src/config/permissions';
 import {
   createDefaultProfileConfig,
   effectiveLarkCliIdentity,
@@ -55,7 +52,11 @@ describe('profile schema', () => {
     const fresh = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
     expect(fresh.mode).toBe('personal');
 
-    const team = createDefaultProfileConfig({ agentKind: 'claude', mode: 'team', accounts: { app } });
+    const team = createDefaultProfileConfig({
+      agentKind: 'claude',
+      mode: 'team',
+      accounts: { app },
+    });
     expect(team.mode).toBe('team');
 
     // Unknown / missing values normalize to personal (safe default for upgrades).

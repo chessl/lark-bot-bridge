@@ -18,16 +18,30 @@ afterEach(async () => {
 describe('Codex startup compatibility with legacy binary metadata', () => {
   it('loads a legacy Codex profile that only has binaryPath, past agent availability', async () => {
     const h = await createLegacyCodexConfig({ codexMetadata: {} });
-    const runtime = await resolveProfileRuntime({ config: h.configPath, profile: 'codex', allowBootstrap: false });
-    const agent = createRuntimeAgent(runtime.profileConfig, { ...runtime.appPaths, configPath: runtime.configPath });
+    const runtime = await resolveProfileRuntime({
+      config: h.configPath,
+      profile: 'codex',
+      allowBootstrap: false,
+    });
+    const agent = createRuntimeAgent(runtime.profileConfig, {
+      ...runtime.appPaths,
+      configPath: runtime.configPath,
+    });
     expect(agent.id).toBe('codex');
     expect(await agent.isAvailable()).toBe(true);
   });
 
   it('loads and refreshes stale legacy Codex metadata, past agent availability', async () => {
     const h = await createLegacyCodexConfig({ codexMetadata: staleLegacyMetadata() });
-    const runtime = await resolveProfileRuntime({ config: h.configPath, profile: 'codex', allowBootstrap: false });
-    const agent = createRuntimeAgent(runtime.profileConfig, { ...runtime.appPaths, configPath: runtime.configPath });
+    const runtime = await resolveProfileRuntime({
+      config: h.configPath,
+      profile: 'codex',
+      allowBootstrap: false,
+    });
+    const agent = createRuntimeAgent(runtime.profileConfig, {
+      ...runtime.appPaths,
+      configPath: runtime.configPath,
+    });
     expect(agent.id).toBe('codex');
     expect(await agent.isAvailable()).toBe(true);
   });
@@ -70,10 +84,7 @@ async function createLegacyCodexConfig(options: {
   cleanups.push(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 }));
   const workspace = join(root, 'workspace');
   const binDir = join(root, 'bin');
-  await Promise.all([
-    mkdir(workspace, { recursive: true }),
-    mkdir(binDir, { recursive: true }),
-  ]);
+  await Promise.all([mkdir(workspace, { recursive: true }), mkdir(binDir, { recursive: true })]);
   const codex = join(binDir, 'codex');
   await writeFile(
     codex,

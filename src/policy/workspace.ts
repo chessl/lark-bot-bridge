@@ -45,7 +45,12 @@ export async function resolveWorkingDirectory(
 
   const tempRealpath = await realpath(tmpdir()).catch(() => resolve(tmpdir()));
   const homeRealpath = await realpath(homedir()).catch(() => resolve(homedir()));
-  const broad = classifyHighRiskWorkingDirectory(resolved, requestedCwd, tempRealpath, homeRealpath);
+  const broad = classifyHighRiskWorkingDirectory(
+    resolved,
+    requestedCwd,
+    tempRealpath,
+    homeRealpath,
+  );
   if (broad) return broad;
 
   return {
@@ -75,10 +80,18 @@ function classifyHighRiskWorkingDirectory(
 
   const home = homeRealpath;
   if (real === home) {
-    return reject('home-root', requestedCwd, '不能把 Home 根目录设为工作目录，请选择更具体的子目录。');
+    return reject(
+      'home-root',
+      requestedCwd,
+      '不能把 Home 根目录设为工作目录，请选择更具体的子目录。',
+    );
   }
   if (real === dirname(home)) {
-    return reject('user-root', requestedCwd, '不能把用户目录根设为工作目录，请选择更具体的子目录。');
+    return reject(
+      'user-root',
+      requestedCwd,
+      '不能把用户目录根设为工作目录，请选择更具体的子目录。',
+    );
   }
 
   if (dirname(real) === home && new Set(['Desktop', 'Downloads']).has(basename(real))) {
@@ -87,7 +100,11 @@ function classifyHighRiskWorkingDirectory(
 
   const temp = resolve(tmpdir());
   if (real === temp || real === tempRealpath || real === '/tmp' || real === '/private/tmp') {
-    return reject('temp-root', requestedCwd, '不能把临时目录根设为工作目录，请选择更具体的子目录。');
+    return reject(
+      'temp-root',
+      requestedCwd,
+      '不能把临时目录根设为工作目录，请选择更具体的子目录。',
+    );
   }
 
   const systemRoots = new Set([
@@ -106,7 +123,11 @@ function classifyHighRiskWorkingDirectory(
   }
 
   if (real === '/Volumes' || dirname(real) === '/Volumes') {
-    return reject('volume-root', requestedCwd, '不能把磁盘卷根目录设为工作目录，请选择更具体的子目录。');
+    return reject(
+      'volume-root',
+      requestedCwd,
+      '不能把磁盘卷根目录设为工作目录，请选择更具体的子目录。',
+    );
   }
 
   return undefined;

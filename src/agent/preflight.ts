@@ -275,7 +275,12 @@ export function getAgentPreflightDiagnostic(err: unknown): AgentPreflightDiagnos
 
 export function isAgentPreflightDiagnostic(input: unknown): input is AgentPreflightDiagnostic {
   if (!input || typeof input !== 'object') return false;
-  const raw = input as { code?: unknown; agentId?: unknown; agentName?: unknown; command?: unknown };
+  const raw = input as {
+    code?: unknown;
+    agentId?: unknown;
+    agentName?: unknown;
+    command?: unknown;
+  };
   return (
     typeof raw.code === 'string' &&
     raw.code.startsWith('agent-') &&

@@ -181,10 +181,12 @@ export class OmpRpcTranslator {
       if (rpcFrame.isTerminal !== false) yield* this.finish();
       return;
     }
-
   }
 
-  *fail(message: string, terminationReason: 'failed' | 'interrupted' | 'timeout' = 'failed'): Generator<AgentEvent> {
+  *fail(
+    message: string,
+    terminationReason: 'failed' | 'interrupted' | 'timeout' = 'failed',
+  ): Generator<AgentEvent> {
     if (this.terminal) return;
     this.terminal = true;
     yield { type: 'error', message, terminationReason };
@@ -260,8 +262,7 @@ function usageEvent(value: unknown): Extract<AgentEvent, { type: 'usage' }> | un
     type: 'usage',
     inputTokens: numberField(usage, 'inputTokens') ?? numberField(usage, 'input'),
     outputTokens: numberField(usage, 'outputTokens') ?? numberField(usage, 'output'),
-    cachedInputTokens:
-      numberField(usage, 'cachedInputTokens') ?? numberField(usage, 'cacheRead'),
+    cachedInputTokens: numberField(usage, 'cachedInputTokens') ?? numberField(usage, 'cacheRead'),
     reasoningOutputTokens: numberField(usage, 'reasoningOutputTokens'),
     costUsd: numberField(usage, 'costUsd') ?? numberField(cost, 'total'),
   };

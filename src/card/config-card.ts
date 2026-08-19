@@ -80,7 +80,8 @@ export function configFormCard(opts: ConfigFormOpts): object {
       : []),
     {
       tag: 'markdown',
-      content: '_控制谁能通过私聊和群聊使用 bot。**留空 = 不响应聊天消息**。云文档评论按文档权限生效。_',
+      content:
+        '_控制谁能通过私聊和群聊使用 bot。**留空 = 不响应聊天消息**。云文档评论按文档权限生效。_',
     },
     { tag: 'hr' },
     {

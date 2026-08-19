@@ -41,7 +41,10 @@ describe('meeting REST layer', () => {
   });
 
   it('joins with join_type=1 and returns the long meeting id', async () => {
-    const { client, calls } = fakeClient({ code: 0, data: { meeting: { id: '70001', topic: '周会' } } });
+    const { client, calls } = fakeClient({
+      code: 0,
+      data: { meeting: { id: '70001', topic: '周会' } },
+    });
 
     const joined = await joinMeeting(client, { meetingNo: '123456789' });
 

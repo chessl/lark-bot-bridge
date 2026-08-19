@@ -18,56 +18,70 @@ describe('run card renderer snapshots', () => {
 
   it('renders active and completed thinking', () => {
     expectCard(stateFrom([{ type: 'thinking', delta: 'checking options' }])).toMatchSnapshot();
-    expectCard(stateFrom([
-      { type: 'thinking', delta: 'checking options' },
-      { type: 'text', delta: 'final answer' },
-      { type: 'done', terminationReason: 'normal' },
-    ])).toMatchSnapshot();
+    expectCard(
+      stateFrom([
+        { type: 'thinking', delta: 'checking options' },
+        { type: 'text', delta: 'final answer' },
+        { type: 'done', terminationReason: 'normal' },
+      ]),
+    ).toMatchSnapshot();
   });
 
   it('renders tool running, done, and error states', () => {
-    expectCard(stateFrom([
-      { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } },
-    ])).toMatchSnapshot();
+    expectCard(
+      stateFrom([{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } }]),
+    ).toMatchSnapshot();
 
-    expectCard(stateFrom([
-      { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } },
-      { type: 'tool_result', id: 'tool-1', output: '/repo', isError: false },
-      { type: 'done', terminationReason: 'normal' },
-    ])).toMatchSnapshot();
+    expectCard(
+      stateFrom([
+        { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } },
+        { type: 'tool_result', id: 'tool-1', output: '/repo', isError: false },
+        { type: 'done', terminationReason: 'normal' },
+      ]),
+    ).toMatchSnapshot();
 
-    expectCard(stateFrom([
-      { type: 'tool_use', id: 'tool-2', name: 'Read', input: { file_path: '/missing.ts' } },
-      { type: 'tool_result', id: 'tool-2', output: 'ENOENT', isError: true },
-      { type: 'done', terminationReason: 'normal' },
-    ])).toMatchSnapshot();
+    expectCard(
+      stateFrom([
+        { type: 'tool_use', id: 'tool-2', name: 'Read', input: { file_path: '/missing.ts' } },
+        { type: 'tool_result', id: 'tool-2', output: 'ENOENT', isError: true },
+        { type: 'done', terminationReason: 'normal' },
+      ]),
+    ).toMatchSnapshot();
   });
 
   it('collapses consecutive tools while preserving the latest running tool', () => {
-    expectCard(stateFrom([
-      { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } },
-      { type: 'tool_result', id: 'tool-1', output: '/repo', isError: false },
-      { type: 'tool_use', id: 'tool-2', name: 'Read', input: { file_path: '/repo/a.ts' } },
-      { type: 'tool_result', id: 'tool-2', output: 'a', isError: false },
-      { type: 'tool_use', id: 'tool-3', name: 'Edit', input: { file_path: '/repo/a.ts' } },
-    ])).toMatchSnapshot();
+    expectCard(
+      stateFrom([
+        { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } },
+        { type: 'tool_result', id: 'tool-1', output: '/repo', isError: false },
+        { type: 'tool_use', id: 'tool-2', name: 'Read', input: { file_path: '/repo/a.ts' } },
+        { type: 'tool_result', id: 'tool-2', output: 'a', isError: false },
+        { type: 'tool_use', id: 'tool-3', name: 'Edit', input: { file_path: '/repo/a.ts' } },
+      ]),
+    ).toMatchSnapshot();
 
-    expectCard(stateFrom([
-      { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } },
-      { type: 'tool_result', id: 'tool-1', output: '/repo', isError: false },
-      { type: 'tool_use', id: 'tool-2', name: 'Read', input: { file_path: '/repo/a.ts' } },
-      { type: 'tool_result', id: 'tool-2', output: 'a', isError: false },
-      { type: 'tool_use', id: 'tool-3', name: 'Edit', input: { file_path: '/repo/a.ts' } },
-      { type: 'tool_result', id: 'tool-3', output: 'ok', isError: false },
-      { type: 'done', terminationReason: 'normal' },
-    ])).toMatchSnapshot();
+    expectCard(
+      stateFrom([
+        { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } },
+        { type: 'tool_result', id: 'tool-1', output: '/repo', isError: false },
+        { type: 'tool_use', id: 'tool-2', name: 'Read', input: { file_path: '/repo/a.ts' } },
+        { type: 'tool_result', id: 'tool-2', output: 'a', isError: false },
+        { type: 'tool_use', id: 'tool-3', name: 'Edit', input: { file_path: '/repo/a.ts' } },
+        { type: 'tool_result', id: 'tool-3', output: 'ok', isError: false },
+        { type: 'done', terminationReason: 'normal' },
+      ]),
+    ).toMatchSnapshot();
   });
 
   it('renders done, error, interrupted, and idle-timeout terminal states', () => {
     expectCard(stateFrom([{ type: 'done', terminationReason: 'normal' }])).toMatchSnapshot();
-    expectCard(stateFrom([{ type: 'error', message: 'process failed', terminationReason: 'failed' }])).toMatchSnapshot();
+    expectCard(
+      stateFrom([{ type: 'error', message: 'process failed', terminationReason: 'failed' }]),
+    ).toMatchSnapshot();
     expectCard(markInterrupted(stateFrom([{ type: 'text', delta: 'partial' }]))).toMatchSnapshot();
-    expectCard(markIdleTimeout(stateFrom([{ type: 'text', delta: 'partial' }]), 15)).toMatchSnapshot();
+    expectCard(
+      markIdleTimeout(stateFrom([{ type: 'text', delta: 'partial' }]), 15),
+    ).toMatchSnapshot();
   });
 
   it('renders markdown text mode without card-only controls', () => {
@@ -82,14 +96,20 @@ describe('run card renderer snapshots', () => {
     expect(renderText(state)).toMatchSnapshot();
     expect(renderText(markInterrupted(state))).toMatchSnapshot();
     expect(renderText(markIdleTimeout(state, 10))).toMatchSnapshot();
-    expect(renderText(stateFrom([{ type: 'error', message: 'process failed', terminationReason: 'failed' }]))).toMatchSnapshot();
+    expect(
+      renderText(
+        stateFrom([{ type: 'error', message: 'process failed', terminationReason: 'failed' }]),
+      ),
+    ).toMatchSnapshot();
   });
 
   it('injects signed bridge callback values for managed run controls', () => {
     const card = renderCard(initialState, {
       signCallback: (action) => `token-for-${action}`,
     }) as {
-      body?: { elements?: Array<{ tag?: string; behaviors?: Array<{ value?: Record<string, unknown> }> }> };
+      body?: {
+        elements?: Array<{ tag?: string; behaviors?: Array<{ value?: Record<string, unknown> }> }>;
+      };
     };
     const button = card.body?.elements?.find((element) => element.tag === 'button');
 
@@ -105,7 +125,12 @@ describe('run card renderer snapshots', () => {
     const state = stateFrom([
       { type: 'text', delta: `I read ${sensitivePath}` },
       { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: sensitivePath } },
-      { type: 'tool_result', id: 'tool-1', output: `content from ${sensitivePath}`, isError: false },
+      {
+        type: 'tool_result',
+        id: 'tool-1',
+        output: `content from ${sensitivePath}`,
+        isError: false,
+      },
       { type: 'done', terminationReason: 'normal' },
     ]);
 

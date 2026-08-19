@@ -85,7 +85,9 @@ export async function onboardCreate(body: unknown, rootDir?: string) {
     appId: String(fv.appId ?? '').trim(),
     appSecret: String(fv.appSecret ?? '').trim(),
     tenant: readTenant(fv.tenant),
-    ...(typeof fv.workspace === 'string' && fv.workspace.trim() ? { workspace: fv.workspace.trim() } : {}),
+    ...(typeof fv.workspace === 'string' && fv.workspace.trim()
+      ? { workspace: fv.workspace.trim() }
+      : {}),
   };
   if (!input.appId || !input.appSecret) throw new HttpError(400, 'appId 和 appSecret 必填');
 
@@ -116,7 +118,10 @@ export async function writeNewProfile(
   try {
     appPaths = resolveAppPaths({ rootDir, profile: input.profile });
   } catch (err) {
-    throw new HttpError(400, `profile 名称无效：${err instanceof Error ? err.message : String(err)}`);
+    throw new HttpError(
+      400,
+      `profile 名称无效：${err instanceof Error ? err.message : String(err)}`,
+    );
   }
   const profile = appPaths.profile;
 
@@ -147,7 +152,10 @@ export async function writeNewProfile(
   await withConfigFileLock(appPaths.configFile, async () => {
     const root = await loadRootConfig(appPaths.configFile);
     if (!root) {
-      await saveRootConfig(createRootConfig(profile, profileConfig, encrypted.secrets), appPaths.configFile);
+      await saveRootConfig(
+        createRootConfig(profile, profileConfig, encrypted.secrets),
+        appPaths.configFile,
+      );
       return;
     }
     if (root.profiles[profile]) {
@@ -162,7 +170,10 @@ export async function writeNewProfile(
   return { profile };
 }
 
-async function encryptAccount(input: CreateProfileInput, appPaths: ReturnType<typeof resolveAppPaths>): Promise<AppConfig> {
+async function encryptAccount(
+  input: CreateProfileInput,
+  appPaths: ReturnType<typeof resolveAppPaths>,
+): Promise<AppConfig> {
   const next = await buildEncryptedAccountConfig(input.appId, input.tenant, undefined, appPaths);
   await setSecret(secretKeyForApp(input.appId), input.appSecret, appPaths);
   return next;

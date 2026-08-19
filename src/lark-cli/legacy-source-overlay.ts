@@ -73,7 +73,7 @@ async function restoreLegacyLarkCliSourceOverlayUnlocked(
   configFile: string,
   markerArg?: OverlayMarker,
 ): Promise<void> {
-  const marker = markerArg ?? await readMarker(configFile);
+  const marker = markerArg ?? (await readMarker(configFile));
   if (!marker) return;
   const { backupFile, markerFile } = legacyLarkCliSourceOverlayPaths(configFile);
   if (marker.hadConfig) {
@@ -90,7 +90,10 @@ async function readMarker(configFile: string): Promise<OverlayMarker | undefined
   const { markerFile } = legacyLarkCliSourceOverlayPaths(configFile);
   try {
     const parsed = JSON.parse(await readFile(markerFile, 'utf8')) as Partial<OverlayMarker>;
-    return { hadConfig: parsed.hadConfig === true, ...(parsed.profile ? { profile: parsed.profile } : {}) };
+    return {
+      hadConfig: parsed.hadConfig === true,
+      ...(parsed.profile ? { profile: parsed.profile } : {}),
+    };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw err;

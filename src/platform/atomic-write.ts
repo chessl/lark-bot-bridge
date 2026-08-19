@@ -47,11 +47,7 @@ export async function writeFileAtomic(
   }
 }
 
-async function renameWithRetry(
-  from: string,
-  to: string,
-  opts: AtomicWriteOptions,
-): Promise<void> {
+async function renameWithRetry(from: string, to: string, opts: AtomicWriteOptions): Promise<void> {
   const maxAttempts = opts.maxRenameAttempts ?? DEFAULT_RENAME_ATTEMPTS;
   const delayMs = opts.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const rename = opts.rename ?? ((src, dest) => fsRename(src, dest));
@@ -75,7 +71,9 @@ export function isTransientRenameError(err: unknown): boolean {
 }
 
 function isIgnorableWindowsFsyncError(err: unknown): boolean {
-  return process.platform === 'win32' && (err as NodeJS.ErrnoException | undefined)?.code === 'EPERM';
+  return (
+    process.platform === 'win32' && (err as NodeJS.ErrnoException | undefined)?.code === 'EPERM'
+  );
 }
 
 async function fsyncDir(path: string): Promise<void> {

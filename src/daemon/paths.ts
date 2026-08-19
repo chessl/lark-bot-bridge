@@ -30,7 +30,10 @@ export function serviceProfileId(profile: string): string {
   // short hash) so any profile can still be installed as an OS daemon.
   if (/^[A-Za-z0-9._-]+$/.test(trimmed)) return trimmed;
   const base =
-    trimmed.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 24) || 'profile';
+    trimmed
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      .replace(/^[-.]+|[-.]+$/g, '')
+      .slice(0, 24) || 'profile';
   const hash = createHash('sha1').update(trimmed).digest('hex').slice(0, 8);
   return `${base}-${hash}`;
 }

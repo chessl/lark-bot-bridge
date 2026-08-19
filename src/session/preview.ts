@@ -1,6 +1,9 @@
 const DEFAULT_PREVIEW_MAX_CHARS = 80;
 
-export function normalizeSessionPreview(input: string, maxChars = DEFAULT_PREVIEW_MAX_CHARS): string {
+export function normalizeSessionPreview(
+  input: string,
+  maxChars = DEFAULT_PREVIEW_MAX_CHARS,
+): string {
   const text = extractBridgeUserInput(input) ?? input;
   return truncatePreview(text.replace(/\s+/g, ' ').trim(), maxChars);
 }

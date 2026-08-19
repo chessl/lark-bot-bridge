@@ -30,8 +30,14 @@ describe('comment parser', () => {
   it('falls back to the latest reply when replyId is missing and multiple replies exist', () => {
     const result = extractCommentQuestionFromReplies({
       replies: [
-        { reply_id: 'reply-1', content: { elements: [{ type: 'text_run', text_run: { text: 'first' } }] } },
-        { reply_id: 'reply-2', content: { elements: [{ type: 'text_run', text_run: { text: 'second' } }] } },
+        {
+          reply_id: 'reply-1',
+          content: { elements: [{ type: 'text_run', text_run: { text: 'first' } }] },
+        },
+        {
+          reply_id: 'reply-2',
+          content: { elements: [{ type: 'text_run', text_run: { text: 'second' } }] },
+        },
       ],
     });
 
@@ -52,7 +58,9 @@ describe('comment parser', () => {
     expect(prompt).toContain('1. 这段方案有个风险');
     expect(prompt).toContain('2. 我觉得可以拆成两步');
     // the prior discussion must come before the question so the agent reads it as context
-    expect(prompt.indexOf('这段方案有个风险')).toBeLessThan(prompt.indexOf('用户的问题：说说你的思考'));
+    expect(prompt.indexOf('这段方案有个风险')).toBeLessThan(
+      prompt.indexOf('用户的问题：说说你的思考'),
+    );
   });
 
   it('omits the prior-discussion block when the thread has no earlier replies', () => {

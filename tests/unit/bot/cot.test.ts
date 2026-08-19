@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { withCotEvents, CotClient, CotPublisher, cotBriefToolTitle, finalAnswerOnlyState } from '../../../src/bot/cot.js';
+import {
+  withCotEvents,
+  CotClient,
+  CotPublisher,
+  cotBriefToolTitle,
+  finalAnswerOnlyState,
+} from '../../../src/bot/cot.js';
 import type { AgentEvent } from '../../../src/agent/types.js';
 import type { RunState } from '../../../src/card/run-state.js';
 
@@ -16,13 +22,24 @@ describe('COT event mapping', () => {
     });
     await publisher.start();
 
-    await drain(withCotEvents(iterate([
-      { type: 'text', delta: '我会先生成图片。' },
-      { type: 'tool_use', id: 'tool-1', name: 'command_execution', input: { command: 'echo bear' } },
-      { type: 'tool_result', id: 'tool-1', output: 'ok', isError: false },
-      { type: 'text', delta: '图片已经生成。' },
-      { type: 'done', terminationReason: 'normal' },
-    ]), publisher, { detail: 'brief' }));
+    await drain(
+      withCotEvents(
+        iterate([
+          { type: 'text', delta: '我会先生成图片。' },
+          {
+            type: 'tool_use',
+            id: 'tool-1',
+            name: 'command_execution',
+            input: { command: 'echo bear' },
+          },
+          { type: 'tool_result', id: 'tool-1', output: 'ok', isError: false },
+          { type: 'text', delta: '图片已经生成。' },
+          { type: 'done', terminationReason: 'normal' },
+        ]),
+        publisher,
+        { detail: 'brief' },
+      ),
+    );
 
     const eventTypes = client.events.map((event) => event.event_type);
     expect(eventTypes).toContain('TEXT_MESSAGE_START');
@@ -54,11 +71,17 @@ describe('COT event mapping', () => {
     });
     await publisher.start();
 
-    await drain(withCotEvents(iterate([
-      { type: 'tool_use', id: 'tool-1', name: 'command_execution', input: { command: 'pwd' } },
-      { type: 'tool_result', id: 'tool-1', output: 'workspace', isError: false },
-      { type: 'done', terminationReason: 'normal' },
-    ]), publisher, { detail: 'detailed' }));
+    await drain(
+      withCotEvents(
+        iterate([
+          { type: 'tool_use', id: 'tool-1', name: 'command_execution', input: { command: 'pwd' } },
+          { type: 'tool_result', id: 'tool-1', output: 'workspace', isError: false },
+          { type: 'done', terminationReason: 'normal' },
+        ]),
+        publisher,
+        { detail: 'detailed' },
+      ),
+    );
 
     expect(client.events.map((event) => event.event_type)).toContain('TOOL_CALL_ARGS');
     const result = client.events.find((event) => event.event_type === 'TOOL_CALL_RESULT');
@@ -68,7 +91,10 @@ describe('COT event mapping', () => {
   it('derives final answer state from text blocks only', () => {
     const state: RunState = {
       blocks: [
-        { kind: 'tool', tool: { id: 'tool', name: 'command_execution', input: {}, status: 'done' } },
+        {
+          kind: 'tool',
+          tool: { id: 'tool', name: 'command_execution', input: {}, status: 'done' },
+        },
         { kind: 'text', content: 'final', streaming: false },
       ],
       reasoning: { content: 'hidden', active: true },
@@ -84,10 +110,12 @@ describe('COT event mapping', () => {
   });
 
   it('uses the legacy tool header format for brief COT titles', () => {
-    expect(cotBriefToolTitle('command_execution', { command: 'echo hello' }, 'done'))
-      .toContain('✅ command_execution');
-    expect(cotBriefToolTitle('command_execution', { command: 'echo hello' }, 'done'))
-      .toContain('echo hello');
+    expect(cotBriefToolTitle('command_execution', { command: 'echo hello' }, 'done')).toContain(
+      '✅ command_execution',
+    );
+    expect(cotBriefToolTitle('command_execution', { command: 'echo hello' }, 'done')).toContain(
+      'echo hello',
+    );
   });
 
   it('creates the CoT bubble once, addressed to the origin message in a topic', async () => {
@@ -105,15 +133,15 @@ describe('COT event mapping', () => {
     await publisher.start();
 
     // Exactly one create — never a second (that would render a duplicate).
-    expect(client.createCalls).toEqual([
-      { chatId: 'oc_chat', originMessageId: 'om_in_topic' },
-    ]);
+    expect(client.createCalls).toEqual([{ chatId: 'oc_chat', originMessageId: 'om_in_topic' }]);
     expect(publisher.disabled).toBe(false);
   });
 
   it('disables the publisher when the create is rejected and never retries', async () => {
     const client = new FakeCotClient();
-    client.failCreate = new Error('COT API failed: code=10002 msg=Bot/User can NOT be out of the chat.');
+    client.failCreate = new Error(
+      'COT API failed: code=10002 msg=Bot/User can NOT be out of the chat.',
+    );
     const publisher = new CotPublisher({
       client,
       chatId: 'oc_chat',
@@ -176,10 +204,16 @@ describe('COT event mapping', () => {
     });
     await publisher.start();
 
-    await drain(withCotEvents(iterate([
-      { type: 'text', delta: 'working' },
-      { type: 'done', terminationReason: 'normal' },
-    ]), publisher, { detail: 'brief' }));
+    await drain(
+      withCotEvents(
+        iterate([
+          { type: 'text', delta: 'working' },
+          { type: 'done', terminationReason: 'normal' },
+        ]),
+        publisher,
+        { detail: 'brief' },
+      ),
+    );
 
     expect(publisher.disabled).toBe(true);
     expect(publisher.degradedReason).toBe('field validation failed');
@@ -201,7 +235,10 @@ class FakeCotClient {
     return this.createResult ?? { cot_id: 'cot_fake', message_id: 'om_cot_fake' };
   }
 
-  async update(_ref: unknown, events: readonly { event_type: string; content: string; timestamp: number }[]): Promise<void> {
+  async update(
+    _ref: unknown,
+    events: readonly { event_type: string; content: string; timestamp: number }[],
+  ): Promise<void> {
     if (this.failUpdate) throw this.failUpdate;
     this.events.push(...events);
   }

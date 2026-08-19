@@ -1,8 +1,4 @@
-import type {
-  LarkChannel,
-  LarkChannelOptions,
-  NormalizedMessage,
-} from '@larksuite/channel';
+import type { LarkChannel, LarkChannelOptions, NormalizedMessage } from '@larksuite/channel';
 import { createLarkChannel } from '@larksuite/channel';
 import { dirname, join } from 'node:path';
 import { capabilityForProfile } from '../agent/capability';
@@ -41,10 +37,7 @@ import {
 import { resolveAppSecret } from '../config/secret-resolver';
 import { log, withTrace } from '../core/logger';
 import { MediaCache, type LocalAttachment } from '../media/cache';
-import {
-  toPolicyAttachment,
-  toPromptAttachment,
-} from '../media/attachment';
+import { toPolicyAttachment, toPromptAttachment } from '../media/attachment';
 import { canUseDm, canUseGroup, requireMentionForChat } from '../policy/access';
 import { MeetingManager } from '../meeting/manager';
 import type { VcRequestClient } from '../meeting/api';
@@ -68,12 +61,7 @@ import { lookupMessageThreadId } from './thread-id';
 import { addWorkingReaction, removeReaction } from './reaction';
 import { fetchKnownChats } from './lark-info';
 import type { AppPaths } from '../config/app-paths';
-import {
-  withCotEvents,
-  CotClient,
-  CotPublisher,
-  finalAnswerOnlyState,
-} from './cot';
+import { withCotEvents, CotClient, CotPublisher, finalAnswerOnlyState } from './cot';
 
 const DEBOUNCE_MS = 600;
 const STREAM_TERMINAL_GRACE_MS = 3000;
@@ -232,9 +220,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     appId: cfg.accounts.app.id,
     appSecret,
     domain:
-      cfg.accounts.app.tenant === 'lark'
-        ? 'https://open.larksuite.com'
-        : 'https://open.feishu.cn',
+      cfg.accounts.app.tenant === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn',
     source: 'lark-bot-bridge',
     logger: buildQuietLogger(),
     policy: {
@@ -496,9 +482,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // Defense-in-depth — the SDK's pingTimeout watchdog handles half-dead WS,
   // this catches anything that the SDK misses (silent state stuck, etc.).
   const probeDomain =
-    cfg.accounts.app.tenant === 'lark'
-      ? 'https://open.larksuite.com'
-      : 'https://open.feishu.cn';
+    cfg.accounts.app.tenant === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn';
   const keepalive = startKeepalive({
     channel,
     domain: probeDomain,
@@ -541,10 +525,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   };
 }
 
-function startKnownChatsRefreshTimer(
-  channel: LarkChannel,
-  controls: Controls,
-): { stop(): void } {
+function startKnownChatsRefreshTimer(channel: LarkChannel, controls: Controls): { stop(): void } {
   const intervalMs = 30 * 60 * 1000;
   const refresh = async (): Promise<void> => {
     const chats = await fetchKnownChats(channel);
@@ -590,8 +571,7 @@ const FORWARD_FETCH_FAILED_CONTENT = '<forwarded_messages status="fetch_failed"/
 /** True when a message is a merge_forward the SDK failed to fetch (see above). */
 function isForwardFetchFailed(msg: NormalizedMessage): boolean {
   return (
-    msg.rawContentType === 'merge_forward' &&
-    msg.content.trim() === FORWARD_FETCH_FAILED_CONTENT
+    msg.rawContentType === 'merge_forward' && msg.content.trim() === FORWARD_FETCH_FAILED_CONTENT
   );
 }
 
@@ -686,9 +666,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
       threadId,
     });
   }
-  const scope = chatMode === 'topic' && threadId
-    ? `${msg.chatId}:${threadId}`
-    : msg.chatId;
+  const scope = chatMode === 'topic' && threadId ? `${msg.chatId}:${threadId}` : msg.chatId;
   log.info('intake', 'enter', {
     scope,
     chatType: msg.chatType,
@@ -1462,20 +1440,12 @@ async function sendFinalReply(input: {
     log.info('outbound', 'sent', outboundLogFields(input, 'card', body, result));
   } else if (input.replyMode === 'markdown') {
     if (body.trim()) {
-      const result = await input.channel.send(
-        input.chatId,
-        { markdown: body },
-        input.sendOpts,
-      );
+      const result = await input.channel.send(input.chatId, { markdown: body }, input.sendOpts);
       requireMessageReceipt(result, 'markdown');
       log.info('outbound', 'sent', outboundLogFields(input, 'markdown', body, result));
     }
   } else if (body.trim()) {
-    const result = await input.channel.send(
-      input.chatId,
-      { markdown: body },
-      input.sendOpts,
-    );
+    const result = await input.channel.send(input.chatId, { markdown: body }, input.sendOpts);
     requireMessageReceipt(result, 'text');
     log.info('outbound', 'sent', outboundLogFields(input, 'text', body, result));
   }
@@ -1883,10 +1853,7 @@ function mergeMentions(batch: NormalizedMessage[]): BridgePromptMention[] {
   return out;
 }
 
-function replyQuoteTargetForMessage(
-  msg: NormalizedMessage,
-  mode: ChatMode,
-): string | undefined {
+function replyQuoteTargetForMessage(msg: NormalizedMessage, mode: ChatMode): string | undefined {
   const replyTo = msg.replyToMessageId;
   if (!replyTo) return undefined;
 
@@ -1940,8 +1907,7 @@ function toPromptTopicMessage(q: QuotedContext): BridgePromptTopicMessage {
 
 function toPromptInteractiveCard(m: NormalizedMessage): BridgePromptInteractiveCard | undefined {
   if (m.rawContentType !== 'interactive') return undefined;
-  const rawContent = (m.raw as { message?: { content?: unknown } } | undefined)
-    ?.message?.content;
+  const rawContent = (m.raw as { message?: { content?: unknown } } | undefined)?.message?.content;
   if (typeof rawContent !== 'string' || rawContent.length === 0) return undefined;
   return {
     messageId: m.messageId,

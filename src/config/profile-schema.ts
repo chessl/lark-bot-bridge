@@ -1,9 +1,4 @@
-import type {
-  AppCredentials,
-  AppPreferences,
-  MessageReplyMode,
-  SecretsConfig,
-} from './schema';
+import type { AppCredentials, AppPreferences, MessageReplyMode, SecretsConfig } from './schema';
 import {
   normalizePermissions,
   permissionsToLegacySandbox,
@@ -214,9 +209,7 @@ export interface CreateDefaultProfileConfigInput {
   omp?: OmpConfig;
 }
 
-export function createDefaultProfileConfig(
-  input: CreateDefaultProfileConfigInput,
-): ProfileConfig {
+export function createDefaultProfileConfig(input: CreateDefaultProfileConfigInput): ProfileConfig {
   return normalizeProfileConfig({
     schemaVersion: 2,
     ...input,
@@ -375,15 +368,18 @@ function normalizeChatMentionMap(input: unknown): Record<string, boolean> {
   return out;
 }
 
-function normalizeWorkspaces(input: {
-  default?: unknown;
-  trusted?: unknown;
-  trustedRoots?: unknown;
-  riskFlags?: unknown;
-} | undefined): ProfileConfig['workspaces'] {
-  const defaultWorkspace = typeof input?.default === 'string' && input.default.trim()
-    ? input.default.trim()
-    : undefined;
+function normalizeWorkspaces(
+  input:
+    | {
+        default?: unknown;
+        trusted?: unknown;
+        trustedRoots?: unknown;
+        riskFlags?: unknown;
+      }
+    | undefined,
+): ProfileConfig['workspaces'] {
+  const defaultWorkspace =
+    typeof input?.default === 'string' && input.default.trim() ? input.default.trim() : undefined;
   return defaultWorkspace ? { default: defaultWorkspace } : {};
 }
 
@@ -441,14 +437,22 @@ function normalizeMeeting(input: unknown): MeetingConfig {
     summaryOnEnd?: unknown;
     summaryTarget?: unknown;
   };
-  const trigger = typeof raw.trigger === 'string' && raw.trigger.trim() ? raw.trigger.trim() : MEETING_DEFAULTS.trigger;
+  const trigger =
+    typeof raw.trigger === 'string' && raw.trigger.trim()
+      ? raw.trigger.trim()
+      : MEETING_DEFAULTS.trigger;
   return {
     enabled: raw.enabled === true,
     autoJoinOnInvite: raw.autoJoinOnInvite === true,
     transcript: {
       keep: clampNumber(raw.transcript?.keep, 10, 2000, MEETING_DEFAULTS.transcript.keep),
       // 0 is meaningful here ("no debounce"), so it can't go through numberOr.
-      stabilizeMs: clampNumber(raw.transcript?.stabilizeMs, 0, 30_000, MEETING_DEFAULTS.transcript.stabilizeMs),
+      stabilizeMs: clampNumber(
+        raw.transcript?.stabilizeMs,
+        0,
+        30_000,
+        MEETING_DEFAULTS.transcript.stabilizeMs,
+      ),
     },
     respondIn:
       raw.respondIn === 'im' || raw.respondIn === 'both' || raw.respondIn === 'meeting'
@@ -521,7 +525,5 @@ function stringArray(value: unknown): string[] {
 }
 
 function numberOr(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? value
-    : fallback;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
 }

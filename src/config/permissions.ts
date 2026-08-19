@@ -42,9 +42,7 @@ export function normalizePermissions(input: {
   sandbox?: Partial<LegacySandboxInput> | undefined;
 }): NormalizedPermissions {
   const hasSandbox = hasLegacySandbox(input.sandbox);
-  const base = hasSandbox
-    ? normalizeLegacySandboxPermissions(input.sandbox)
-    : defaultPermissions();
+  const base = hasSandbox ? normalizeLegacySandboxPermissions(input.sandbox) : defaultPermissions();
 
   if (input.permissions !== undefined) {
     return {
@@ -109,10 +107,7 @@ export function accessToClaudePermissionMode(
   permissions?: PermissionConfig,
 ): ClaudePermissionMode {
   const override = permissions?.claude?.permissionMode;
-  if (
-    override &&
-    ACCESS_ORDER[CLAUDE_PERMISSION_ACCESS[override]] <= ACCESS_ORDER[access]
-  ) {
+  if (override && ACCESS_ORDER[CLAUDE_PERMISSION_ACCESS[override]] <= ACCESS_ORDER[access]) {
     return override;
   }
 

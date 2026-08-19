@@ -46,11 +46,7 @@ export async function applyLarkCliIdentityPolicy(
   return runQuiet('lark-cli', ['config', 'default-as', defaultAs], env);
 }
 
-async function runQuiet(
-  cmd: string,
-  args: string[],
-  env: NodeJS.ProcessEnv,
-): Promise<boolean> {
+async function runQuiet(cmd: string, args: string[], env: NodeJS.ProcessEnv): Promise<boolean> {
   let timedOut = false;
   const exitCode = await new Promise<number | null>((resolve) => {
     const child = spawnProcess(cmd, args, {

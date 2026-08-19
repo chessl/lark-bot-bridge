@@ -1,7 +1,11 @@
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AgentPreflightError } from '../agent/preflight';
-import { createDefaultProfileConfig, type AgentKind, type ProfileConfig } from '../config/profile-schema';
+import {
+  createDefaultProfileConfig,
+  type AgentKind,
+  type ProfileConfig,
+} from '../config/profile-schema';
 import type { AppConfig } from '../config/schema';
 import { resolveWorkingDirectory } from '../policy/workspace';
 import { resolveExecutablePath } from './agent-detection';
@@ -31,9 +35,7 @@ export async function createBootstrapProfileConfig(
       ? await createBootstrapCodexConfig(input.codexBinaryPath)
       : undefined;
   const omp =
-    input.agentKind === 'omp'
-      ? await createBootstrapOmpConfig(input.ompBinaryPath)
-      : undefined;
+    input.agentKind === 'omp' ? await createBootstrapOmpConfig(input.ompBinaryPath) : undefined;
   const profile = createDefaultProfileConfig({
     agentKind: input.agentKind,
     accounts: input.accounts,

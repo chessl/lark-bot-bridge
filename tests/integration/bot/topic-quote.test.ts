@@ -250,7 +250,10 @@ describe('topic message quote handling', () => {
     expect(prompt).toContain('the real upstream question');
     // The triggering message is in the thread list too — it must be excluded so
     // it isn't duplicated inside topic_context.
-    const topicBlock = prompt.slice(prompt.indexOf('<topic_context>'), prompt.indexOf('</topic_context>'));
+    const topicBlock = prompt.slice(
+      prompt.indexOf('<topic_context>'),
+      prompt.indexOf('</topic_context>'),
+    );
     expect(topicBlock).not.toContain('om_at_in_topic');
   });
 
@@ -303,7 +306,12 @@ describe('topic message quote handling', () => {
     await startTestBridge(h);
 
     await h.channel.handlers.message?.(
-      message({ messageId: 'om_empty', rootId: 'om_empty', parentId: 'om_empty', content: '@Bridge ping' }),
+      message({
+        messageId: 'om_empty',
+        rootId: 'om_empty',
+        parentId: 'om_empty',
+        content: '@Bridge ping',
+      }),
     );
     await waitFor(() => h.agent.runOptions.length === 1);
     // give the (absent) stream and its recall a chance to fire before asserting
@@ -326,7 +334,12 @@ describe('topic message quote handling', () => {
     await startTestBridge(h);
 
     await h.channel.handlers.message?.(
-      message({ messageId: 'om_real', rootId: 'om_real', parentId: 'om_real', content: '@Bridge 问题' }),
+      message({
+        messageId: 'om_real',
+        rootId: 'om_real',
+        parentId: 'om_real',
+        content: '@Bridge 问题',
+      }),
     );
     await waitFor(() => h.channel.streams.length === 1);
     // give any (erroneous) recall a chance to fire before asserting it didn't
@@ -464,13 +477,15 @@ describe('merge_forward fetch failure', () => {
   });
 });
 
-async function createHarness(options: {
-  chatMode?: 'group' | 'topic';
-  quotedMessages?: Record<string, string>;
-  rawThreadIds?: Record<string, string>;
-  threadMessages?: Array<Record<string, unknown>>;
-  agentEvents?: AgentEvent[];
-} = {}):Promise<{
+async function createHarness(
+  options: {
+    chatMode?: 'group' | 'topic';
+    quotedMessages?: Record<string, string>;
+    rawThreadIds?: Record<string, string>;
+    threadMessages?: Array<Record<string, unknown>>;
+    agentEvents?: AgentEvent[];
+  } = {},
+): Promise<{
   tmp: TmpProfile;
   channel: FakeLarkChannel & { handlers: MessageHandlerMap };
   agent: FakeAgentAdapter;
@@ -542,12 +557,14 @@ async function startTestBridge(h: {
   cleanups.push(() => bridge.disconnect());
 }
 
-function createFakeLarkChannel(options: {
-  chatMode?: 'group' | 'topic';
-  quotedMessages?: Record<string, string>;
-  rawThreadIds?: Record<string, string>;
-  threadMessages?: Array<Record<string, unknown>>;
-} = {}):FakeLarkChannel & { handlers: MessageHandlerMap } {
+function createFakeLarkChannel(
+  options: {
+    chatMode?: 'group' | 'topic';
+    quotedMessages?: Record<string, string>;
+    rawThreadIds?: Record<string, string>;
+    threadMessages?: Array<Record<string, unknown>>;
+  } = {},
+): FakeLarkChannel & { handlers: MessageHandlerMap } {
   const handlers: MessageHandlerMap = {};
   const sent: Array<{ chatId: string; content: unknown; options: unknown }> = [];
   const streams: Array<{ chatId: string; options: unknown }> = [];

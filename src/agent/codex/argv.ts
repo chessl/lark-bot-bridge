@@ -38,15 +38,7 @@ export function buildCodexArgs(input: BuildCodexArgsInput): string[] {
   const imageFlags = (input.images ?? []).flatMap((path) => ['--image', path]);
 
   if (input.threadId) {
-    return [
-      'exec',
-      ...globalFlags,
-      'resume',
-      '--json',
-      ...imageFlags,
-      input.threadId,
-      '-',
-    ];
+    return ['exec', ...globalFlags, 'resume', '--json', ...imageFlags, input.threadId, '-'];
   }
 
   return [

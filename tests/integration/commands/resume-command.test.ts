@@ -6,8 +6,16 @@ import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import type { ChatModeCache } from '../../../src/bot/chat-mode-cache.js';
 import { PendingQueue } from '../../../src/bot/pending-queue.js';
 import { handleCardAction } from '../../../src/card/dispatcher.js';
-import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index.js';
-import { createDefaultProfileConfig, type AgentKind, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import {
+  tryHandleCommand,
+  type CommandContext,
+  type Controls,
+} from '../../../src/commands/index.js';
+import {
+  createDefaultProfileConfig,
+  type AgentKind,
+  type ProfileConfig,
+} from '../../../src/config/profile-schema.js';
 import { canUseDm } from '../../../src/policy/access.js';
 import { evaluateRunPolicy } from '../../../src/policy/run-policy.js';
 import { resolveWorkingDirectory } from '../../../src/policy/workspace.js';
@@ -32,7 +40,10 @@ interface Harness {
   codexHistory: CodexThreadHistoryEntry[];
   activeRuns: ActiveRuns;
   pending: PendingQueue;
-  run(content: string, options?: { withCatalogIdentity?: boolean; chatMode?: 'p2p' | 'group' | 'topic' }): Promise<boolean>;
+  run(
+    content: string,
+    options?: { withCatalogIdentity?: boolean; chatMode?: 'p2p' | 'group' | 'topic' },
+  ): Promise<boolean>;
   dispatchResumeArg(arg: string): Promise<void>;
 }
 
@@ -169,7 +180,9 @@ describe('agent-aware resume commands', () => {
   it('does not fall back to legacy SessionStore when Codex catalog identity is missing', async () => {
     const h = await createHarness('codex');
 
-    await expect(h.run('/resume use thread-current', { withCatalogIdentity: false })).resolves.toBe(true);
+    await expect(h.run('/resume use thread-current', { withCatalogIdentity: false })).resolves.toBe(
+      true,
+    );
 
     expect(h.sessions.getRaw('chat-1')).toBeUndefined();
     expect(lastMarkdown(h.channel)).toContain('当前上下文没有可恢复的 Codex thread');
@@ -361,11 +374,7 @@ async function createHarness(
   };
 }
 
-function claudeSession(
-  sessionId: string,
-  preview: string,
-  mtime: number,
-): SessionSummary {
+function claudeSession(sessionId: string, preview: string, mtime: number): SessionSummary {
   return {
     sessionId,
     preview,
@@ -382,7 +391,8 @@ async function commandIdentity(
 ): Promise<SessionCatalogIdentity> {
   const workspace = await resolveWorkingDirectory(cwd);
   if (!workspace.ok) throw new Error(workspace.userVisible);
-  const capability = agentKind === 'codex' ? codexCapability(profileConfig) : claudeCapability(profileConfig);
+  const capability =
+    agentKind === 'codex' ? codexCapability(profileConfig) : claudeCapability(profileConfig);
   const access = canUseDm(profileConfig, controls, 'ou-user');
   const policy = evaluateRunPolicy({
     scope: {

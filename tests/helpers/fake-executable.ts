@@ -25,9 +25,13 @@ export async function writeVersionExecutableFile(
   }
 
   const comment = marker ? `// ${marker}\n` : '';
-  await writeFile(file, `#!${process.execPath}\nconsole.log(${JSON.stringify(version)});\n${comment}`, {
-    mode: 0o755,
-  });
+  await writeFile(
+    file,
+    `#!${process.execPath}\nconsole.log(${JSON.stringify(version)});\n${comment}`,
+    {
+      mode: 0o755,
+    },
+  );
   await chmod(file, 0o755);
 }
 

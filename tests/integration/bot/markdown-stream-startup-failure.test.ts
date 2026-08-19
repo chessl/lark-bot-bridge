@@ -138,9 +138,11 @@ describe('markdown stream startup failures', () => {
         [{ type: 'done', terminationReason: 'normal' }],
       ],
       stream: async (_chatId, input) => {
-        const producer = (input as {
-          markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
-        }).markdown;
+        const producer = (
+          input as {
+            markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
+          }
+        ).markdown;
         if (producer) {
           streamProducerStarted = true;
           void producer({ setContent: vi.fn(async () => {}) });
@@ -164,11 +166,12 @@ describe('markdown stream startup failures', () => {
     streamFailure.reject(new Error('late stream failed'));
 
     await waitFor(() =>
-      fail.mock.calls.some((call) =>
-        call[0] === 'stream' &&
-        call[1] instanceof Error &&
-        call[1].message === 'late stream failed' &&
-        (call[2] as { step?: string } | undefined)?.step === 'stream-terminal-late',
+      fail.mock.calls.some(
+        (call) =>
+          call[0] === 'stream' &&
+          call[1] instanceof Error &&
+          call[1].message === 'late stream failed' &&
+          (call[2] as { step?: string } | undefined)?.step === 'stream-terminal-late',
       ),
     );
   }, 10_000);
@@ -182,9 +185,11 @@ describe('markdown stream startup failures', () => {
         { type: 'done', terminationReason: 'normal' },
       ],
       stream: async (_chatId, input) => {
-        const producer = (input as {
-          markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
-        }).markdown;
+        const producer = (
+          input as {
+            markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
+          }
+        ).markdown;
         await producer?.({
           setContent: vi.fn(async (markdown: string) => {
             visibleProgress.push(markdown);
@@ -242,9 +247,11 @@ describe('markdown stream startup failures', () => {
         { type: 'done', terminationReason: 'normal' },
       ],
       stream: async (_chatId, input) => {
-        const producer = (input as {
-          markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
-        }).markdown;
+        const producer = (
+          input as {
+            markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
+          }
+        ).markdown;
         await producer?.({
           setContent: vi.fn(async (markdown: string) => {
             visibleProgress.push(markdown);
@@ -274,9 +281,11 @@ describe('markdown stream startup failures', () => {
         { type: 'done', terminationReason: 'normal' },
       ],
       stream: async (_chatId, input) => {
-        const producer = (input as {
-          markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
-        }).markdown;
+        const producer = (
+          input as {
+            markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
+          }
+        ).markdown;
         await new Promise((resolve) => setTimeout(resolve, 200));
         await producer?.({
           setContent: vi.fn(async (markdown: string) => {
@@ -307,9 +316,11 @@ describe('markdown stream startup failures', () => {
         { type: 'done', terminationReason: 'normal' },
       ],
       stream: async (_chatId, input) => {
-        const producer = (input as {
-          markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
-        }).markdown;
+        const producer = (
+          input as {
+            markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
+          }
+        ).markdown;
         await gate.promise;
         await producer?.({ setContent });
       },
@@ -335,9 +346,11 @@ describe('markdown stream startup failures', () => {
         { type: 'done', terminationReason: 'normal' },
       ],
       stream: async (_chatId, input) => {
-        const producer = (input as {
-          markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
-        }).markdown;
+        const producer = (
+          input as {
+            markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
+          }
+        ).markdown;
         await producer?.({ setContent: vi.fn(async () => {}) });
         throw new Error('progress stream failed');
       },
@@ -369,9 +382,11 @@ describe('markdown stream startup failures', () => {
       ],
       send: async () => ({ messageId: '' }),
       stream: async (_chatId, input) => {
-        const producer = (input as {
-          markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
-        }).markdown;
+        const producer = (
+          input as {
+            markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
+          }
+        ).markdown;
         await producer?.({ setContent: vi.fn(async () => {}) });
       },
     });
@@ -384,9 +399,9 @@ describe('markdown stream startup failures', () => {
       ),
     );
 
-    expect(
-      info.mock.calls.some((call) => call[0] === 'outbound' && call[1] === 'sent'),
-    ).toBe(false);
+    expect(info.mock.calls.some((call) => call[0] === 'outbound' && call[1] === 'sent')).toBe(
+      false,
+    );
   });
 
   it('sends one dedicated final reply card after progress completes in card mode', async () => {
@@ -399,9 +414,11 @@ describe('markdown stream startup failures', () => {
         { type: 'done', terminationReason: 'normal' },
       ],
       stream: async (_chatId, input) => {
-        const producer = (input as {
-          card?: { producer?: (ctrl: { update(next: unknown): Promise<void> }) => Promise<void> };
-        }).card?.producer;
+        const producer = (
+          input as {
+            card?: { producer?: (ctrl: { update(next: unknown): Promise<void> }) => Promise<void> };
+          }
+        ).card?.producer;
         await producer?.({
           update: vi.fn(async (next: unknown) => {
             progressCards.push(next);
@@ -429,16 +446,18 @@ describe('markdown stream startup failures', () => {
   });
 });
 
-async function createHarness(options: {
-  reactionCreate?: () => Promise<{ data: { reaction_id: string } }>;
-  stream?: StreamFn;
-  send?: SendFn;
-  /** One run's events, or one array per run. */
-  events?: FakeAgentEvents;
-  messageReply?: 'card' | 'markdown' | 'text';
-  /** Codex holds its answer back for a dedicated final reply; Claude streams it. */
-  agentKind?: 'claude' | 'codex';
-} = {}): Promise<{
+async function createHarness(
+  options: {
+    reactionCreate?: () => Promise<{ data: { reaction_id: string } }>;
+    stream?: StreamFn;
+    send?: SendFn;
+    /** One run's events, or one array per run. */
+    events?: FakeAgentEvents;
+    messageReply?: 'card' | 'markdown' | 'text';
+    /** Codex holds its answer back for a dedicated final reply; Claude streams it. */
+    agentKind?: 'claude' | 'codex';
+  } = {},
+): Promise<{
   tmp: TmpProfile;
   channel: FakeLarkChannel;
   agent: FakeAgentAdapter;
@@ -524,11 +543,13 @@ async function startTestBridge(h: {
   cleanups.push(() => bridge.disconnect());
 }
 
-function createFakeLarkChannel(harnessOptions: {
-  reactionCreate?: () => Promise<{ data: { reaction_id: string } }>;
-  stream?: StreamFn;
-  send?: SendFn;
-} = {}): FakeLarkChannel {
+function createFakeLarkChannel(
+  harnessOptions: {
+    reactionCreate?: () => Promise<{ data: { reaction_id: string } }>;
+    stream?: StreamFn;
+    send?: SendFn;
+  } = {},
+): FakeLarkChannel {
   const handlers: MessageHandlerMap = {};
   const sent: FakeLarkChannel['sent'] = [];
   const channel: FakeLarkChannel = {
@@ -552,7 +573,10 @@ function createFakeLarkChannel(harnessOptions: {
             get: vi.fn(async () => ({ data: { items: [] } })),
           },
           messageReaction: {
-            create: vi.fn(harnessOptions.reactionCreate ?? (async () => ({ data: { reaction_id: 'reaction_1' } }))),
+            create: vi.fn(
+              harnessOptions.reactionCreate ??
+                (async () => ({ data: { reaction_id: 'reaction_1' } })),
+            ),
             delete: vi.fn(async () => ({})),
           },
         },
@@ -574,9 +598,11 @@ function createFakeLarkChannel(harnessOptions: {
       if (harnessOptions.send) return harnessOptions.send(chatId, content, options);
       return { messageId: `sent_${sent.length}` };
     },
-    stream: harnessOptions.stream ?? (async () => {
-      await new Promise<void>(() => {});
-    }),
+    stream:
+      harnessOptions.stream ??
+      (async () => {
+        await new Promise<void>(() => {});
+      }),
     async addReaction(messageId, emojiType) {
       const r = await channel.rawClient.im.v1.messageReaction.create({
         path: { message_id: messageId },

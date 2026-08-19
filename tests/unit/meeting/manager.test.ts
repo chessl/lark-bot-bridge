@@ -24,7 +24,8 @@ function fakeChannel(): { channel: unknown; handlers: Map<string, Handler> } {
 function fakeClient(meetingId = '70001'): VcRequestClient {
   return {
     request: vi.fn(async (p: { url: string }) => {
-      if (p.url.endsWith('/join')) return { code: 0, data: { meeting: { id: meetingId } } } as never;
+      if (p.url.endsWith('/join'))
+        return { code: 0, data: { meeting: { id: meetingId } } } as never;
       return { code: 0, data: {} } as never;
     }),
   };
@@ -34,12 +35,14 @@ function cfg(over: Partial<MeetingConfig> = {}): MeetingConfig {
   return { ...MEETING_DEFAULTS, enabled: true, ...over };
 }
 
-function manager(opts: {
-  channel?: unknown;
-  config?: MeetingConfig;
-  client?: VcRequestClient;
-  onInvited?: (no: string) => void;
-} = {}) {
+function manager(
+  opts: {
+    channel?: unknown;
+    config?: MeetingConfig;
+    client?: VcRequestClient;
+    onInvited?: (no: string) => void;
+  } = {},
+) {
   return new MeetingManager({
     client: opts.client ?? fakeClient(),
     config: () => opts.config ?? cfg(),
@@ -91,7 +94,9 @@ describe('MeetingManager routing', () => {
           event_id: 'e1',
           meeting: { id: '70001' },
           activity_event_type: 'transcript_received',
-          transcript_received_items: [{ sentence_id: 1, text: '属于本会', speaker: { name: '甲' } }],
+          transcript_received_items: [
+            { sentence_id: 1, text: '属于本会', speaker: { name: '甲' } },
+          ],
         },
         {
           // A meeting this process doesn't manage — must be dropped silently.
@@ -124,7 +129,11 @@ describe('MeetingManager routing', () => {
   it('notifies on invite but does not join when autoJoinOnInvite is off', async () => {
     const { channel, handlers } = fakeChannel();
     const seen: string[] = [];
-    const m = manager({ channel, config: cfg({ autoJoinOnInvite: false }), onInvited: (n) => seen.push(n) });
+    const m = manager({
+      channel,
+      config: cfg({ autoJoinOnInvite: false }),
+      onInvited: (n) => seen.push(n),
+    });
     m.attachPush();
 
     handlers.get(VC_BOT_EVENTS.invited)?.({ meeting: { meeting_no: '123456789' } });
@@ -161,7 +170,9 @@ describe('MeetingManager routing', () => {
     m.dispose();
     expect(m.list()).toHaveLength(0);
     // join is the only call; no /leave was issued.
-    const urls = (client.request as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[0] as { url: string }).url);
+    const urls = (client.request as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => (c[0] as { url: string }).url,
+    );
     expect(urls.filter((u) => u.endsWith('/leave'))).toHaveLength(0);
   });
 });

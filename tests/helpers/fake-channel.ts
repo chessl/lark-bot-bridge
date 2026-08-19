@@ -63,7 +63,10 @@ export function createFakeChannel(): FakeChannel {
   let nextCard = 1;
   let nextMessage = 1;
 
-  const pushManagedCardMessage = (params: unknown, fallbackChatId: string): { message_id: string } => {
+  const pushManagedCardMessage = (
+    params: unknown,
+    fallbackChatId: string,
+  ): { message_id: string } => {
     requests.push({ method: 'im.v1.message.create', params });
     const card = resolveReferencedCard(params);
     sent.push({
@@ -129,7 +132,11 @@ export function createFakeChannel(): FakeChannel {
     async updateCardById(cardId: string, cardJson: unknown, sequence: number): Promise<void> {
       requests.push({ method: 'cardkit.v1.card.update', params: { cardId, cardJson, sequence } });
     },
-    async send(chatId: string, content: unknown, options?: unknown): Promise<{ messageId: string }> {
+    async send(
+      chatId: string,
+      content: unknown,
+      options?: unknown,
+    ): Promise<{ messageId: string }> {
       // Resolve a `{ cardId }` reference back to the card JSON so assertions
       // can read the rendered card content (matching the legacy send shape).
       const cardId = (content as { cardId?: unknown } | undefined)?.cardId;

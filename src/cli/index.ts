@@ -3,12 +3,7 @@ import pkg from '../../package.json';
 import { formatAgentPreflightDiagnostic, getAgentPreflightDiagnostic } from '../agent/preflight';
 import { runMigrate } from './commands/migrate';
 import { runKillCli, runPs } from './commands/ps';
-import {
-  runSecretsGet,
-  runSecretsList,
-  runSecretsRemove,
-  runSecretsSet,
-} from './commands/secrets';
+import { runSecretsGet, runSecretsList, runSecretsRemove, runSecretsSet } from './commands/secrets';
 import {
   runProfileCreate,
   runProfileExport,
@@ -40,26 +35,34 @@ program
   .description('Run the bridge in the foreground (was `start` in older versions)')
   .option('-c, --config <path>', 'path to config file')
   .option('--profile <name>', 'profile name to run')
-  .option('--web-ui', 'run the machine-wide supervisor + local web console (hosts all profiles); default is a single-profile headless run')
+  .option(
+    '--web-ui',
+    'run the machine-wide supervisor + local web console (hosts all profiles); default is a single-profile headless run',
+  )
   .option('--agent <kind>', 'agent kind for a new profile (claude, codex, or omp)')
   .option('--workspace <path>', 'initial working directory for first-run profile bootstrap')
   .option('--app-id <id>', 'use an existing Lark/Feishu app instead of QR app creation')
-  .option('--app-secret <secret>', 'App Secret for --app-id; prefer interactive input on shared machines')
+  .option(
+    '--app-secret <secret>',
+    'App Secret for --app-id; prefer interactive input on shared machines',
+  )
   .option('--tenant <tenant>', 'tenant for --app-id (feishu or lark; default feishu)')
   .option('--skip-check-lark-cli', 'skip lark-cli pre-flight check (auto-install + bind)')
-  .action(async (opts: {
-    config?: string;
-    profile?: string;
-    webUi?: boolean;
-    agent?: string;
-    workspace?: string;
-    appId?: string;
-    appSecret?: string;
-    tenant?: string;
-    skipCheckLarkCli?: boolean;
-  }) => {
-    await runStart(opts);
-  });
+  .action(
+    async (opts: {
+      config?: string;
+      profile?: string;
+      webUi?: boolean;
+      agent?: string;
+      workspace?: string;
+      appId?: string;
+      appSecret?: string;
+      tenant?: string;
+      skipCheckLarkCli?: boolean;
+    }) => {
+      await runStart(opts);
+    },
+  );
 
 program
   .command('migrate')
@@ -71,9 +74,7 @@ program
     await runMigrate(opts);
   });
 
-const profile = program
-  .command('profile')
-  .description('Manage local bridge profiles');
+const profile = program.command('profile').description('Manage local bridge profiles');
 
 profile
   .command('list')
@@ -88,17 +89,25 @@ profile
   .option('--agent <kind>', 'agent kind (claude, codex, or omp)')
   .option('--workspace <path>', 'initial working directory for this profile')
   .option('--app-id <id>', 'use an existing Lark/Feishu app instead of QR app creation')
-  .option('--app-secret <secret>', 'App Secret for --app-id; prefer interactive input on shared machines')
+  .option(
+    '--app-secret <secret>',
+    'App Secret for --app-id; prefer interactive input on shared machines',
+  )
   .option('--tenant <tenant>', 'tenant for --app-id (feishu or lark; default feishu)')
-  .action(async (name: string, opts: {
-    agent?: string;
-    workspace?: string;
-    appId?: string;
-    appSecret?: string;
-    tenant?: string;
-  }) => {
-    await runProfileCreate(name, opts);
-  });
+  .action(
+    async (
+      name: string,
+      opts: {
+        agent?: string;
+        workspace?: string;
+        appId?: string;
+        appSecret?: string;
+        tenant?: string;
+      },
+    ) => {
+      await runProfileCreate(name, opts);
+    },
+  );
 
 profile
   .command('use <name>')
@@ -123,19 +132,24 @@ profile
   .option('--force', 'overwrite an existing output file')
   .option('--include-secrets', 'include secret provider configuration and app secret values')
   .option('--yes', 'confirm exporting secrets')
-  .action(async (name: string, opts: {
-    output?: string;
-    force?: boolean;
-    includeSecrets?: boolean;
-    yes?: boolean;
-  }) => {
-    await runProfileExport(name, {
-      output: opts.output,
-      force: opts.force,
-      includeSecrets: opts.includeSecrets,
-      yes: opts.yes,
-    });
-  });
+  .action(
+    async (
+      name: string,
+      opts: {
+        output?: string;
+        force?: boolean;
+        includeSecrets?: boolean;
+        yes?: boolean;
+      },
+    ) => {
+      await runProfileExport(name, {
+        output: opts.output,
+        force: opts.force,
+        includeSecrets: opts.includeSecrets,
+        yes: opts.yes,
+      });
+    },
+  );
 
 program
   .command('ui')
@@ -155,7 +169,9 @@ program
 
 program
   .command('kill <target>')
-  .description('Kill a running bridge process by short id or list index (SIGTERM, then SIGKILL after 2s). Was `stop <target>` in older versions.')
+  .description(
+    'Kill a running bridge process by short id or list index (SIGTERM, then SIGKILL after 2s). Was `stop <target>` in older versions.',
+  )
   .action(async (target: string) => {
     await runKillCli(target);
   });
@@ -166,31 +182,42 @@ program
   .command('start')
   .description('Install (if needed) and start the bridge as an OS-managed daemon')
   .option('--profile <name>', 'profile name (defaults to active profile)')
-  .option('--web-ui', 'run the supervisor + web console as the background service (hosts all profiles) instead of a single profile')
+  .option(
+    '--web-ui',
+    'run the supervisor + web console as the background service (hosts all profiles) instead of a single profile',
+  )
   .option('--agent <kind>', 'agent kind for first-run profile bootstrap (claude, codex, or omp)')
   .option('--workspace <path>', 'initial working directory for first-run profile bootstrap')
   .option('--app-id <id>', 'use an existing Lark/Feishu app instead of QR app creation')
-  .option('--app-secret <secret>', 'App Secret for --app-id; prefer interactive input on shared machines')
+  .option(
+    '--app-secret <secret>',
+    'App Secret for --app-id; prefer interactive input on shared machines',
+  )
   .option('--tenant <tenant>', 'tenant for --app-id (feishu or lark; default feishu)')
   .option('--skip-check-lark-cli', 'skip lark-cli pre-flight check (auto-install + bind)')
-  .action(async (opts: {
-    profile?: string;
-    webUi?: boolean;
-    agent?: string;
-    workspace?: string;
-    appId?: string;
-    appSecret?: string;
-    tenant?: string;
-    skipCheckLarkCli?: boolean;
-  }) => {
-    await runServiceStart(opts);
-  });
+  .action(
+    async (opts: {
+      profile?: string;
+      webUi?: boolean;
+      agent?: string;
+      workspace?: string;
+      appId?: string;
+      appSecret?: string;
+      tenant?: string;
+      skipCheckLarkCli?: boolean;
+    }) => {
+      await runServiceStart(opts);
+    },
+  );
 
 program
   .command('stop')
   .description('Stop the OS-managed daemon and disable autostart (service definition stays)')
   .option('--profile <name>', 'profile name (defaults to active profile)')
-  .option('--web-ui', 'target the supervisor service (auto-detected when no per-profile service exists)')
+  .option(
+    '--web-ui',
+    'target the supervisor service (auto-detected when no per-profile service exists)',
+  )
   .action(async (opts: { profile?: string; webUi?: boolean }) => {
     await runServiceStop({ profile: opts.profile, webUi: opts.webUi });
   });
@@ -224,11 +251,13 @@ program
 
 const secrets = program
   .command('secrets')
-  .description('Manage the bridge\'s encrypted secret keystore (~/.lark-bot-bridge/secrets.enc)');
+  .description("Manage the bridge's encrypted secret keystore (~/.lark-bot-bridge/secrets.enc)");
 
 secrets
   .command('get')
-  .description('Exec-provider protocol: read JSON request from stdin, write JSON response to stdout. Used by lark-cli config bind --source lark-channel.')
+  .description(
+    'Exec-provider protocol: read JSON request from stdin, write JSON response to stdout. Used by lark-cli config bind --source lark-channel.',
+  )
   .action(async () => {
     await runSecretsGet();
   });

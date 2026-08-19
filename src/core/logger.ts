@@ -9,10 +9,7 @@ export interface LoggerOptions {
   now: () => Date;
 }
 
-const DEFAULT_RETENTION_DAYS = Math.max(
-  1,
-  Number(process.env.LARK_CHANNEL_LOG_DAYS ?? 30) || 30,
-);
+const DEFAULT_RETENTION_DAYS = Math.max(1, Number(process.env.LARK_CHANNEL_LOG_DAYS ?? 30) || 30);
 
 let loggerOptions: LoggerOptions = {
   retentionDays: DEFAULT_RETENTION_DAYS,
@@ -224,13 +221,16 @@ function redactId(value: unknown): unknown {
 
 function emit(level: Level, phase: string, event: string, fields: LogFields = {}): void {
   const ctx = als.getStore() ?? {};
-  const entry = sanitizeLogEntry({
-    ts: formatLocalTimestamp(loggerOptions.now()),
-    level,
-    phase,
-    event,
-    ...ctx,
-  }, LOCAL_LOG_SANITIZE);
+  const entry = sanitizeLogEntry(
+    {
+      ts: formatLocalTimestamp(loggerOptions.now()),
+      level,
+      phase,
+      event,
+      ...ctx,
+    },
+    LOCAL_LOG_SANITIZE,
+  );
   for (const [k, v] of Object.entries(fields)) {
     if (Object.hasOwn(RESERVED_KEYS, k)) {
       entry[`_${k}`] = sanitizeLogValue(`_${k}`, v, LOCAL_LOG_SANITIZE);
@@ -315,7 +315,7 @@ function formatStdout(
     return `  ▶ run start scope=${scope} run=${shortId(fields.runId)} queue=${fields.queueWaitMs ?? 0}ms`;
   }
   if (phase === 'run' && (event === 'completed' || event === 'failed')) {
-    const result = event === 'failed' ? 'failed' : fields.result ?? 'done';
+    const result = event === 'failed' ? 'failed' : (fields.result ?? 'done');
     const mark = event === 'failed' ? '✗' : result === 'interrupted' ? '⏹' : '✓';
     const scope = shortId(fields.scope);
     const duration = formatDurationMs(fields.durationMs);
@@ -379,7 +379,7 @@ function formatLocalTimestamp(date: Date): string {
 function shortId(value: unknown): string {
   if (value === undefined || value === null) return '-';
   const s = String(value);
-  const last = s.includes(':') ? s.split(':').at(-1) ?? s : s;
+  const last = s.includes(':') ? (s.split(':').at(-1) ?? s) : s;
   const bare = last.startsWith('...') ? last.slice(3) : last;
   return bare.length > 6 ? bare.slice(-6) : bare;
 }
@@ -454,7 +454,9 @@ export function configureLogger(opts: Partial<LoggerOptions>): void {
   stream = null;
   currentDate = '';
   loggerOptions = {
-    ...(opts.logsDir !== undefined ? { logsDir: opts.logsDir } : { logsDir: loggerOptions.logsDir }),
+    ...(opts.logsDir !== undefined
+      ? { logsDir: opts.logsDir }
+      : { logsDir: loggerOptions.logsDir }),
     retentionDays: Math.max(1, opts.retentionDays ?? loggerOptions.retentionDays),
     now: opts.now ?? loggerOptions.now,
   };
@@ -552,10 +554,7 @@ export function sanitizeLogsForDoctor(logs: string): string {
 export function redactDiagnosticText(text: string): string {
   let out = redactJsonCredentialText(text);
   out = redactResourceText(out);
-  out = out.replace(
-    /\b(Authorization\s*[:=]\s*Bearer\s+)[A-Za-z0-9._\-+/=]+/gi,
-    '$1[REDACTED]',
-  );
+  out = out.replace(/\b(Authorization\s*[:=]\s*Bearer\s+)[A-Za-z0-9._\-+/=]+/gi, '$1[REDACTED]');
   out = out.replace(/\b(Bearer\s+)[A-Za-z0-9._\-+/=]+/g, '$1[REDACTED]');
   out = out.replace(
     /\b(access_token|tenant_access_token|app_access_token|app_secret|appSecret|secret|token|doc_token|file_token|authorization)=([^&\s"',}]+)/gi,
@@ -672,4 +671,3 @@ async function readTail(path: string, maxBytes: number): Promise<string> {
     throw err;
   }
 }
-

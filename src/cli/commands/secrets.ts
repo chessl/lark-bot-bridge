@@ -180,7 +180,8 @@ async function resolveSecretProfilePaths(opts: SecretProfileOptions): Promise<Ap
   const rootDir = opts.rootDir ?? paths.rootDir;
   const rootPaths = resolveAppPaths({ rootDir });
   const root = await loadRootConfig(rootPaths.configFile);
-  const profile = opts.profile ?? (await readActiveProfile(rootDir)) ?? root?.activeProfile ?? 'claude';
+  const profile =
+    opts.profile ?? (await readActiveProfile(rootDir)) ?? root?.activeProfile ?? 'claude';
   if (root && !root.profiles[profile]) throw new Error(`profile not found: ${profile}`);
   return resolveAppPaths({ rootDir, profile });
 }

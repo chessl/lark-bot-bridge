@@ -48,12 +48,9 @@ const DEFAULT_MAX_ENTRIES_PER_PROFILE = 1000;
 const KEY_SEPARATOR = '\x1f';
 
 export function sessionCatalogKey(input: SessionCatalogIdentity): string {
-  return [
-    input.scopeId,
-    input.agentId,
-    input.cwdRealpath,
-    input.policyFingerprint,
-  ].join(KEY_SEPARATOR);
+  return [input.scopeId, input.agentId, input.cwdRealpath, input.policyFingerprint].join(
+    KEY_SEPARATOR,
+  );
 }
 
 export class SessionCatalog {
@@ -140,8 +137,7 @@ export class SessionCatalog {
     const now = options.now ?? Date.now();
     const maxArchivedAgeMs = options.maxArchivedAgeMs ?? DEFAULT_MAX_ARCHIVED_AGE_MS;
     const maxEntriesPerScope = options.maxEntriesPerScope ?? DEFAULT_MAX_ENTRIES_PER_SCOPE;
-    const maxEntriesPerProfile =
-      options.maxEntriesPerProfile ?? DEFAULT_MAX_ENTRIES_PER_PROFILE;
+    const maxEntriesPerProfile = options.maxEntriesPerProfile ?? DEFAULT_MAX_ENTRIES_PER_PROFILE;
 
     for (const [key, entry] of this.data.entries()) {
       if (entry.status === 'archived' && now - entry.updatedAt > maxArchivedAgeMs) {
@@ -259,6 +255,8 @@ function assertAgentIdentity(input: UpsertSessionCatalogInput): void {
     return;
   }
   if (!input.sessionId || input.threadId) {
-    throw new Error(`${input.agentId} catalog entries require sessionId and must not include threadId`);
+    throw new Error(
+      `${input.agentId} catalog entries require sessionId and must not include threadId`,
+    );
   }
 }

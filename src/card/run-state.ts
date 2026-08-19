@@ -37,9 +37,7 @@ export const initialState: RunState = {
 };
 
 function closeStreamingText(blocks: Block[]): Block[] {
-  return blocks.map((b) =>
-    b.kind === 'text' && b.streaming ? { ...b, streaming: false } : b,
-  );
+  return blocks.map((b) => (b.kind === 'text' && b.streaming ? { ...b, streaming: false } : b));
 }
 
 export function reduce(state: RunState, evt: AgentEvent): RunState {

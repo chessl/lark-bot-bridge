@@ -13,7 +13,11 @@ import {
 } from '../lark-cli/user-im';
 import { isMeetingNo } from '../meeting/api';
 import { checkMeetingPreflight, type MeetingPreflight } from '../meeting/preflight';
-import { describeMeetingError, type MeetingManager, type MeetingPushHealth } from '../meeting/manager';
+import {
+  describeMeetingError,
+  type MeetingManager,
+  type MeetingPushHealth,
+} from '../meeting/manager';
 import type { MeetingSessionStatus } from '../meeting/session';
 import { resolveAppPaths } from '../config/app-paths';
 import { loadRootConfig, runtimeProfileConfig } from '../config/profile-store';
@@ -156,14 +160,21 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 function parseMeetingBody(body: unknown, current: MeetingConfig): MeetingConfig {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return current;
   const fv = body as Record<string, unknown>;
-  const t = (fv.transcript && typeof fv.transcript === 'object' ? fv.transcript : {}) as Record<string, unknown>;
-  const trigger = typeof fv.trigger === 'string' && fv.trigger.trim() ? fv.trigger.trim() : current.trigger;
+  const t = (fv.transcript && typeof fv.transcript === 'object' ? fv.transcript : {}) as Record<
+    string,
+    unknown
+  >;
+  const trigger =
+    typeof fv.trigger === 'string' && fv.trigger.trim() ? fv.trigger.trim() : current.trigger;
   return {
     enabled: typeof fv.enabled === 'boolean' ? fv.enabled : current.enabled,
     autoJoinOnInvite:
       typeof fv.autoJoinOnInvite === 'boolean' ? fv.autoJoinOnInvite : current.autoJoinOnInvite,
     transcript: {
-      keep: t.keep === undefined ? current.transcript.keep : clampInt(t.keep, 10, 2000, current.transcript.keep),
+      keep:
+        t.keep === undefined
+          ? current.transcript.keep
+          : clampInt(t.keep, 10, 2000, current.transcript.keep),
       stabilizeMs:
         t.stabilizeMs === undefined
           ? current.transcript.stabilizeMs
@@ -214,7 +225,8 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
       : state.profileConfig.larkCli.identityPreset;
 
   const rawModel = typeof fv.model === 'string' ? fv.model : '';
-  const modelValid = rawModel !== '' && supportedModels(agentKind).some((m) => m.value === rawModel);
+  const modelValid =
+    rawModel !== '' && supportedModels(agentKind).some((m) => m.value === rawModel);
   const modelSelection = modelValid
     ? rawModel
     : normalizeModelSelection(agentKind, state.cfg.preferences?.model);
@@ -243,7 +255,11 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
   } else {
     const n = Number(fv.runIdleTimeoutMinutes);
     runIdleTimeoutMinutes =
-      !Number.isFinite(n) || n < 0 ? currentIdleMinutes : n === 0 ? 0 : clampInt(n, 1, 120, currentIdleMinutes);
+      !Number.isFinite(n) || n < 0
+        ? currentIdleMinutes
+        : n === 0
+          ? 0
+          : clampInt(n, 1, 120, currentIdleMinutes);
   }
 
   const requireMentionInGroup =
@@ -253,7 +269,8 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
 
   const meeting = parseMeetingBody(fv.meeting, state.profileConfig.meeting);
 
-  const nextEffectiveIdentity: LarkCliIdentityPreset = mode === 'team' ? 'bot-only' : larkCliIdentity;
+  const nextEffectiveIdentity: LarkCliIdentityPreset =
+    mode === 'team' ? 'bot-only' : larkCliIdentity;
   const previousEffectiveIdentity = effectiveLarkCliIdentity(state.profileConfig);
 
   return {
@@ -515,7 +532,11 @@ export async function userAuthStatus(profile: string, rootDir?: string) {
  * `scopes` defaults (in user-im) to just the view-groups scope — the caller
  * passes the add-member scope only when the user actually needs it.
  */
-export async function userLoginStart(profile: string, rootDir: string | undefined, scopes?: string[]) {
+export async function userLoginStart(
+  profile: string,
+  rootDir: string | undefined,
+  scopes?: string[],
+) {
   try {
     return await startDeviceLogin({ profile, rootDir }, scopes);
   } catch (err) {
@@ -524,7 +545,11 @@ export async function userLoginStart(profile: string, rootDir: string | undefine
 }
 
 /** Finish the device flow after the user authorized in the browser. */
-export async function userLoginComplete(profile: string, rootDir: string | undefined, body: unknown) {
+export async function userLoginComplete(
+  profile: string,
+  rootDir: string | undefined,
+  body: unknown,
+) {
   const fv = asRecord(body);
   const deviceCode = typeof fv.deviceCode === 'string' ? fv.deviceCode : '';
   if (!deviceCode) throw new ApiError(400, 'deviceCode is required');
@@ -583,7 +608,12 @@ export async function addBotToChatView(
   // than surfacing a confusing permission error from the API.
   const status = await getUserAuthStatus({ profile, rootDir });
   if (!status.loggedIn || !hasScope(status, ADD_BOT_SCOPES)) {
-    return { ok: false, pending: false, needAuth: true, message: '拉bot进群需要额外授权（添加群成员）' };
+    return {
+      ok: false,
+      pending: false,
+      needAuth: true,
+      message: '拉bot进群需要额外授权（添加群成员）',
+    };
   }
   const state = await loadProfileState(profile, rootDir);
   const botAppId = state.cfg.accounts?.app?.id;

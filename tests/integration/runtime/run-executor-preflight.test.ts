@@ -47,9 +47,7 @@ describe('RunExecutor prepareRun preflight', () => {
   });
 });
 
-async function createHarness(options: {
-  agent: PreparingAgent;
-}): Promise<{
+async function createHarness(options: { agent: PreparingAgent }): Promise<{
   tmp: TmpProfile;
   agent: PreparingAgent;
   pool: ProcessPool;

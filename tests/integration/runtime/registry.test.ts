@@ -46,7 +46,9 @@ describe('process registry', () => {
     const root = await makeRoot();
     const registryFile = join(root, 'registry', 'processes.json');
     await writeJson(registryFile, {
-      entries: [entry({ id: 'dead', pid: 999_999_999, profileName: 'claude', agentKind: 'claude' })],
+      entries: [
+        entry({ id: 'dead', pid: 999_999_999, profileName: 'claude', agentKind: 'claude' }),
+      ],
     });
 
     const registered = await register({
@@ -59,7 +61,9 @@ describe('process registry', () => {
       registryFile,
     });
 
-    const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as { entries: ProcessEntry[] };
+    const persisted = JSON.parse(await readFile(registryFile, 'utf8')) as {
+      entries: ProcessEntry[];
+    };
     expect(persisted.entries).toHaveLength(1);
     expect(persisted.entries[0]).toMatchObject({
       id: registered.id,

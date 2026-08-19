@@ -2,10 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  SessionCatalog,
-  sessionCatalogKey,
-} from '../../../src/session/catalog.js';
+import { SessionCatalog, sessionCatalogKey } from '../../../src/session/catalog.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -156,9 +153,7 @@ describe('agent-aware session catalog', () => {
   it('garbage-collects old archived entries, per-scope overflow, and profile overflow', async () => {
     const catalog = new SessionCatalog(await path());
     await catalog.replaceForTest([
-      ...Array.from({ length: 25 }, (_, i) =>
-        entry(`chat-1`, `sess-${i}`, 50_000 + i, `fp-${i}`),
-      ),
+      ...Array.from({ length: 25 }, (_, i) => entry(`chat-1`, `sess-${i}`, 50_000 + i, `fp-${i}`)),
       ...Array.from({ length: 981 }, (_, i) =>
         entry(`chat-${i + 2}`, `other-${i}`, 20_000 + i, `fp-other-${i}`),
       ),
@@ -188,12 +183,7 @@ async function path(): Promise<string> {
   return join(dir, 'catalog.json');
 }
 
-function entry(
-  scopeId: string,
-  sessionId: string,
-  updatedAt: number,
-  policyFingerprint = 'fp-1',
-) {
+function entry(scopeId: string, sessionId: string, updatedAt: number, policyFingerprint = 'fp-1') {
   const identity = {
     scopeId,
     agentId: 'claude' as const,

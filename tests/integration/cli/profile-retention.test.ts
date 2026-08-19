@@ -44,7 +44,9 @@ describe('profile retention and export', () => {
 
     await runProfileRemove('codex-dev', { rootDir: root });
 
-    await expect(stat(join(root, 'profiles', 'codex-dev'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(join(root, 'profiles', 'codex-dev'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 
   it('refuses to remove a profile while its runtime lock is active', async () => {
@@ -53,7 +55,9 @@ describe('profile retention and export', () => {
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'codex-dev' });
 
     await withProfileAndAppLocks(appPaths, 'cli_codex_dev', 'codex', async () => {
-      await expect(runProfileRemove('codex-dev', { rootDir: root })).rejects.toThrow(/locked|running/i);
+      await expect(runProfileRemove('codex-dev', { rootDir: root })).rejects.toThrow(
+        /locked|running/i,
+      );
     });
 
     await expect(stat(join(root, 'profiles', 'codex-dev'))).resolves.toBeDefined();
@@ -71,7 +75,9 @@ describe('profile retention and export', () => {
 
     const archived = join(root, '.trash', 'codex-dev-20260525T123456Z');
     await expect(stat(archived)).resolves.toBeDefined();
-    await expect(stat(join(root, 'profiles', 'codex-dev'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(join(root, 'profiles', 'codex-dev'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
     expect(Object.keys(await readRoot(root))).toContain('profiles');
     expect((await readRoot(root)).profiles['codex-dev']).toBeUndefined();
     expect(logs.join('\n')).toContain('已归档 profile');
@@ -157,10 +163,14 @@ describe('profile retention and export', () => {
     const root = await makeRoot();
     await writeProfiles(root, 'claude', ['claude', 'codex-dev']);
 
-    await expect(runProfileRemove('codex-dev', { rootDir: root, purge: true })).rejects.toThrow(/--yes/);
+    await expect(runProfileRemove('codex-dev', { rootDir: root, purge: true })).rejects.toThrow(
+      /--yes/,
+    );
     await runProfileRemove('codex-dev', { rootDir: root, purge: true, yes: true });
 
-    await expect(stat(join(root, 'profiles', 'codex-dev'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(join(root, 'profiles', 'codex-dev'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
     await expect(stat(join(root, '.trash'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 

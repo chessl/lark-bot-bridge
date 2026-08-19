@@ -168,7 +168,9 @@ describe('profile create command', () => {
     });
 
     const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as RootConfig;
-    const managed = await realpath(resolveAppPaths({ rootDir: root, profile: 'claude-managed' }).defaultWorkspaceDir);
+    const managed = await realpath(
+      resolveAppPaths({ rootDir: root, profile: 'claude-managed' }).defaultWorkspaceDir,
+    );
     expect(saved.profiles['claude-managed']?.workspaces.default).toBe(managed);
   });
 });

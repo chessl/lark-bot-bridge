@@ -130,10 +130,7 @@ export class CallbackAuth {
   }
 }
 
-function matchesExpected(
-  payload: CallbackPayload,
-  expected: CallbackVerifyExpected,
-): boolean {
+function matchesExpected(payload: CallbackPayload, expected: CallbackVerifyExpected): boolean {
   return (
     payload.r === expected.runId &&
     payload.s === expected.scope &&
@@ -150,7 +147,9 @@ function encodeJson(payload: CallbackPayload): string {
 
 function decodePayload(encoded: string): CallbackPayload | undefined {
   try {
-    const raw = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as Partial<CallbackPayload>;
+    const raw = JSON.parse(
+      Buffer.from(encoded, 'base64url').toString('utf8'),
+    ) as Partial<CallbackPayload>;
     if (
       typeof raw.r !== 'string' ||
       typeof raw.s !== 'string' ||
@@ -187,8 +186,5 @@ function sign(payload: string, secret: string): string {
 function signatureMatches(actual: string, expected: string): boolean {
   const actualBytes = Buffer.from(actual);
   const expectedBytes = Buffer.from(expected);
-  return (
-    actualBytes.length === expectedBytes.length &&
-    timingSafeEqual(actualBytes, expectedBytes)
-  );
+  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
 }

@@ -21,7 +21,12 @@ import type { AcquiredRuntimeLock } from './locks';
 export function createRuntimeAgent(
   profileConfig: ProfileConfig,
   appPaths: Pick<AppPaths, 'profileDir'> &
-    Partial<Pick<AppPaths, 'rootDir' | 'profile' | 'configFile' | 'larkCliConfigDir' | 'larkCliSourceConfigFile'>> & {
+    Partial<
+      Pick<
+        AppPaths,
+        'rootDir' | 'profile' | 'configFile' | 'larkCliConfigDir' | 'larkCliSourceConfigFile'
+      >
+    > & {
       configPath?: string;
     },
 ): AgentAdapter {
@@ -68,7 +73,9 @@ export function createRuntimeAgent(
   return new ClaudeAdapter({ larkChannel });
 }
 
-export async function checkRuntimeAgentAvailability(agent: AgentAdapter): Promise<AgentAvailability> {
+export async function checkRuntimeAgentAvailability(
+  agent: AgentAdapter,
+): Promise<AgentAvailability> {
   if (agent.checkAvailability) return agent.checkAvailability();
   const ok = await agent.isAvailable();
   if (ok) return { ok: true };

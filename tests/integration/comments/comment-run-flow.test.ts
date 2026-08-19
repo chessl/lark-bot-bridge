@@ -2,13 +2,21 @@ import { realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CommentEvent } from '@larksuite/channel';
-import type { AgentAdapter, AgentEvent, AgentRun, AgentRunOptions } from '../../../src/agent/types.js';
+import type {
+  AgentAdapter,
+  AgentEvent,
+  AgentRun,
+  AgentRunOptions,
+} from '../../../src/agent/types.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { handleCommentMention } from '../../../src/bot/comments.js';
 import { commentDocumentScopeId, commentTokenDigest } from '../../../src/bot/comment-resource.js';
 import { codexCapability } from '../../../src/agent/capability.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import {
+  createDefaultProfileConfig,
+  type ProfileConfig,
+} from '../../../src/config/profile-schema.js';
 import { evaluateRunPolicy } from '../../../src/policy/run-policy.js';
 import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionCatalog } from '../../../src/session/catalog.js';
@@ -103,7 +111,9 @@ describe('comment run flow', () => {
     expect(h.agent.runOptions[0]?.sessionId).toBeUndefined();
     expect(h.agent.runOptions[1]?.sessionId).toBe('session-one');
     expect(h.agent.runOptions[2]?.sessionId).toBe('session-two');
-    expect(h.sessions.resumeFor(docSessionScope('doc-token'), await realpath(h.tmp.workspace))).toBe('session-three');
+    expect(
+      h.sessions.resumeFor(docSessionScope('doc-token'), await realpath(h.tmp.workspace)),
+    ).toBe('session-three');
     expect(h.sessions.resumeFor('doc:doc-token', await realpath(h.tmp.workspace))).toBeUndefined();
   });
 
@@ -146,9 +156,13 @@ describe('comment run flow', () => {
     });
     await seedCodexCatalog(h, 'seed-thread');
 
-    const first = handleCommentMention(h.deps(event({ commentId: 'comment-1', replyId: 'reply-1' })));
+    const first = handleCommentMention(
+      h.deps(event({ commentId: 'comment-1', replyId: 'reply-1' })),
+    );
     await waitFor(() => h.agent.runOptions.length === 1);
-    const second = handleCommentMention(h.deps(event({ commentId: 'comment-2', replyId: 'reply-2' })));
+    const second = handleCommentMention(
+      h.deps(event({ commentId: 'comment-2', replyId: 'reply-2' })),
+    );
     await waitFor(() => h.agent.runOptions.length === 2);
 
     expect(h.agent.runOptions[0]?.threadId).toBe('seed-thread');
@@ -203,20 +217,21 @@ describe('comment run flow', () => {
     expect(h.agent.runOptions).toEqual([]);
     expect(h.inThreadReplies.at(-1)).toContain('工作目录不可用');
   });
-
 });
 
-async function createHarness(options: {
-  agentKind?: 'claude' | 'codex';
-  agentTexts?: string[];
-  agentEventRuns?: AgentEvent[][];
-  sessionIds?: string[];
-  threadIds?: string[];
-  reactionFails?: boolean;
-  /** Full reply_list (chronological) returned by fileComment.get for comment-1.
-   * Lets a test model a thread with replies preceding the @bot reply. */
-  commentReplies?: Array<{ reply_id: string; text: string }>;
-} = {}): Promise<{
+async function createHarness(
+  options: {
+    agentKind?: 'claude' | 'codex';
+    agentTexts?: string[];
+    agentEventRuns?: AgentEvent[][];
+    sessionIds?: string[];
+    threadIds?: string[];
+    reactionFails?: boolean;
+    /** Full reply_list (chronological) returned by fileComment.get for comment-1.
+     * Lets a test model a thread with replies preceding the @bot reply. */
+    commentReplies?: Array<{ reply_id: string; text: string }>;
+  } = {},
+): Promise<{
   tmp: TmpProfile;
   agent: FakeAgentAdapter;
   sessions: SessionStore;
@@ -245,9 +260,7 @@ async function createHarness(options: {
           : { sessionId: sessionIds[index] ?? `session-${index}` }),
         cwd: tmp.workspace,
       },
-      agentKind === 'codex'
-        ? { type: 'final_text', content: text }
-        : { type: 'text', delta: text },
+      agentKind === 'codex' ? { type: 'final_text', content: text } : { type: 'text', delta: text },
       {
         type: 'done',
         ...(agentKind === 'codex'
@@ -271,7 +284,13 @@ async function createHarness(options: {
       return {};
     },
     wiki: {
-      v2: { space: { async getNode() { throw apiError(131005); } } },
+      v2: {
+        space: {
+          async getNode() {
+            throw apiError(131005);
+          },
+        },
+      },
     },
     drive: {
       v1: {
@@ -380,7 +399,13 @@ async function createBlockingHarness(options: {
       return {};
     },
     wiki: {
-      v2: { space: { async getNode() { throw apiError(131005); } } },
+      v2: {
+        space: {
+          async getNode() {
+            throw apiError(131005);
+          },
+        },
+      },
     },
     drive: {
       v1: {
@@ -551,7 +576,10 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   throw new Error('timed out waiting for condition');
 }
 
-function profile(defaultWorkspace: string, agentKind: 'claude' | 'codex' = 'claude'): ProfileConfig {
+function profile(
+  defaultWorkspace: string,
+  agentKind: 'claude' | 'codex' = 'claude',
+): ProfileConfig {
   const config = createDefaultProfileConfig({
     agentKind,
     accounts: { app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' } },
@@ -563,7 +591,11 @@ function profile(defaultWorkspace: string, agentKind: 'claude' | 'codex' = 'clau
   return config;
 }
 
-function codexRunWithProgress(threadId: string, progress: string, finalAnswer: string): AgentEvent[] {
+function codexRunWithProgress(
+  threadId: string,
+  progress: string,
+  finalAnswer: string,
+): AgentEvent[] {
   return [
     { type: 'system', threadId },
     { type: 'text', delta: progress },
@@ -571,7 +603,9 @@ function codexRunWithProgress(threadId: string, progress: string, finalAnswer: s
       type: 'tool_use',
       id: `${threadId}-tool`,
       name: 'command_execution',
-      input: { command: 'lark-cli docs +fetch --api-version v2 --doc doc-token --doc-format markdown' },
+      input: {
+        command: 'lark-cli docs +fetch --api-version v2 --doc doc-token --doc-format markdown',
+      },
     },
     { type: 'tool_result', id: `${threadId}-tool`, output: 'doc body', isError: false },
     { type: 'final_text', content: finalAnswer },

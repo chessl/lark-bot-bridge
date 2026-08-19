@@ -7,12 +7,13 @@ import { ActiveRuns } from '../../../src/bot/active-runs';
 import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import { getSecret, listSecretIds } from '../../../src/config/keystore';
-import {
-  createDefaultProfileConfig,
-  type RootConfig,
-} from '../../../src/config/profile-schema';
+import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import { runtimeProfileConfig } from '../../../src/config/profile-store';
-import { getMessageReplyMode, getRequireMentionInGroup, secretKeyForApp } from '../../../src/config/schema';
+import {
+  getMessageReplyMode,
+  getRequireMentionInGroup,
+  secretKeyForApp,
+} from '../../../src/config/schema';
 import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
@@ -67,8 +68,9 @@ describe('profile-aware account and config commands', () => {
       lark_cli_identity: 'user-default',
     });
 
-    const root = await waitForRoot(h.rootDir, (candidate) =>
-      candidate.profiles.claude?.preferences.messageReply === 'text',
+    const root = await waitForRoot(
+      h.rootDir,
+      (candidate) => candidate.profiles.claude?.preferences.messageReply === 'text',
     );
     expect(root.schemaVersion).toBe(2);
     expect(root.activeProfile).toBe('claude');
@@ -98,8 +100,9 @@ describe('profile-aware account and config commands', () => {
       model: 'claude-opus-4-8',
       message_reply: 'text',
     });
-    const withModel = await waitForRoot(h.rootDir, (candidate) =>
-      candidate.profiles.claude?.preferences.model === 'claude-opus-4-8',
+    const withModel = await waitForRoot(
+      h.rootDir,
+      (candidate) => candidate.profiles.claude?.preferences.model === 'claude-opus-4-8',
     );
     expect(withModel.profiles.claude?.preferences.model).toBe('claude-opus-4-8');
 
@@ -107,8 +110,9 @@ describe('profile-aware account and config commands', () => {
       model: 'default',
       message_reply: 'text',
     });
-    const cleared = await waitForRoot(h.rootDir, (candidate) =>
-      candidate.profiles.claude?.preferences.model === undefined,
+    const cleared = await waitForRoot(
+      h.rootDir,
+      (candidate) => candidate.profiles.claude?.preferences.model === undefined,
     );
     expect(cleared.profiles.claude?.preferences.model).toBeUndefined();
   });
@@ -129,8 +133,9 @@ describe('profile-aware account and config commands', () => {
       require_mention_in_group: 'yes',
     });
 
-    const root = await waitForRoot(h.rootDir, (candidate) =>
-      candidate.profiles.claude?.preferences.maxConcurrentRuns === 8,
+    const root = await waitForRoot(
+      h.rootDir,
+      (candidate) => candidate.profiles.claude?.preferences.maxConcurrentRuns === 8,
     );
     expect(root.profiles.claude?.preferences.messageReply).toBe('text');
     expect(root.profiles.claude?.preferences.messageReplyMigrated).toBe(true);
@@ -159,10 +164,7 @@ describe('profile-aware account and config commands', () => {
     const root = await readRoot(h.rootDir);
     expect(root.profiles.claude?.larkCli.identityPreset).toBe('bot-only');
     expect(root.profiles.claude?.preferences.messageReply).not.toBe('text');
-    expect(appliedLarkCliIdentities()).toEqual([
-      'user-default',
-      'bot-only',
-    ]);
+    expect(appliedLarkCliIdentities()).toEqual(['user-default', 'bot-only']);
     const card = JSON.stringify(h.channel.sent.at(-1)?.content);
     expect(card).toContain('保存失败');
     expect(card).toContain('lark-cli 身份策略');
@@ -193,10 +195,7 @@ describe('profile-aware account and config commands', () => {
       expect(h.channel.sent.length).toBeGreaterThan(0);
     });
 
-    expect(appliedLarkCliIdentities()).toEqual([
-      'user-default',
-      'bot-only',
-    ]);
+    expect(appliedLarkCliIdentities()).toEqual(['user-default', 'bot-only']);
     const card = JSON.stringify(h.channel.sent.at(-1)?.content);
     expect(card).toContain('保存失败');
     expect(card).toContain('已回滚');
@@ -214,8 +213,9 @@ describe('profile-aware account and config commands', () => {
       tenant: 'lark',
     });
 
-    const root = await waitForRoot(h.rootDir, (candidate) =>
-      candidate.profiles.claude?.accounts.app.id === 'cli_new',
+    const root = await waitForRoot(
+      h.rootDir,
+      (candidate) => candidate.profiles.claude?.accounts.app.id === 'cli_new',
     );
     expect(root.schemaVersion).toBe(2);
     expect(root.profiles['codex-dev']).toBeDefined();
@@ -231,20 +231,21 @@ describe('profile-aware account and config commands', () => {
     expect(root.secrets?.providers?.bridge?.command).toContain('secrets-getter');
     expect((root as unknown as { accounts?: unknown }).accounts).toBeUndefined();
     await expect(
-      getSecret(secretKeyForApp('cli_new'), resolveAppPaths({ rootDir: h.rootDir, profile: 'claude' })),
+      getSecret(
+        secretKeyForApp('cli_new'),
+        resolveAppPaths({ rootDir: h.rootDir, profile: 'claude' }),
+      ),
     ).resolves.toBe('new-secret');
     const claudePaths = resolveAppPaths({ rootDir: h.rootDir, profile: 'claude' });
     const codexPaths = resolveAppPaths({ rootDir: h.rootDir, profile: 'codex-dev' });
     expect(claudePaths.secretsFile).not.toBe(codexPaths.secretsFile);
-    await expect(
-      listSecretIds(codexPaths),
-    ).resolves.not.toContain(secretKeyForApp('cli_new'));
+    await expect(listSecretIds(codexPaths)).resolves.not.toContain(secretKeyForApp('cli_new'));
   });
 });
 
-async function createHarness(options: {
-  preferences?: RootConfig['profiles'][string]['preferences'];
-} = {}): Promise<{
+async function createHarness(
+  options: { preferences?: RootConfig['profiles'][string]['preferences'] } = {},
+): Promise<{
   rootDir: string;
   channel: ReturnType<typeof createFakeChannel>;
   command(content: string, formValue?: Record<string, unknown>): Promise<boolean>;
@@ -337,10 +338,13 @@ async function waitForRoot(
   predicate: (root: RootConfig) => boolean,
 ): Promise<RootConfig> {
   let lastRoot = await readRoot(rootDir);
-  await vi.waitFor(async () => {
-    lastRoot = await readRoot(rootDir);
-    expect(predicate(lastRoot)).toBe(true);
-  }, { timeout: 5000 });
+  await vi.waitFor(
+    async () => {
+      lastRoot = await readRoot(rootDir);
+      expect(predicate(lastRoot)).toBe(true);
+    },
+    { timeout: 5000 },
+  );
   return lastRoot;
 }
 
@@ -360,7 +364,9 @@ function deferred<T>(): {
 
 function appliedLarkCliIdentities(): unknown[] {
   return (
-    identityPolicyMocks.applyLarkCliIdentityPolicy.mock.calls as unknown as Array<[unknown, unknown]>
+    identityPolicyMocks.applyLarkCliIdentityPolicy.mock.calls as unknown as Array<
+      [unknown, unknown]
+    >
   ).map((call) => call[1]);
 }
 

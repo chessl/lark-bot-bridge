@@ -118,8 +118,6 @@ describe('OmpRpcTranslator', () => {
         success: false,
         error: 'no authenticated model',
       }),
-    ).toEqual([
-      { type: 'error', message: 'no authenticated model', terminationReason: 'failed' },
-    ]);
+    ).toEqual([{ type: 'error', message: 'no authenticated model', terminationReason: 'failed' }]);
   });
 });

@@ -2,11 +2,12 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import {
-  createDefaultProfileConfig,
-  type RootConfig,
-} from '../../../src/config/profile-schema';
-import { createRootConfig, loadRootConfig, saveRootConfig } from '../../../src/config/profile-store';
+  createRootConfig,
+  loadRootConfig,
+  saveRootConfig,
+} from '../../../src/config/profile-store';
 
 const roots: string[] = [];
 
@@ -86,25 +87,28 @@ describe('profile store canonical serialization', () => {
       runtimeOnlyFutureField: true,
     };
 
-    await saveRootConfig({
-      schemaVersion: 2,
-      activeProfile: 'codex',
-      preferences: { messageReply: 'text' },
-      secrets: rootSecrets,
-      migrations: {
-        permissionDefaultsV1: [
-          'codex',
-          'codex',
-          '  claude  ',
-          'claude',
-          'claude ',
-          '',
-          42 as unknown as string,
-        ],
-      },
-      profiles: { codex: profile },
-      extra: true,
-    } as unknown as RootConfig & { extra?: true; preferences: any }, configPath);
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'codex',
+        preferences: { messageReply: 'text' },
+        secrets: rootSecrets,
+        migrations: {
+          permissionDefaultsV1: [
+            'codex',
+            'codex',
+            '  claude  ',
+            'claude',
+            'claude ',
+            '',
+            42 as unknown as string,
+          ],
+        },
+        profiles: { codex: profile },
+        extra: true,
+      } as unknown as RootConfig & { extra?: true; preferences: any },
+      configPath,
+    );
 
     const saved = JSON.parse(await readFile(configPath, 'utf8'));
     expect(saved.schemaVersion).toBe(2);
@@ -146,12 +150,15 @@ describe('profile store canonical serialization', () => {
       },
     });
 
-    await saveRootConfig({
-      schemaVersion: 2,
-      activeProfile: 'codex',
-      preferences: {},
-      profiles: { codex: profile },
-    }, configPath);
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'codex',
+        preferences: {},
+        profiles: { codex: profile },
+      },
+      configPath,
+    );
 
     const loaded = await loadRootConfig(configPath);
     expect(loaded?.profiles.codex?.permissions).toEqual({
@@ -173,12 +180,15 @@ describe('profile store canonical serialization', () => {
       accounts: { app },
     });
 
-    await saveRootConfig({
-      schemaVersion: 2,
-      activeProfile: 'claude',
-      preferences: {},
-      profiles: { claude: profile },
-    }, configPath);
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'claude',
+        preferences: {},
+        profiles: { claude: profile },
+      },
+      configPath,
+    );
 
     // On disk: mode is written (not stripped by the serializer).
     const saved = JSON.parse(await readFile(configPath, 'utf8'));
@@ -195,12 +205,15 @@ describe('profile store canonical serialization', () => {
     const profile = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
     profile.access.chatRequireMention = { oc_open: false, oc_strict: true };
 
-    await saveRootConfig({
-      schemaVersion: 2,
-      activeProfile: 'claude',
-      preferences: {},
-      profiles: { claude: profile },
-    }, configPath);
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'claude',
+        preferences: {},
+        profiles: { claude: profile },
+      },
+      configPath,
+    );
 
     const saved = JSON.parse(await readFile(configPath, 'utf8'));
     expect(saved.profiles.claude.access.chatRequireMention).toEqual({
@@ -229,12 +242,15 @@ describe('profile store canonical serialization', () => {
       transcript: { keep: 50, stabilizeMs: 800 },
     };
 
-    await saveRootConfig({
-      schemaVersion: 2,
-      activeProfile: 'claude',
-      preferences: {},
-      profiles: { claude: profile },
-    }, configPath);
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'claude',
+        preferences: {},
+        profiles: { claude: profile },
+      },
+      configPath,
+    );
 
     const saved = JSON.parse(await readFile(configPath, 'utf8'));
     expect(saved.profiles.claude.meeting).toMatchObject({ enabled: true, trigger: '@小助手' });

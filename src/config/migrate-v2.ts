@@ -1,12 +1,4 @@
-import {
-  copyFile,
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { resolveAppPaths } from './app-paths';
 import {
@@ -107,10 +99,7 @@ export async function migrateV1ToV2(opts: MigrateV2Options = {}): Promise<Migrat
     return { migrated: false, profile: (parsed as RootConfig).activeProfile ?? profile };
   }
 
-  await assertNoActiveOldProcesses([
-    paths.userRegistryFile,
-    join(paths.rootDir, 'processes.json'),
-  ]);
+  await assertNoActiveOldProcesses([paths.userRegistryFile, join(paths.rootDir, 'processes.json')]);
 
   const legacy = parsed as LegacyConfig;
   const app = legacy.accounts?.app ?? legacy.app;
@@ -140,15 +129,18 @@ export async function migrateV1ToV2(opts: MigrateV2Options = {}): Promise<Migrat
     };
   }
 
-  const next: RootConfig = markPermissionDefaultsMigration({
-    schemaVersion: 2,
-    activeProfile: profile,
-    preferences: {},
-    ...(legacy.secrets ? { secrets: legacy.secrets } : {}),
-    profiles: {
-      [profile]: profileConfig,
+  const next: RootConfig = markPermissionDefaultsMigration(
+    {
+      schemaVersion: 2,
+      activeProfile: profile,
+      preferences: {},
+      ...(legacy.secrets ? { secrets: legacy.secrets } : {}),
+      profiles: {
+        [profile]: profileConfig,
+      },
     },
-  }, profile);
+    profile,
+  );
 
   const moved: Array<{ from: string; to: string }> = [];
   try {
@@ -213,7 +205,9 @@ function activeProcessFromRegistryEntry(entry: RegistryEntry): ActiveBridgeMigra
   return active;
 }
 
-function uniqueActiveProcesses(processes: ActiveBridgeMigrationProcess[]): ActiveBridgeMigrationProcess[] {
+function uniqueActiveProcesses(
+  processes: ActiveBridgeMigrationProcess[],
+): ActiveBridgeMigrationProcess[] {
   const seen = new Set<string>();
   const unique: ActiveBridgeMigrationProcess[] = [];
   for (const active of processes) {

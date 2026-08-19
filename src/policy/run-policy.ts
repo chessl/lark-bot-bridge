@@ -92,14 +92,15 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     return reject('access-denied', '当前用户无权发起运行。');
   }
 
-  if (input.scope.resourceBindings?.some((binding) => binding.kind === 'folder' && !binding.verified)) {
+  if (
+    input.scope.resourceBindings?.some((binding) => binding.kind === 'folder' && !binding.verified)
+  ) {
     return reject('folder-allowlist-unverified', '暂不支持 folder allowlist，已拒绝运行。');
   }
 
   if (
     input.attachments.some(
-      (attachment) =>
-        attachment.requiredness === 'required' && attachment.decision !== 'accepted',
+      (attachment) => attachment.requiredness === 'required' && attachment.decision !== 'accepted',
     )
   ) {
     return reject('required-attachment-rejected', '必需附件未通过校验，已拒绝运行。');
@@ -120,10 +121,7 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     );
   }
   const sandbox = accessToCodexSandbox(accessMode);
-  const permissionMode = accessToClaudePermissionMode(
-    accessMode,
-    input.profileConfig.permissions,
-  );
+  const permissionMode = accessToClaudePermissionMode(accessMode, input.profileConfig.permissions);
   const resourceDigest = resourceScopeDigest({
     source: input.scope.source,
     chatId: input.scope.chatId,
@@ -160,7 +158,10 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
   };
 }
 
-function reject(code: RunPolicyReject['rejectReason']['code'], userVisible: string): RunPolicyReject {
+function reject(
+  code: RunPolicyReject['rejectReason']['code'],
+  userVisible: string,
+): RunPolicyReject {
   return {
     ok: false,
     rejectReason: {

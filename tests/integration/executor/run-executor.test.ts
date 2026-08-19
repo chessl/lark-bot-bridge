@@ -44,7 +44,6 @@ describe('RunExecutor', () => {
     expect(h.activeRuns.get('scope-1')).toBeUndefined();
   });
 
-
   it('fast-fails nowait when the pool is full and queues normal submissions FIFO', async () => {
     const h = await createHarness({
       events: [

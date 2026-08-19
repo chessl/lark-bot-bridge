@@ -244,9 +244,11 @@ export function getRequireMentionInGroup(cfg: AppConfig): boolean {
   if (cfg.preferences?.requireMentionInGroup !== undefined) {
     return cfg.preferences.requireMentionInGroup !== false;
   }
-  const profileAccess = (cfg as AppConfig & {
-    access?: { requireMentionInGroup?: boolean };
-  }).access;
+  const profileAccess = (
+    cfg as AppConfig & {
+      access?: { requireMentionInGroup?: boolean };
+    }
+  ).access;
   if (profileAccess?.requireMentionInGroup !== undefined) {
     return profileAccess.requireMentionInGroup;
   }

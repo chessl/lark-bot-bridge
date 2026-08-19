@@ -196,11 +196,7 @@ export function buildMeetingPrompt(input: MeetingPromptInput): string {
   parts.push(input.transcript.length ? input.transcript.join('\n') : '（暂无字幕）');
   parts.push('=== 字幕结束 ===');
   parts.push('');
-  parts.push(
-    input.askedBy
-      ? `参会人「${input.askedBy}」在会中向你提问：`
-      : '收到的请求：',
-  );
+  parts.push(input.askedBy ? `参会人「${input.askedBy}」在会中向你提问：` : '收到的请求：');
   parts.push(input.question);
   parts.push('');
   parts.push(
@@ -224,7 +220,10 @@ export async function summarizeEndedMeeting(deps: MeetingAgentDeps): Promise<voi
 
   const transcript = session.recentTranscript();
   if (transcript.length === 0) {
-    log.info('meeting', 'summary-skipped', { meetingId: session.meetingId, reason: 'empty-transcript' });
+    log.info('meeting', 'summary-skipped', {
+      meetingId: session.meetingId,
+      reason: 'empty-transcript',
+    });
     return;
   }
   const target = resolveSummaryTarget(
@@ -335,7 +334,10 @@ async function runMeetingAgent(
       // bot-name prefix with the configured one reads like a different bot.
       const prefix =
         usedPrefix ??
-        triggerPrefixes(controls.profileConfig.meeting.trigger, deps.channel.botIdentity?.name)[0] ??
+        triggerPrefixes(
+          controls.profileConfig.meeting.trigger,
+          deps.channel.botIdentity?.name,
+        )[0] ??
         controls.profileConfig.meeting.trigger;
       return `上一个任务还在执行。发「${prefix} stop」可以中断它，然后再问我。`;
     }

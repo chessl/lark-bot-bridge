@@ -168,7 +168,9 @@ describe('run policy', () => {
   it('is pure policy calculation and does not import IO or API clients', () => {
     const source = readFileSync(join(process.cwd(), 'src/policy/run-policy.ts'), 'utf8');
 
-    expect(source).not.toMatch(/from ['"]node:fs|from ['"]node:fs\/promises|fs\.realpath|fs\.stat|statSync|realpathSync/);
+    expect(source).not.toMatch(
+      /from ['"]node:fs|from ['"]node:fs\/promises|fs\.realpath|fs\.stat|statSync|realpathSync/,
+    );
     expect(source).not.toMatch(/rawClient|LarkChannel|createLarkChannel/);
     expect(source).not.toMatch(/writeFile|mkdir|rm\(/);
   });
@@ -190,14 +192,16 @@ function baseInput(overrides: Partial<RunPolicyInput> = {}): RunPolicyInput {
   };
 }
 
-function profile(options: {
-  agentKind?: 'claude' | 'codex';
-  permissions?: {
-    defaultAccess: AccessMode;
-    maxAccess: AccessMode;
-  };
-  attachments?: Partial<ProfileConfig['attachments']>;
-} = {}) {
+function profile(
+  options: {
+    agentKind?: 'claude' | 'codex';
+    permissions?: {
+      defaultAccess: AccessMode;
+      maxAccess: AccessMode;
+    };
+    attachments?: Partial<ProfileConfig['attachments']>;
+  } = {},
+) {
   const cfg = createDefaultProfileConfig({
     agentKind: options.agentKind ?? 'claude',
     accounts: {
@@ -207,9 +211,7 @@ function profile(options: {
         tenant: 'feishu',
       },
     },
-    ...(options.agentKind === 'codex'
-      ? { codex: { binaryPath: '/usr/local/bin/codex' } }
-      : {}),
+    ...(options.agentKind === 'codex' ? { codex: { binaryPath: '/usr/local/bin/codex' } } : {}),
     permissions: options.permissions,
   });
   return {

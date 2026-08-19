@@ -20,11 +20,7 @@ class FakeRun implements FakeAgentRun {
   #stopped = false;
   #waitForExitCalls = 0;
 
-  constructor(
-    opts: AgentRunOptions,
-    events: readonly AgentEvent[],
-    waitForExitResult: boolean,
-  ) {
+  constructor(opts: AgentRunOptions, events: readonly AgentEvent[], waitForExitResult: boolean) {
     this.runId = opts.runId;
     this.opts = opts;
     this.waitForExitResult = waitForExitResult;
@@ -56,9 +52,7 @@ class FakeRun implements FakeAgentRun {
   }
 }
 
-export type FakeAgentEvents =
-  | readonly AgentEvent[]
-  | readonly (readonly AgentEvent[])[];
+export type FakeAgentEvents = readonly AgentEvent[] | readonly (readonly AgentEvent[])[];
 
 export class FakeAgentAdapter implements AgentAdapter {
   readonly id: string;
@@ -70,13 +64,15 @@ export class FakeAgentAdapter implements AgentAdapter {
   #eventRuns: AgentEvent[][];
   #waitForExitResults: boolean[];
 
-  constructor(options: {
-    id?: string;
-    displayName?: string;
-    available?: boolean;
-    events?: FakeAgentEvents;
-    waitForExit?: boolean | readonly boolean[];
-  } = {}) {
+  constructor(
+    options: {
+      id?: string;
+      displayName?: string;
+      available?: boolean;
+      events?: FakeAgentEvents;
+      waitForExit?: boolean | readonly boolean[];
+    } = {},
+  ) {
     this.id = options.id ?? 'fake-agent';
     this.displayName = options.displayName ?? 'Fake Agent';
     this.#available = options.available ?? true;

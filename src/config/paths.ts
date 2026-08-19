@@ -25,12 +25,6 @@ export const paths = {
  * anywhere in the runtime.
  */
 export const legacyPaths = {
-  appDir: join(
-    process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'),
-    'lark-channel-bridge',
-  ),
-  cacheDir: join(
-    process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache'),
-    'lark-channel-bridge',
-  ),
+  appDir: join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'lark-channel-bridge'),
+  cacheDir: join(process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'lark-channel-bridge'),
 };

@@ -146,9 +146,7 @@ function printTable(rows: Record<string, string>[]): void {
     widths[col] = Math.max(...rows.map((r) => displayWidth(r[col] ?? '')));
   }
   for (const r of rows) {
-    const line = cols
-      .map((c) => padEndDisplay(r[c] ?? '', widths[c] ?? 0))
-      .join('  ');
+    const line = cols.map((c) => padEndDisplay(r[c] ?? '', widths[c] ?? 0)).join('  ');
     console.log(line);
   }
 }

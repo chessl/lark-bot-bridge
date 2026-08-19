@@ -99,7 +99,6 @@ describe('IM run flow', () => {
     expect(result.cwdRealpath).toBe(workspaceRealpath);
     expect(h.agent.runOptions[0]?.cwd).toBe(workspaceRealpath);
   });
-
 });
 
 async function createHarness(options: { defaultWorkspace?: boolean } = {}): Promise<{

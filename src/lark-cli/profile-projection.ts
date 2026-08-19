@@ -9,11 +9,7 @@ export async function writeLarkCliSourceProjection(
   cfg: AppConfig,
   appPaths: Pick<
     AppPaths,
-    | 'rootDir'
-    | 'profile'
-    | 'larkCliSourceDir'
-    | 'larkCliSourceConfigFile'
-    | 'secretsGetterScript'
+    'rootDir' | 'profile' | 'larkCliSourceDir' | 'larkCliSourceConfigFile' | 'secretsGetterScript'
   >,
 ): Promise<string> {
   await mkdir(appPaths.larkCliSourceDir, { recursive: true, mode: 0o700 });
@@ -31,9 +27,13 @@ export async function writeLarkCliSourceProjection(
     ...(secrets ? { secrets } : {}),
   };
 
-  await writeFileAtomic(appPaths.larkCliSourceConfigFile, `${JSON.stringify(projection, null, 2)}\n`, {
-    mode: 0o600,
-  });
+  await writeFileAtomic(
+    appPaths.larkCliSourceConfigFile,
+    `${JSON.stringify(projection, null, 2)}\n`,
+    {
+      mode: 0o600,
+    },
+  );
   return appPaths.larkCliSourceConfigFile;
 }
 

@@ -1,8 +1,4 @@
-import type {
-  ApiMessageItem,
-  LarkChannel,
-  RawMessageEvent,
-} from '@larksuite/channel';
+import type { ApiMessageItem, LarkChannel, RawMessageEvent } from '@larksuite/channel';
 import { normalize } from '@larksuite/channel';
 import { log } from '../core/logger';
 import { expandInteractiveCard } from './interactive-card';
@@ -139,17 +135,13 @@ async function normalizeItemToQuoted(
       // We want the raw content here, not the trimmed @bot mention form.
       stripBotMentions: false,
     });
-    const createMs = parent.create_time
-      ? Number.parseInt(String(parent.create_time), 10)
-      : 0;
+    const createMs = parent.create_time ? Number.parseInt(String(parent.create_time), 10) : 0;
     return {
       messageId: parent.message_id,
       senderId: senderOpenId ?? '',
       senderName: normalized.senderName,
       senderType: mapSenderType(parent.sender?.sender_type),
-      createdAt: Number.isFinite(createMs) && createMs > 0
-        ? new Date(createMs).toISOString()
-        : '',
+      createdAt: Number.isFinite(createMs) && createMs > 0 ? new Date(createMs).toISOString() : '',
       // For zero-text interactive cards the SDK gave us "[interactive card]"
       // — substitute the raw JSON so Claude can still see what was quoted.
       content: expandInteractiveCard(normalized.content, parent.body?.content),
@@ -194,9 +186,16 @@ export async function fetchTopicContext(
           ...(pageToken ? { page_token: pageToken } : {}),
         },
       });
-      const data = (res as {
-        data?: { items?: ApiMessageItem[]; messages?: ApiMessageItem[]; has_more?: boolean; page_token?: string };
-      }).data;
+      const data = (
+        res as {
+          data?: {
+            items?: ApiMessageItem[];
+            messages?: ApiMessageItem[];
+            has_more?: boolean;
+            page_token?: string;
+          };
+        }
+      ).data;
       const items = data?.items ?? data?.messages ?? [];
       collected.push(...items);
       pageToken = data?.has_more ? data.page_token : undefined;

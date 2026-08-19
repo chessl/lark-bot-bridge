@@ -4,8 +4,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizedMessage } from '@larksuite/channel';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
-import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index.js';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import {
+  tryHandleCommand,
+  type CommandContext,
+  type Controls,
+} from '../../../src/commands/index.js';
+import {
+  createDefaultProfileConfig,
+  type ProfileConfig,
+} from '../../../src/config/profile-schema.js';
 import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
@@ -133,7 +140,12 @@ async function createHarness(options: {
   const activeRuns = new ActiveRuns();
   const pool = new ProcessPool(() => 1);
   const agent = new FakeAgentAdapter({
-    events: [[{ type: 'text', delta: 'OK' }, { type: 'done', terminationReason: 'normal' }]],
+    events: [
+      [
+        { type: 'text', delta: 'OK' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    ],
   });
   const profileConfig = appConfig(options.configuredWorkspace ? tmp.workspace : undefined);
   if (options.defaultWorkspace) {

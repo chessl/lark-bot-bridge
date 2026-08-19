@@ -1,5 +1,10 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.9/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -10,6 +15,11 @@
     "enabled": true,
     "rules": {
       "preset": "recommended"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
     }
   },
   "javascript": {

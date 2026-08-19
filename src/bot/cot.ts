@@ -40,9 +40,16 @@ export class CotClient {
       signal: AbortSignal.timeout(COT_REQUEST_TIMEOUT_MS),
     });
     if (!resp.ok) throw new Error(`tenant token HTTP ${resp.status}`);
-    const data = await resp.json() as { code?: number; msg?: string; tenant_access_token?: string; expire?: number };
+    const data = (await resp.json()) as {
+      code?: number;
+      msg?: string;
+      tenant_access_token?: string;
+      expire?: number;
+    };
     if (data.code !== 0 || !data.tenant_access_token) {
-      throw new Error(`tenant token failed: code=${data.code ?? '?'} msg=${data.msg ?? '<no msg>'}`);
+      throw new Error(
+        `tenant token failed: code=${data.code ?? '?'} msg=${data.msg ?? '<no msg>'}`,
+      );
     }
     this.token = data.tenant_access_token;
     const expireSeconds = typeof data.expire === 'number' ? data.expire : 7200;
@@ -64,7 +71,11 @@ export class CotClient {
     if (!resp.ok) throw new Error(`COT HTTP ${resp.status}`);
     const text = await resp.text();
     if (!text) return {};
-    const data = JSON.parse(text) as { code?: number; msg?: string; data?: Record<string, unknown> } & Record<string, unknown>;
+    const data = JSON.parse(text) as {
+      code?: number;
+      msg?: string;
+      data?: Record<string, unknown>;
+    } & Record<string, unknown>;
     if (data.code !== undefined && data.code !== 0) {
       throw new Error(`COT API failed: code=${data.code} msg=${data.msg ?? '<no msg>'}`);
     }
@@ -108,10 +119,13 @@ export class CotClient {
   async complete(ref: CotRef, reason: string): Promise<void> {
     const cotId = encodeURIComponent(ref.cotId);
     const messageId = encodeURIComponent(ref.messageId);
-    await this.request(`/open-apis/im/v1/message_cot/complete/${cotId}?message_id=${messageId}&reason=${reason}`, {
-      method: 'POST',
-      body: '',
-    });
+    await this.request(
+      `/open-apis/im/v1/message_cot/complete/${cotId}?message_id=${messageId}&reason=${reason}`,
+      {
+        method: 'POST',
+        body: '',
+      },
+    );
   }
 }
 
@@ -235,7 +249,8 @@ export class CotPublisher {
     }
     const events = this.buffer.splice(0);
     if (events.length === 0) return;
-    this.flushing = this.client.update(this.ref, events)
+    this.flushing = this.client
+      .update(this.ref, events)
       .catch((err) => {
         this.disabled = true;
         this.degradedReason = err instanceof Error ? err.message : String(err);
@@ -304,7 +319,9 @@ export async function* withCotEvents(
         const toolCallId = evt.id;
         const detailed = opts.detail === 'detailed';
         const showSummary = opts.detail === 'brief' || detailed;
-        const title = showSummary ? cotBriefToolTitle(evt.name, evt.input, 'running') : '正在调用工具';
+        const title = showSummary
+          ? cotBriefToolTitle(evt.name, evt.input, 'running')
+          : '正在调用工具';
         toolBrief.set(toolCallId, { name: evt.name, input: evt.input });
         publisher.enqueue('TOOL_CALL_START', {
           toolCallId,
@@ -375,9 +392,13 @@ export async function* withCotEvents(
         }
         if (evt.type === 'error') {
           finishReason = 'error';
-          publisher.enqueue('RUN_ERROR', { message: evt.message, code: evt.terminationReason ?? 'error' });
+          publisher.enqueue('RUN_ERROR', {
+            message: evt.message,
+            code: evt.terminationReason ?? 'error',
+          });
         } else {
-          const status = evt.terminationReason === 'normal' ? 'done' : evt.terminationReason ?? 'done';
+          const status =
+            evt.terminationReason === 'normal' ? 'done' : (evt.terminationReason ?? 'done');
           finishReason = status === 'done' ? 'done' : 'error';
           publisher.enqueue('RUN_FINISHED', {
             threadId: publisher.scope,

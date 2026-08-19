@@ -50,7 +50,6 @@ describe('Claude IM regression boundaries', () => {
       { scope: 'chat-1', batch: [msg('m-1', 'first'), msg('m-2', 'second')] },
     ]);
   });
-
 });
 
 function msg(messageId: string, content: string): NormalizedMessage {

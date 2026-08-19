@@ -40,9 +40,7 @@ export class CodexJsonlTranslator {
       case 'turn.completed':
         return this.translateTurnCompleted(raw);
       case 'turn.failed':
-        return this.prependPendingText(
-          this.translateTerminalError(raw, 'codex turn failed'),
-        );
+        return this.prependPendingText(this.translateTerminalError(raw, 'codex turn failed'));
       case 'error':
         return this.translateNonTerminalError(raw, 'codex error');
       default:
@@ -234,10 +232,7 @@ function numberValue(value: unknown): number | undefined {
 function errorMessage(raw: Record<string, unknown>, fallback: string): string {
   const nested = recordValue(raw.error);
   return (
-    stringValue(raw.message) ??
-    stringValue(nested?.message) ??
-    stringValue(raw.error) ??
-    fallback
+    stringValue(raw.message) ?? stringValue(nested?.message) ?? stringValue(raw.error) ?? fallback
   );
 }
 

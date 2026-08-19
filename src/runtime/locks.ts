@@ -147,7 +147,12 @@ async function acquireRuntimeLock(
       update: 10_000,
     });
   } catch (err) {
-    throw new RuntimeLockConflictError(meta.kind, meta.target, await readRuntimeLockMeta(meta.target), err);
+    throw new RuntimeLockConflictError(
+      meta.kind,
+      meta.target,
+      await readRuntimeLockMeta(meta.target),
+      err,
+    );
   }
 
   const fullMeta: RuntimeLockMeta = {

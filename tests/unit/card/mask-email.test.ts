@@ -57,7 +57,12 @@ describe('deepMaskEmails', () => {
 describe('renderers strip emails end-to-end', () => {
   const withEmail: AgentEvent[] = [
     { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'git commit -m "x"' } },
-    { type: 'tool_result', id: 't1', output: 'Co-Authored-By: Some One <noreply@example.com>', isError: false },
+    {
+      type: 'tool_result',
+      id: 't1',
+      output: 'Co-Authored-By: Some One <noreply@example.com>',
+      isError: false,
+    },
     { type: 'text', delta: 'Committed. Trailer: authored by team@example.org.' },
     { type: 'done', terminationReason: 'normal' },
   ];

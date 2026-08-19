@@ -25,14 +25,7 @@ import {
 import { activateProfile, listBots, listProfiles } from './fleet';
 import { onboardCreate, onboardState, onboardValidate } from './onboard';
 import { finishQrRegistration, qrStatus, startQrRegistration } from './qr-register';
-import {
-  checkToken,
-  HttpError,
-  isLocalRequest,
-  readJsonBody,
-  sendHtml,
-  sendJson,
-} from './http';
+import { checkToken, HttpError, isLocalRequest, readJsonBody, sendHtml, sendJson } from './http';
 import type { Controls } from '../commands';
 import type { UiServerDeps, UiServerHandle } from './types';
 
@@ -212,7 +205,11 @@ async function route(
   if (path === '/api/config' && p) {
     const { state, live, controls } = await resolveTargetState(deps, url);
     const body = await readJsonBody(req);
-    sendJson(res, 200, live && controls ? await applyConfig(controls, body) : await applyConfigToDisk(state, body));
+    sendJson(
+      res,
+      200,
+      live && controls ? await applyConfig(controls, body) : await applyConfigToDisk(state, body),
+    );
     return;
   }
   if (path === '/api/access' && p) {
@@ -255,7 +252,11 @@ async function route(
     if (!profile) throw new HttpError(400, 'no profile');
     const query = url.searchParams.get('query') ?? undefined;
     const pageToken = url.searchParams.get('pageToken') ?? undefined;
-    sendJson(res, 200, await userChatsView(profile, deps.rootDir, sup.channelFor(profile), { query, pageToken }));
+    sendJson(
+      res,
+      200,
+      await userChatsView(profile, deps.rootDir, sup.channelFor(profile), { query, pageToken }),
+    );
     return;
   }
   if (path === '/api/chats/add-bot' && p) {

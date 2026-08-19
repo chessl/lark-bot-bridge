@@ -47,18 +47,21 @@ export async function runMigrate(opts: MigrateOptions): Promise<void> {
     agentKindFromString(opts.agent) ??
     (opts.profile === 'codex' || opts.profile === 'omp' ? opts.profile : undefined);
   const needsV2Migration = await hasLegacyProfileConfig(configPath);
-  const result = await migrateProfileV2WithActiveBridgePrompt({
-    rootDir: dirname(configPath),
-    configFile: configPath,
-    profile: opts.profile,
-    ...(agentKind ? { agentKind } : {}),
-    ...(needsV2Migration && agentKind === 'codex'
-      ? { codex: await createBootstrapCodexConfig(undefined) }
-      : {}),
-    ...(needsV2Migration && agentKind === 'omp'
-      ? { omp: await createBootstrapOmpConfig(undefined) }
-      : {}),
-  }, opts);
+  const result = await migrateProfileV2WithActiveBridgePrompt(
+    {
+      rootDir: dirname(configPath),
+      configFile: configPath,
+      profile: opts.profile,
+      ...(agentKind ? { agentKind } : {}),
+      ...(needsV2Migration && agentKind === 'codex'
+        ? { codex: await createBootstrapCodexConfig(undefined) }
+        : {}),
+      ...(needsV2Migration && agentKind === 'omp'
+        ? { omp: await createBootstrapOmpConfig(undefined) }
+        : {}),
+    },
+    opts,
+  );
   if (!result) return;
   if (result.migrated) {
     console.log(`✓ 已升级 profile 目录结构：${result.profile}`);

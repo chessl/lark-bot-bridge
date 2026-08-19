@@ -2,10 +2,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  CodexHistoryError,
-  listCodexThreadHistory,
-} from '../../../src/session/codex-history.js';
+import { CodexHistoryError, listCodexThreadHistory } from '../../../src/session/codex-history.js';
 import { buildAgentPrompt } from '../../../src/agent/prompt.js';
 
 interface FakeCodex {
@@ -25,9 +22,9 @@ describe('Codex thread history provider', () => {
       process.env.CODEX_HOME = oldCodexHome;
     }
     await Promise.all(
-      cleanup.splice(0).map((dir) =>
-        rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 }),
-      ),
+      cleanup
+        .splice(0)
+        .map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })),
     );
   });
 
@@ -156,9 +153,12 @@ describe('Codex thread history provider', () => {
   });
 });
 
-async function createFakeCodex(options: { failList?: boolean; firstPreview?: string } = {}): Promise<FakeCodex> {
+async function createFakeCodex(
+  options: { failList?: boolean; firstPreview?: string } = {},
+): Promise<FakeCodex> {
   const dir = await mkdtemp(join(tmpdir(), 'codex-history-test-'));
-  const scriptPath = process.platform === 'win32' ? join(dir, 'codex-app-server.mjs') : join(dir, 'codex');
+  const scriptPath =
+    process.platform === 'win32' ? join(dir, 'codex-app-server.mjs') : join(dir, 'codex');
   const path = process.platform === 'win32' ? join(dir, 'codex.cmd') : scriptPath;
   const recordPath = join(dir, 'record.json');
   const firstPreview = options.firstPreview ?? 'new thread prompt';

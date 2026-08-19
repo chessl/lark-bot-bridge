@@ -5,7 +5,8 @@ describe('managed card sending', () => {
   it('falls back to sending the raw card when the card_id message is rejected', async () => {
     const channel = {
       createCard: vi.fn(async () => ({ cardId: 'card_1' })),
-      send: vi.fn()
+      send: vi
+        .fn()
         .mockRejectedValueOnce(new Error('cardid is invalid'))
         .mockResolvedValueOnce({ messageId: 'om_raw' }),
     };
@@ -50,7 +51,8 @@ describe('managed card sending', () => {
   it('updates raw-card fallback messages by message id', async () => {
     const channel = {
       createCard: vi.fn(async () => ({ cardId: 'card_raw' })),
-      send: vi.fn()
+      send: vi
+        .fn()
         .mockRejectedValueOnce(new Error('cardid is invalid'))
         .mockResolvedValueOnce({ messageId: 'om_raw_update' }),
       updateCardById: vi.fn(async () => {}),

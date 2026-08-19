@@ -43,9 +43,7 @@ const CODEX_MODELS: ModelOption[] = [
   { value: 'o3', label: 'o3' },
 ];
 
-const OMP_MODELS: ModelOption[] = [
-  { value: DEFAULT_MODEL, label: '跟随 OMP 默认（不指定）' },
-];
+const OMP_MODELS: ModelOption[] = [{ value: DEFAULT_MODEL, label: '跟随 OMP 默认（不指定）' }];
 
 /** The model picker options for a profile's agent kind. */
 export function supportedModels(agentKind: AgentKind): ModelOption[] {
@@ -71,10 +69,7 @@ export function isDefaultModel(value: string | undefined): boolean {
  * values (e.g. a Claude alias left over after switching a profile to Codex)
  * fall back to {@link DEFAULT_MODEL}.
  */
-export function normalizeModelSelection(
-  agentKind: AgentKind,
-  value: string | undefined,
-): string {
+export function normalizeModelSelection(agentKind: AgentKind, value: string | undefined): string {
   if (agentKind === 'omp') return value?.trim() || DEFAULT_MODEL;
   if (isDefaultModel(value)) return DEFAULT_MODEL;
   return supportedModels(agentKind).some((m) => m.value === value)

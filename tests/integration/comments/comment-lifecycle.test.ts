@@ -1,12 +1,20 @@
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommentEvent, LarkChannel } from '@larksuite/channel';
-import type { AgentAdapter, AgentEvent, AgentRun, AgentRunOptions } from '../../../src/agent/types.js';
+import type {
+  AgentAdapter,
+  AgentEvent,
+  AgentRun,
+  AgentRunOptions,
+} from '../../../src/agent/types.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { handleCommentMention } from '../../../src/bot/comments.js';
 import { commentTokenDigest } from '../../../src/bot/comment-resource.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import {
+  createDefaultProfileConfig,
+  type ProfileConfig,
+} from '../../../src/config/profile-schema.js';
 import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
@@ -187,31 +195,37 @@ async function createHarness(options: { autoCompleteAgent?: boolean } = {}): Pro
   const requests: RequestRecord[] = [];
   const inThreadReplies: string[] = [];
   const rawClient: FakeCommentChannel['rawClient'] = {
-      async request(input) {
-        requests.push(input);
-        if (input.url.includes('/replies?')) {
-          inThreadReplies.push(extractText(input.data));
-        }
-        return {};
-      },
-      wiki: {
-        v2: { space: { async getNode() { throw apiError(131005); } } },
-      },
-      drive: {
-        v1: {
-          fileComment: {
-            async get() {
-              return commentGet('reply-1', '@bot question');
-            },
-            async list() {
-              return { data: { items: [] } };
-            },
-            async create() {
-              return {};
-            },
+    async request(input) {
+      requests.push(input);
+      if (input.url.includes('/replies?')) {
+        inThreadReplies.push(extractText(input.data));
+      }
+      return {};
+    },
+    wiki: {
+      v2: {
+        space: {
+          async getNode() {
+            throw apiError(131005);
           },
         },
       },
+    },
+    drive: {
+      v1: {
+        fileComment: {
+          async get() {
+            return commentGet('reply-1', '@bot question');
+          },
+          async list() {
+            return { data: { items: [] } };
+          },
+          async create() {
+            return {};
+          },
+        },
+      },
+    },
   };
   const channel: FakeCommentChannel = {
     botIdentity: { openId: 'ou-bot', name: 'Bridge Bot' },

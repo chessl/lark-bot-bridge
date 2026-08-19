@@ -47,13 +47,16 @@ export async function applyProfileLarkCliIdentity(
   larkCliIdentity: ProfileConfig['larkCli']['identityPreset'],
 ): Promise<boolean> {
   const appPaths = profileAppPaths(state);
-  const ok = await applyLarkCliIdentityPolicy({
-    profile: appPaths.profile,
-    rootDir: appPaths.rootDir,
-    configPath: state.configPath,
-    larkCliConfigDir: appPaths.larkCliConfigDir,
-    larkCliSourceConfigFile: appPaths.larkCliSourceConfigFile,
-  }, larkCliIdentity).catch(() => false);
+  const ok = await applyLarkCliIdentityPolicy(
+    {
+      profile: appPaths.profile,
+      rootDir: appPaths.rootDir,
+      configPath: state.configPath,
+      larkCliConfigDir: appPaths.larkCliConfigDir,
+      larkCliSourceConfigFile: appPaths.larkCliSourceConfigFile,
+    },
+    larkCliIdentity,
+  ).catch(() => false);
   if (!ok) {
     log.warn('config-ops', 'lark-cli-identity-policy-apply-failed', {
       profile: appPaths.profile,
@@ -184,7 +187,11 @@ export async function savePreferencesConfig(
 
     const profile = root.profiles[state.profile];
     if (!profile) throw new Error(`profile not found: ${state.profile}`);
-    const { requireMentionInGroup: _requireMention, access: _access, ...profilePreferences } = preferences;
+    const {
+      requireMentionInGroup: _requireMention,
+      access: _access,
+      ...profilePreferences
+    } = preferences;
     root.profiles[state.profile] = {
       ...profile,
       mode,

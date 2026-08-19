@@ -166,7 +166,8 @@ export class MeetingSession {
       }
     }
     this.ingested += 1;
-    const rawType = item.activity_event_type ?? (item as { event_type?: string }).event_type ?? 'unknown';
+    const rawType =
+      item.activity_event_type ?? (item as { event_type?: string }).event_type ?? 'unknown';
     const events = unpackActivity(item, this.botOpenId);
     // An item that yields nothing is either an unhandled type or a shape we
     // failed to read; mark it with `?` so the console shows it instead of
@@ -333,7 +334,9 @@ function contentDedupKey(item: RawActivityItem): string | undefined {
   const type = item.activity_event_type ?? (item as { event_type?: string }).event_type;
   if (!type) return undefined;
   const payload = item as Record<string, unknown>;
-  const nested = (payload.payload && typeof payload.payload === 'object' ? payload.payload : {}) as Record<string, unknown>;
+  const nested = (
+    payload.payload && typeof payload.payload === 'object' ? payload.payload : {}
+  ) as Record<string, unknown>;
   const arr = Object.entries({ ...payload, ...nested }).find(
     ([k, v]) => k.endsWith('_items') && Array.isArray(v),
   )?.[1] as unknown[] | undefined;

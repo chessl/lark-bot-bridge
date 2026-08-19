@@ -98,9 +98,7 @@ describe('CodexAdapter system prompt wiring', () => {
     adapter.run({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
 
     const stdin = await readAll(child.stdin);
-    expect(stdin).toBe(
-      prefixBridgeSystemPrompt('hi', { openId: 'ou_bot_self', name: 'Bridge' }),
-    );
+    expect(stdin).toBe(prefixBridgeSystemPrompt('hi', { openId: 'ou_bot_self', name: 'Bridge' }));
   });
 
   it('falls back to the base system prompt when no identity was set', async () => {

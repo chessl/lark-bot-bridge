@@ -16,9 +16,9 @@ describe('OmpAdapter process contract', () => {
 
   afterEach(async () => {
     await Promise.all(
-      cleanup.splice(0).map((dir) =>
-        rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 }),
-      ),
+      cleanup
+        .splice(0)
+        .map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })),
     );
   });
 
@@ -69,9 +69,7 @@ describe('OmpAdapter process contract', () => {
       systemPrompt: string;
       commands: Array<Record<string, unknown>>;
     };
-    expect(record.argv).toEqual(
-      buildOmpArgs({ systemPromptFile: record.argv[6]! }),
-    );
+    expect(record.argv).toEqual(buildOmpArgs({ systemPromptFile: record.argv[6]! }));
     expect(record.env).toMatchObject({
       LARK_CHANNEL: '1',
       LARK_CHANNEL_PROFILE: 'omp-dev',

@@ -12,10 +12,7 @@ import type { AgentAdapter } from '../../agent/types';
 import { startChannel, type BridgeChannel } from '../../bot/channel';
 import type { Controls } from '../../commands';
 import type { AppPaths } from '../../config/app-paths';
-import {
-  type AgentKind,
-  type ProfileConfig,
-} from '../../config/profile-schema';
+import { type AgentKind, type ProfileConfig } from '../../config/profile-schema';
 import type { AppConfig } from '../../config/schema';
 import { isComplete } from '../../config/schema';
 import { configureLogger, gcOldLogs, log } from '../../core/logger';
@@ -91,7 +88,9 @@ export interface StartOptions {
    * profile in the foreground. Default false → classic headless run. */
   webUi?: boolean;
   confirmStopRuntimeLockProcess?: (err: RuntimeLockConflictError) => boolean | Promise<boolean>;
-  stopRuntimeLockProcess?: (meta: RuntimeLockMeta) => StopProcessEntryResult | Promise<StopProcessEntryResult>;
+  stopRuntimeLockProcess?: (
+    meta: RuntimeLockMeta,
+  ) => StopProcessEntryResult | Promise<StopProcessEntryResult>;
 }
 
 /**
@@ -248,7 +247,6 @@ function parkWithShutdown(
   return new Promise<void>(() => {});
 }
 
-
 /**
  * Print the same-app conflict, then ask the user how to proceed. Returns
  * true to continue starting (after killing the old ones), false to cancel.
@@ -258,9 +256,7 @@ function parkWithShutdown(
  * users running a daemon.
  */
 async function resolveConflict(conflicts: ProcessEntry[]): Promise<boolean> {
-  console.log(
-    `⚠️  检测到这个飞书应用已经有 ${conflicts.length} 个 bot 正在运行:`,
-  );
+  console.log(`⚠️  检测到这个飞书应用已经有 ${conflicts.length} 个 bot 正在运行:`);
   for (const e of conflicts) {
     const ago = formatAgo(Date.now() - new Date(e.startedAt).getTime());
     // botName 只在 WS 连上后才回填,刚启动 / 连接失败的旧 entry 可能没有。
@@ -270,9 +266,7 @@ async function resolveConflict(conflicts: ProcessEntry[]): Promise<boolean> {
   console.log('');
 
   if (!process.stdin.isTTY) {
-    console.warn(
-      '⚠️  当前不是交互式启动,已自动取消。如需替换,先用 `kill <bot id>` 关掉旧的。\n',
-    );
+    console.warn('⚠️  当前不是交互式启动,已自动取消。如需替换,先用 `kill <bot id>` 关掉旧的。\n');
     return false;
   }
 
@@ -280,9 +274,7 @@ async function resolveConflict(conflicts: ProcessEntry[]): Promise<boolean> {
   const ask = (q: string): Promise<string> => new Promise((resolve) => rl.question(q, resolve));
   try {
     const verb = conflicts.length > 1 ? '它们' : '那个';
-    const answer = (await ask(`继续启动会先关掉${verb},是否继续? [y/N]: `))
-      .trim()
-      .toLowerCase();
+    const answer = (await ask(`继续启动会先关掉${verb},是否继续? [y/N]: `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       return false;
     }
@@ -349,9 +341,11 @@ async function confirmStopRuntimeLockProcess(err: RuntimeLockConflictError): Pro
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = (await new Promise<string>((resolve) =>
-      rl.question('是否停止旧进程并重新启动? [y/N]: ', resolve),
-    ))
+    const answer = (
+      await new Promise<string>((resolve) =>
+        rl.question('是否停止旧进程并重新启动? [y/N]: ', resolve),
+      )
+    )
       .trim()
       .toLowerCase();
     return answer === 'y' || answer === 'yes';
@@ -359,7 +353,6 @@ async function confirmStopRuntimeLockProcess(err: RuntimeLockConflictError): Pro
     rl.close();
   }
 }
-
 
 function formatAgo(ms: number): string {
   if (ms < 60_000) return `${Math.floor(ms / 1000)} 秒前`;

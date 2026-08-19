@@ -23,13 +23,7 @@ import {
   type AcquiredRuntimeLock,
 } from './locks';
 import { resolveProfileRuntime } from './profile-runtime';
-import {
-  register,
-  unregister,
-  unregisterSync,
-  updateEntry,
-  type ProcessEntry,
-} from './registry';
+import { register, unregister, unregisterSync, updateEntry, type ProcessEntry } from './registry';
 
 type StartChannelFn = typeof realStartChannel;
 
@@ -208,7 +202,10 @@ class ManagedProfile {
       });
       const next = nextRuntime.cfg;
       if (!isComplete(next)) throw new Error('config incomplete after change');
-      assertReconnectAgentKindUnchanged(this.profileConfig.agentKind, nextRuntime.profileConfig.agentKind);
+      assertReconnectAgentKindUnchanged(
+        this.profileConfig.agentKind,
+        nextRuntime.profileConfig.agentKind,
+      );
       const nextAgent = createRuntimeAgent(nextRuntime.profileConfig, {
         ...nextRuntime.appPaths,
         configPath: nextRuntime.configPath,
@@ -237,7 +234,10 @@ class ManagedProfile {
       try {
         await this.bridge.disconnect();
       } catch (err) {
-        log.warn('supervisor', 'old-disconnect-failed', { profile: this.profile, err: String(err) });
+        log.warn('supervisor', 'old-disconnect-failed', {
+          profile: this.profile,
+          err: String(err),
+        });
       }
       this.bridge = nextBridge;
       await updateEntry(
@@ -359,7 +359,10 @@ export class Supervisor {
     );
     await managed.bringUp(new Date().toISOString());
     this.managed.set(appPaths.profile, managed);
-    log.info('supervisor', 'profile-online', { profile: appPaths.profile, appId: cfg.accounts.app.id });
+    log.info('supervisor', 'profile-online', {
+      profile: appPaths.profile,
+      appId: cfg.accounts.app.id,
+    });
   }
 
   /** Take a profile offline (in-process). The supervisor keeps running. */

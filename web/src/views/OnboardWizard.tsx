@@ -1,5 +1,5 @@
 import { QRCodeSVG } from "qrcode.react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -30,6 +30,7 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
 
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const scanned = useRef(false);
+  const naming = useRef({ agentKind, existing });
 
   useEffect(() => {
     apiGet<OnboardState>("/api/onboard/state")
@@ -41,13 +42,42 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
       })
       .catch(() => {});
   }, []);
+  useEffect(() => {
+    naming.current = { agentKind, existing };
+  }, [agentKind, existing]);
 
-  const stopPolling = () => {
-    if (timer.current) clearInterval(timer.current);
+  const stopPolling = useCallback(() => {
+    clearInterval(timer.current ?? undefined);
     timer.current = null;
-  };
+  }, []);
 
-  async function generate() {
+  const poll = useCallback(
+    async (sessionId: string) => {
+      let s: { status: string; error?: string; botName?: string; suggestedProfile?: string };
+      try {
+        s = await apiGet(`/api/profiles/qr/status?sessionId=${encodeURIComponent(sessionId)}`);
+      } catch {
+        return; // transient; keep polling
+      }
+      if (s.status === "scanned" && !scanned.current) {
+        scanned.current = true;
+        stopPolling();
+        // App created — prefill the profile name from the scanned app's name.
+        setBotName(s.botName ?? "");
+        setProfileName(
+          s.suggestedProfile || uniqueName(naming.current.agentKind, naming.current.existing),
+        );
+        setPhase("confirm");
+      } else if (s.status === "error") {
+        stopPolling();
+        setPhase("error");
+        toast.error(s.error ?? "扫码创建失败");
+      }
+    },
+    [stopPolling],
+  );
+
+  const generate = useCallback(async () => {
     stopPolling();
     scanned.current = false;
     setQr(null);
@@ -64,28 +94,7 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
       setPhase("error");
       toast.error(String((e as Error).message ?? e));
     }
-  }
-
-  async function poll(sessionId: string) {
-    let s: { status: string; error?: string; botName?: string; suggestedProfile?: string };
-    try {
-      s = await apiGet(`/api/profiles/qr/status?sessionId=${encodeURIComponent(sessionId)}`);
-    } catch {
-      return; // transient; keep polling
-    }
-    if (s.status === "scanned" && !scanned.current) {
-      scanned.current = true;
-      stopPolling();
-      // App created — prefill the profile name from the scanned app's name.
-      setBotName(s.botName ?? "");
-      setProfileName(s.suggestedProfile || uniqueName(agentKind, existing));
-      setPhase("confirm");
-    } else if (s.status === "error") {
-      stopPolling();
-      setPhase("error");
-      toast.error(s.error ?? "扫码创建失败");
-    }
-  }
+  }, [poll, stopPolling]);
 
   async function confirmCreate() {
     if (!qr) return;
@@ -105,11 +114,10 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
   }
 
   // Auto-render the QR on open.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: this starts one registration session when the wizard opens
   useEffect(() => {
     void generate();
     return stopPolling;
-  }, []);
+  }, [generate, stopPolling]);
 
   if (phase === "confirm" || phase === "creating") {
     return (

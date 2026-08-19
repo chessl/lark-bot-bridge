@@ -9,11 +9,7 @@ export type NormalizedCard =
 export function normalizeCard(value: unknown): NormalizedCard {
   if (value === null) return null;
 
-  if (
-    typeof value === 'boolean'
-    || typeof value === 'number'
-    || typeof value === 'string'
-  ) {
+  if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
     return value;
   }
 

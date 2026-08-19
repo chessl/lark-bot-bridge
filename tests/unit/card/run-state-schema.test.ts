@@ -6,9 +6,9 @@ describe('run state terminal event schema', () => {
     expect(reduce(initialState, { type: 'done', terminationReason: 'normal' }).terminal).toBe(
       'done',
     );
-    expect(
-      reduce(initialState, { type: 'done', terminationReason: 'interrupted' }).terminal,
-    ).toBe('interrupted');
+    expect(reduce(initialState, { type: 'done', terminationReason: 'interrupted' }).terminal).toBe(
+      'interrupted',
+    );
     expect(reduce(initialState, { type: 'done', terminationReason: 'timeout' }).terminal).toBe(
       'idle_timeout',
     );

@@ -135,5 +135,4 @@ describe('Codex argv contract', () => {
       }),
     ).toContain('--ignore-user-config');
   });
-
 });

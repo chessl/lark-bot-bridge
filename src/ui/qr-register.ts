@@ -99,14 +99,21 @@ export async function startQrRegistration(rootDir?: string): Promise<{
         const tenant: TenantBrand = result.user_info?.tenant_brand ?? 'feishu';
         session.app = { appId: result.client_id, appSecret: result.client_secret, tenant };
         // Fetch the app/bot name and derive a profile-name suggestion.
-        const info = await validateAppCredentials(result.client_id, result.client_secret, tenant).catch(
-          () => undefined,
-        );
+        const info = await validateAppCredentials(
+          result.client_id,
+          result.client_secret,
+          tenant,
+        ).catch(() => undefined);
         session.botName = info?.botName;
         const existing = new Set(
-          Object.keys((await loadRootConfig(resolveAppPaths({ rootDir }).configFile))?.profiles ?? {}),
+          Object.keys(
+            (await loadRootConfig(resolveAppPaths({ rootDir }).configFile))?.profiles ?? {},
+          ),
         );
-        session.suggestedProfile = uniqueProfileName(sanitizeProfileName(info?.botName ?? ''), existing);
+        session.suggestedProfile = uniqueProfileName(
+          sanitizeProfileName(info?.botName ?? ''),
+          existing,
+        );
         session.status = 'scanned';
         log.info('ui', 'qr-register-scanned', { appId: result.client_id, botName: info?.botName });
       })

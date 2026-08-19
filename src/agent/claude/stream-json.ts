@@ -45,7 +45,11 @@ export function* translateEvent(raw: unknown): Generator<AgentEvent> {
     for (const block of evt.message.content) {
       if (block.type === 'text' && typeof block.text === 'string' && block.text) {
         yield { type: 'text', delta: block.text };
-      } else if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking) {
+      } else if (
+        block.type === 'thinking' &&
+        typeof block.thinking === 'string' &&
+        block.thinking
+      ) {
         yield { type: 'thinking', delta: block.thinking };
       } else if (block.type === 'tool_use' && block.id && block.name) {
         yield { type: 'tool_use', id: block.id, name: block.name, input: block.input };

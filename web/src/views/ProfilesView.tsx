@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,20 +22,22 @@ export function ProfilesView({ onOpen }: { onOpen: (profile: string) => void }) 
   const [stopping, setStopping] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = () =>
-    apiGet<{ profiles: ProfileInfo[] }>("/api/profiles")
-      .then((d) => {
-        setProfiles(d.profiles);
-        setError(null);
-      })
-      .catch((e) => setError(String(e.message ?? e)));
+  const load = useCallback(
+    () =>
+      apiGet<{ profiles: ProfileInfo[] }>("/api/profiles")
+        .then((d) => {
+          setProfiles(d.profiles);
+          setError(null);
+        })
+        .catch((e) => setError(String(e.message ?? e))),
+    [],
+  );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: poll the profile list for this mounted view
   useEffect(() => {
     load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
-  }, []);
+  }, [load]);
 
   async function start(name: string, e: React.MouseEvent) {
     e.stopPropagation();

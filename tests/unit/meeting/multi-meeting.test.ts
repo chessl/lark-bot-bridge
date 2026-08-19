@@ -59,7 +59,11 @@ describe('one bot across several meetings', () => {
   it('keeps each meeting transcript isolated', async () => {
     const { channel, handlers } = fakeChannel();
     const { client } = multiJoinClient({ '111111111': 'm-A', '222222222': 'm-B' });
-    const m = new MeetingManager({ client, config: () => ({ ...MEETING_DEFAULTS, enabled: true }), channel });
+    const m = new MeetingManager({
+      client,
+      config: () => ({ ...MEETING_DEFAULTS, enabled: true }),
+      channel,
+    });
     m.attachPush();
 
     const a = await m.join('111111111');
@@ -76,7 +80,11 @@ describe('one bot across several meetings', () => {
 
   it('answers back into the meeting that asked, not the other one', async () => {
     const { client, sent } = multiJoinClient({ '111111111': 'm-A', '222222222': 'm-B' });
-    const m = new MeetingManager({ client, config: () => ({ ...MEETING_DEFAULTS, enabled: true }), channel: fakeChannel().channel });
+    const m = new MeetingManager({
+      client,
+      config: () => ({ ...MEETING_DEFAULTS, enabled: true }),
+      channel: fakeChannel().channel,
+    });
     const a = await m.join('111111111');
     await m.join('222222222');
 
@@ -89,7 +97,11 @@ describe('one bot across several meetings', () => {
 
   it('leaves only the requested meeting', async () => {
     const { client, sent } = multiJoinClient({ '111111111': 'm-A', '222222222': 'm-B' });
-    const m = new MeetingManager({ client, config: () => ({ ...MEETING_DEFAULTS, enabled: true }), channel: fakeChannel().channel });
+    const m = new MeetingManager({
+      client,
+      config: () => ({ ...MEETING_DEFAULTS, enabled: true }),
+      channel: fakeChannel().channel,
+    });
     await m.join('111111111');
     const b = await m.join('222222222');
 
@@ -104,7 +116,11 @@ describe('one bot across several meetings', () => {
   it('ends only the meeting that reported ended', async () => {
     const { channel, handlers } = fakeChannel();
     const { client } = multiJoinClient({ '111111111': 'm-A', '222222222': 'm-B' });
-    const m = new MeetingManager({ client, config: () => ({ ...MEETING_DEFAULTS, enabled: true }), channel });
+    const m = new MeetingManager({
+      client,
+      config: () => ({ ...MEETING_DEFAULTS, enabled: true }),
+      channel,
+    });
     m.attachPush();
     const a = await m.join('111111111');
     const b = await m.join('222222222');
@@ -118,7 +134,11 @@ describe('one bot across several meetings', () => {
 
   it('finds a session by meeting number so commands can disambiguate', async () => {
     const { client } = multiJoinClient({ '111111111': 'm-A', '222222222': 'm-B' });
-    const m = new MeetingManager({ client, config: () => ({ ...MEETING_DEFAULTS, enabled: true }), channel: fakeChannel().channel });
+    const m = new MeetingManager({
+      client,
+      config: () => ({ ...MEETING_DEFAULTS, enabled: true }),
+      channel: fakeChannel().channel,
+    });
     await m.join('111111111');
     await m.join('222222222');
 
@@ -129,7 +149,11 @@ describe('one bot across several meetings', () => {
 
   it('binds a session to the chat it was joined from, for command targeting', async () => {
     const { client } = multiJoinClient({ '111111111': 'm-A', '222222222': 'm-B' });
-    const m = new MeetingManager({ client, config: () => ({ ...MEETING_DEFAULTS, enabled: true }), channel: fakeChannel().channel });
+    const m = new MeetingManager({
+      client,
+      config: () => ({ ...MEETING_DEFAULTS, enabled: true }),
+      channel: fakeChannel().channel,
+    });
     const a = await m.join('111111111', { originChatId: 'oc_team' });
     const b = await m.join('222222222', { originChatId: 'oc_other' });
 

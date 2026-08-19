@@ -1,21 +1,12 @@
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { join } from 'node:path';
-import {
-  mergeProcessEnv,
-  spawnProcess,
-  type SpawnedProcessByStdio,
-} from '../platform/spawn';
+import { mergeProcessEnv, spawnProcess, type SpawnedProcessByStdio } from '../platform/spawn';
 import { normalizeSessionPreview } from './preview';
 
 type CodexAppServerChild = SpawnedProcessByStdio<Writable, Readable, Readable>;
 
-export type CodexThreadSourceKind =
-  | 'cli'
-  | 'vscode'
-  | 'exec'
-  | 'appServer'
-  | 'unknown';
+export type CodexThreadSourceKind = 'cli' | 'vscode' | 'exec' | 'appServer' | 'unknown';
 
 export interface CodexThreadHistoryEntry {
   threadId: string;
@@ -95,11 +86,14 @@ export async function listCodexThreadHistory(
       child.removeListener('error', fail);
       child.stdin.removeListener('error', fail);
       child.stderr.removeAllListeners('data');
-      if (options.kill && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+      if (options.kill && child.exitCode === null && child.signalCode === null)
+        child.kill('SIGTERM');
     };
 
     timer = setTimeout(() => {
-      reject(new CodexHistoryError('timeout', `codex history query timed out after ${timeoutMs}ms`));
+      reject(
+        new CodexHistoryError('timeout', `codex history query timed out after ${timeoutMs}ms`),
+      );
       cleanup({ kill: true });
     }, timeoutMs);
 
@@ -125,7 +119,9 @@ export async function listCodexThreadHistory(
         reject(
           new CodexHistoryError(
             'app-server-error',
-            typeof err?.message === 'string' ? err.message : 'codex app-server rejected history query',
+            typeof err?.message === 'string'
+              ? err.message
+              : 'codex app-server rejected history query',
           ),
         );
         cleanup({ kill: true });
@@ -222,12 +218,17 @@ function parseThreadListResponse(
   if (!raw || !Array.isArray(raw.data)) {
     return {
       ok: false,
-      error: new CodexHistoryError('malformed-response', 'codex app-server returned malformed thread/list response'),
+      error: new CodexHistoryError(
+        'malformed-response',
+        'codex app-server returned malformed thread/list response',
+      ),
     };
   }
   return {
     ok: true,
-    entries: raw.data.map(normalizeThread).filter((entry): entry is CodexThreadHistoryEntry => Boolean(entry)),
+    entries: raw.data
+      .map(normalizeThread)
+      .filter((entry): entry is CodexThreadHistoryEntry => Boolean(entry)),
   };
 }
 

@@ -61,7 +61,9 @@ describe('signed card callback dispatch', () => {
 
     const queued = h.pending.cancel('oc_group');
     expect(queued).toHaveLength(1);
-    expect(queued[0]?.content).toBe('[card-click] {"choice":"a","form_value":{"note":"from form"}}');
+    expect(queued[0]?.content).toBe(
+      '[card-click] {"choice":"a","form_value":{"note":"from form"}}',
+    );
     expect(queued[0]?.chatType).toBe('group');
   });
 
@@ -86,7 +88,10 @@ describe('signed card callback dispatch', () => {
     // channel.fetchMessage, whose normalized shape drops thread_id) would fall
     // back to the bare chatId and route the click into the wrong session.
     h.channel.rawThreadIds.set('om_card', 'th_topic');
-    h.activeRuns.register('oc_group:th_topic', h.agent.run({ runId: 'run-active', prompt: 'running' }));
+    h.activeRuns.register(
+      'oc_group:th_topic',
+      h.agent.run({ runId: 'run-active', prompt: 'running' }),
+    );
 
     await h.dispatch({
       __bridge_cb: true,

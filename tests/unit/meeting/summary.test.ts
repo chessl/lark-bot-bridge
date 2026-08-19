@@ -25,7 +25,9 @@ function profileConfig(meeting: MeetingConfig) {
 import type { MeetingConfig } from '../../../src/config/profile-schema';
 import type { VcRequestClient } from '../../../src/meeting/api';
 
-const noopClient: VcRequestClient = { request: vi.fn(async () => ({ code: 0, data: {} }) as never) };
+const noopClient: VcRequestClient = {
+  request: vi.fn(async () => ({ code: 0, data: {} }) as never),
+};
 
 /** A run that emits one text chunk then completes. */
 function fakeRun(text: string) {
@@ -56,7 +58,9 @@ function makeSession(config: MeetingConfig, originChatId?: string) {
   s.ingest({
     event_id: 'e1',
     activity_event_type: 'transcript_received',
-    transcript_received_items: [{ sentence_id: 1, text: '讨论了发布计划', speaker: { name: '甲' } }],
+    transcript_received_items: [
+      { sentence_id: 1, text: '讨论了发布计划', speaker: { name: '甲' } },
+    ],
   });
   return s;
 }
@@ -112,7 +116,9 @@ describe('summarizeEndedMeeting', () => {
     expect(mocks.startRunFlow).toHaveBeenCalledTimes(1);
     expect(d.sent).toHaveLength(1);
     expect(d.sent[0]?.to).toBe('oc_team');
-    expect(String((d.sent[0]?.input as { markdown: string }).markdown)).toContain('会议纪要 · 周会');
+    expect(String((d.sent[0]?.input as { markdown: string }).markdown)).toContain(
+      '会议纪要 · 周会',
+    );
     expect(String((d.sent[0]?.input as { markdown: string }).markdown)).toContain('周五上线');
   });
 
@@ -153,7 +159,12 @@ describe('summarizeEndedMeeting', () => {
     const sent: unknown[] = [];
     await summarizeEndedMeeting({
       session,
-      channel: { send: vi.fn(async () => { sent.push(1); return {} as never; }) },
+      channel: {
+        send: vi.fn(async () => {
+          sent.push(1);
+          return {} as never;
+        }),
+      },
       controls: { profile: 'claude', profileConfig: profileConfig(config) },
       executor: {},
       activeRuns: { interrupt: vi.fn() },

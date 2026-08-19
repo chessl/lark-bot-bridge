@@ -76,8 +76,12 @@ describe('README runtime contract', () => {
   it('documents access control commands instead of config-only access management', async () => {
     const docs = await readDocs();
 
-    expect(docs).not.toContain('`/config` only adjusts presentation preferences. Manage access in the profile config.');
-    expect(docs).not.toContain('`/config` 只调整展示偏好，不再维护访问名单。请在 profile config 里维护。');
+    expect(docs).not.toContain(
+      '`/config` only adjusts presentation preferences. Manage access in the profile config.',
+    );
+    expect(docs).not.toContain(
+      '`/config` 只调整展示偏好，不再维护访问名单。请在 profile config 里维护。',
+    );
   });
 
   it('documents cloud-doc comments as document-scoped instead of access-gated', async () => {

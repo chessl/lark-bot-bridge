@@ -4,7 +4,10 @@ import type { CommentEvent } from '@larksuite/channel';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { handleCommentMention } from '../../../src/bot/comments.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import {
+  createDefaultProfileConfig,
+  type ProfileConfig,
+} from '../../../src/config/profile-schema.js';
 import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
@@ -106,52 +109,52 @@ async function createHarness(options: {
   const calls: string[] = [];
   const replies: string[] = [];
   const rawClient: FakeCommentChannel['rawClient'] = {
-      async request(input) {
-        calls.push('request');
-        const url = (input as { url?: string }).url ?? '';
-        if (url.includes('/comments/reaction')) return {};
-        if (url.includes('/replies?')) replies.push(extractReplyText(input));
-        return {};
-      },
-      wiki: {
-        v2: {
-          space: {
-            async getNode() {
-              calls.push('wiki.getNode');
-              if (options.wikiNode) {
-                return {
-                  data: {
-                    node: {
-                      obj_token: options.wikiNode.objToken,
-                      obj_type: options.wikiNode.objType,
-                      space_id: options.wikiNode.spaceId,
-                    },
+    async request(input) {
+      calls.push('request');
+      const url = (input as { url?: string }).url ?? '';
+      if (url.includes('/comments/reaction')) return {};
+      if (url.includes('/replies?')) replies.push(extractReplyText(input));
+      return {};
+    },
+    wiki: {
+      v2: {
+        space: {
+          async getNode() {
+            calls.push('wiki.getNode');
+            if (options.wikiNode) {
+              return {
+                data: {
+                  node: {
+                    obj_token: options.wikiNode.objToken,
+                    obj_type: options.wikiNode.objType,
+                    space_id: options.wikiNode.spaceId,
                   },
-                };
-              }
-              throw apiError(131005);
-            },
+                },
+              };
+            }
+            throw apiError(131005);
           },
         },
       },
-      drive: {
-        v1: {
-          fileComment: {
-            async get() {
-              calls.push('fileComment.get');
-              return commentGet('reply-1', '@bot question');
-            },
-            async list() {
-              calls.push('fileComment.list');
-              return { data: { items: [] } };
-            },
-            async create() {
-              calls.push('fileComment.create');
-              return {};
-            },
+    },
+    drive: {
+      v1: {
+        fileComment: {
+          async get() {
+            calls.push('fileComment.get');
+            return commentGet('reply-1', '@bot question');
+          },
+          async list() {
+            calls.push('fileComment.list');
+            return { data: { items: [] } };
+          },
+          async create() {
+            calls.push('fileComment.create');
+            return {};
           },
         },
       },
+    },
   };
   const channel: FakeCommentChannel = {
     calls,
@@ -161,7 +164,12 @@ async function createHarness(options: {
     comments: makeFakeCommentSurface(rawClient),
   };
   const agent = new FakeAgentAdapter({
-    events: [[{ type: 'text', delta: 'answer' }, { type: 'done', terminationReason: 'normal' }]],
+    events: [
+      [
+        { type: 'text', delta: 'answer' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    ],
   });
   const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
@@ -260,5 +268,9 @@ function extractReplyText(input: unknown): string {
     content?: { elements?: Array<{ text_run?: { text?: string } }> };
     data?: { content?: { elements?: Array<{ text_run?: { text?: string } }> } };
   };
-  return data.content?.elements?.[0]?.text_run?.text ?? data.data?.content?.elements?.[0]?.text_run?.text ?? '';
+  return (
+    data.content?.elements?.[0]?.text_run?.text ??
+    data.data?.content?.elements?.[0]?.text_run?.text ??
+    ''
+  );
 }

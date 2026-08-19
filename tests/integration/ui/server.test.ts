@@ -64,7 +64,9 @@ function stubSupervisor(): UiSupervisor {
 }
 
 function get(path: string, token?: string, headers: Record<string, string> = {}) {
-  return fetch(`${base}${path}`, { headers: { ...(token ? { 'x-ui-token': token } : {}), ...headers } });
+  return fetch(`${base}${path}`, {
+    headers: { ...(token ? { 'x-ui-token': token } : {}), ...headers },
+  });
 }
 function post(path: string, token: string, body: unknown) {
   return fetch(`${base}${path}`, {
@@ -84,13 +86,19 @@ beforeEach(async () => {
   configPath = join(rootDir, 'config.json');
   await mkdir(join(rootDir, 'profiles', 'claude'), { recursive: true });
   await saveRootConfig(
-    createRootConfig('claude', createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } })),
+    createRootConfig(
+      'claude',
+      createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } }),
+    ),
     configPath,
   );
   // second profile 'work' on disk (offline)
   const rc = (await loadRootConfig(configPath))!;
   await mkdir(join(rootDir, 'profiles', 'work'), { recursive: true });
-  rc.profiles.work = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app: { ...app, id: 'cli_work' } } });
+  rc.profiles.work = createDefaultProfileConfig({
+    agentKind: 'claude',
+    accounts: { app: { ...app, id: 'cli_work' } },
+  });
   await saveRootConfig(rc, configPath);
   await writeActiveProfile(rootDir, 'claude');
 
@@ -126,7 +134,12 @@ describe('ui server (supervisor-backed)', () => {
 
   it('returns status and config for the active (online) profile', async () => {
     const status = await json(await get('/api/status', handle.token));
-    expect(status).toMatchObject({ hosted: true, version: 'test', activeProfile: 'claude', online: 1 });
+    expect(status).toMatchObject({
+      hosted: true,
+      version: 'test',
+      activeProfile: 'claude',
+      online: 1,
+    });
 
     const config = await json(await get('/api/config', handle.token));
     expect(config.mode).toBe('personal');
@@ -135,7 +148,11 @@ describe('ui server (supervisor-backed)', () => {
 
   it('applies a config change live to an online profile and persists it', async () => {
     const view = await json(
-      await post('/api/config', handle.token, { mode: 'team', maxConcurrentRuns: 7, requireMentionInGroup: false }),
+      await post('/api/config', handle.token, {
+        mode: 'team',
+        maxConcurrentRuns: 7,
+        requireMentionInGroup: false,
+      }),
     );
     expect(view.mode).toBe('team');
     expect(view.live).toBe(true);
@@ -159,30 +176,53 @@ describe('ui server (supervisor-backed)', () => {
   });
 
   it('adds and removes access entries', async () => {
-    const added = await json(await post('/api/access', handle.token, { action: 'add', kind: 'user', id: 'ou_alice' }));
+    const added = await json(
+      await post('/api/access', handle.token, { action: 'add', kind: 'user', id: 'ou_alice' }),
+    );
     expect(added.allowedUsers).toContain('ou_alice');
-    const removed = await json(await post('/api/access', handle.token, { action: 'remove', kind: 'user', id: 'ou_alice' }));
+    const removed = await json(
+      await post('/api/access', handle.token, { action: 'remove', kind: 'user', id: 'ou_alice' }),
+    );
     expect(removed.allowedUsers).not.toContain('ou_alice');
   });
 
   it('sets and clears a per-chat @-mention override, and drops it when the chat is removed', async () => {
-    await json(await post('/api/access', handle.token, { action: 'add', kind: 'chat', id: 'oc_grp' }));
+    await json(
+      await post('/api/access', handle.token, { action: 'add', kind: 'chat', id: 'oc_grp' }),
+    );
 
     // Set an override (respond to all — no @ needed).
     const set = await json(
-      await post('/api/access', handle.token, { action: 'set-mention', kind: 'chat', id: 'oc_grp', requireMention: false }),
+      await post('/api/access', handle.token, {
+        action: 'set-mention',
+        kind: 'chat',
+        id: 'oc_grp',
+        requireMention: false,
+      }),
     );
     expect(set.chatRequireMention).toEqual({ oc_grp: false });
     expect(online.get('claude').profileConfig.access.chatRequireMention).toEqual({ oc_grp: false });
 
     // Clear it (follow global) with null.
     const cleared = await json(
-      await post('/api/access', handle.token, { action: 'set-mention', kind: 'chat', id: 'oc_grp', requireMention: null }),
+      await post('/api/access', handle.token, {
+        action: 'set-mention',
+        kind: 'chat',
+        id: 'oc_grp',
+        requireMention: null,
+      }),
     );
     expect(cleared.chatRequireMention).toEqual({});
 
     // Re-set then remove the chat → override is dropped too.
-    await json(await post('/api/access', handle.token, { action: 'set-mention', kind: 'chat', id: 'oc_grp', requireMention: true }));
+    await json(
+      await post('/api/access', handle.token, {
+        action: 'set-mention',
+        kind: 'chat',
+        id: 'oc_grp',
+        requireMention: true,
+      }),
+    );
     const afterRemove = await json(
       await post('/api/access', handle.token, { action: 'remove', kind: 'chat', id: 'oc_grp' }),
     );
@@ -205,7 +245,9 @@ describe('ui server (supervisor-backed)', () => {
   it('starts and stops a profile via the supervisor', async () => {
     expect((await post('/api/profiles/start', handle.token, { profile: 'work' })).status).toBe(200);
     expect(online.has('work')).toBe(true);
-    expect((await post('/api/profiles/stop', handle.token, { profile: 'claude' })).status).toBe(200);
+    expect((await post('/api/profiles/stop', handle.token, { profile: 'claude' })).status).toBe(
+      200,
+    );
     expect(online.has('claude')).toBe(false);
   });
 

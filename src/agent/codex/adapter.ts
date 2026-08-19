@@ -159,7 +159,12 @@ export class CodexAdapter implements AgentAdapter {
 
     return {
       runId: opts.runId,
-      events: createEventStream(child, stderrChunks, () => runtimeError, () => stopReason),
+      events: createEventStream(
+        child,
+        stderrChunks,
+        () => runtimeError,
+        () => stopReason,
+      ),
       async stop() {
         if (child.exitCode !== null || child.signalCode !== null) return;
         stopReason = 'interrupted';
@@ -290,6 +295,8 @@ async function waitForExitCode(child: CodexChild): Promise<number | null> {
 function isWindowsCommandNotFoundLine(line: string): boolean {
   return (
     process.platform === 'win32' &&
-    /is not recognized as an internal or external command|operable program or batch file/i.test(line)
+    /is not recognized as an internal or external command|operable program or batch file/i.test(
+      line,
+    )
   );
 }

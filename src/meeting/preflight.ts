@@ -203,7 +203,8 @@ export async function checkMeetingPreflight(
   if (payload === undefined) {
     return {
       status: 'unknown',
-      message: r.stderr.trim().split('\n')[0] ?? '权限检查未返回结果（lark-cli 未安装或未绑定应用？）',
+      message:
+        r.stderr.trim().split('\n')[0] ?? '权限检查未返回结果（lark-cli 未安装或未绑定应用？）',
       missingScopes: [],
       requiredEvents: MEETING_REQUIRED_EVENTS,
       requiredScopes: MEETING_REQUIRED_SCOPES,

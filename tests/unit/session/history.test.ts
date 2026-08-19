@@ -11,9 +11,9 @@ describe('Claude local session history', () => {
     vi.doUnmock('node:os');
     vi.resetModules();
     await Promise.all(
-      cleanup.splice(0).map((dir) =>
-        rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 }),
-      ),
+      cleanup
+        .splice(0)
+        .map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })),
     );
   });
 

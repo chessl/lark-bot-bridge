@@ -36,7 +36,10 @@ describe('access policy', () => {
 
     expect(isCreator(controls, 'ou_owner')).toBe(true);
     expect(canUseDm(profile, controls, 'ou_owner')).toEqual({ ok: true, reason: 'owner' });
-    expect(canRunAdminCommand(profile, controls, 'ou_owner')).toEqual({ ok: true, reason: 'owner' });
+    expect(canRunAdminCommand(profile, controls, 'ou_owner')).toEqual({
+      ok: true,
+      reason: 'owner',
+    });
   });
 
   it('does not grant creator access without a cached owner', () => {

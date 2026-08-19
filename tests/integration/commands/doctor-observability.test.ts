@@ -62,7 +62,12 @@ async function createHarness(): Promise<{
   const activeRuns = new ActiveRuns();
   const pool = new ProcessPool(() => 1);
   const agent = new FakeAgentAdapter({
-    events: [[{ type: 'text', delta: 'OK' }, { type: 'done', terminationReason: 'normal' }]],
+    events: [
+      [
+        { type: 'text', delta: 'OK' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    ],
   });
   const profileConfig = createDefaultProfileConfig({
     agentKind: 'claude',

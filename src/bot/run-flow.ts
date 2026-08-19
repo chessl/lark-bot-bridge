@@ -144,14 +144,13 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
       policy,
       sessionId,
       threadId,
-      model: resolveModelArg(
-        input.profileConfig.agentKind,
-        input.profileConfig.preferences.model,
-      ),
+      model: resolveModelArg(input.profileConfig.agentKind, input.profileConfig.preferences.model),
       images:
         input.capability.agentId === 'codex' || input.capability.agentId === 'omp'
           ? policy.attachments
-              .filter((attachment) => attachment.kind === 'image' && attachment.decision === 'accepted')
+              .filter(
+                (attachment) => attachment.kind === 'image' && attachment.decision === 'accepted',
+              )
               .map((attachment) => attachment.path)
               .filter((path): path is string => Boolean(path))
           : undefined,
@@ -169,7 +168,7 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
               ? '当前 bot 正在重连，稍后会继续处理新消息。'
               : err.code === 'run-already-active'
                 ? '当前会话已有运行在执行，请稍后再试或先停止当前运行。'
-              : '当前无法发起运行，请稍后重试。',
+                : '当前无法发起运行，请稍后重试。',
         },
         workspace,
       };

@@ -153,11 +153,15 @@ export function runtimeProfileConfig(root: RootConfig, profile: string): AppConf
   }
   return {
     ...cfg,
-    ...(cfg.secrets ?? root.secrets ? { secrets: cfg.secrets ?? root.secrets } : {}),
+    ...((cfg.secrets ?? root.secrets) ? { secrets: cfg.secrets ?? root.secrets } : {}),
   };
 }
 
-export function createRootConfig(profile: string, cfg: ProfileConfig, secrets = cfg.secrets): RootConfig {
+export function createRootConfig(
+  profile: string,
+  cfg: ProfileConfig,
+  secrets = cfg.secrets,
+): RootConfig {
   return {
     schemaVersion: 2,
     activeProfile: profile,
@@ -197,7 +201,9 @@ export function markPermissionDefaultsMigration(root: RootConfig, profile: strin
   };
 }
 
-function normalizeRootMigrations(input: RootConfig['migrations'] | undefined): RootConfig['migrations'] | undefined {
+function normalizeRootMigrations(
+  input: RootConfig['migrations'] | undefined,
+): RootConfig['migrations'] | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
   const permissionDefaultsV1 = uniqueSortedStrings(input.permissionDefaultsV1);
   return permissionDefaultsV1.length > 0 ? { permissionDefaultsV1 } : undefined;
@@ -205,11 +211,14 @@ function normalizeRootMigrations(input: RootConfig['migrations'] | undefined): R
 
 function uniqueSortedStrings(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
-  return [...new Set(input
-    .filter((value): value is string => typeof value === 'string')
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0))]
-    .sort();
+  return [
+    ...new Set(
+      input
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  ].sort();
 }
 
 export interface RemoveProfileOptions {
@@ -283,7 +292,10 @@ async function nextArchivePath(trashDir: string, profile: string, now: Date): Pr
 }
 
 function archiveTimestamp(now: Date): string {
-  return now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  return now
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z');
 }
 
 async function pathExists(path: string): Promise<boolean> {

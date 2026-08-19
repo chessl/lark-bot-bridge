@@ -56,17 +56,21 @@ describe('profile runtime resolver', () => {
     const root = await tmpRoot();
     const configFile = join(root, 'config.json');
     const { backupFile, markerFile } = legacyLarkCliSourceOverlayPaths(configFile);
-    const original = `${JSON.stringify({
-      schemaVersion: 2,
-      activeProfile: 'codex',
-      profiles: {
-        codex: createDefaultProfileConfig({
-          agentKind: 'codex',
-          accounts: { app },
-          codex: { binaryPath: 'codex' },
-        }),
+    const original = `${JSON.stringify(
+      {
+        schemaVersion: 2,
+        activeProfile: 'codex',
+        profiles: {
+          codex: createDefaultProfileConfig({
+            agentKind: 'codex',
+            accounts: { app },
+            codex: { binaryPath: 'codex' },
+          }),
+        },
       },
-    }, null, 2)}\n`;
+      null,
+      2,
+    )}\n`;
     const overlay = `${JSON.stringify({ accounts: { app: { id: 'cli_overlay' } } }, null, 2)}\n`;
     await writeFile(backupFile, original, { mode: 0o600 });
     await writeFile(markerFile, `${JSON.stringify({ hadConfig: true, profile: 'codex' })}\n`, {
@@ -221,7 +225,9 @@ describe('profile runtime resolver', () => {
       tenant: 'feishu';
     });
 
-    const managed = await realpath(resolveAppPaths({ rootDir: root, profile: 'claude' }).defaultWorkspaceDir);
+    const managed = await realpath(
+      resolveAppPaths({ rootDir: root, profile: 'claude' }).defaultWorkspaceDir,
+    );
     const savedText = await readFile(join(root, 'config.json'), 'utf8');
     const saved = JSON.parse(savedText) as {
       profiles: Record<string, { workspaces?: { default?: string } }>;
@@ -324,10 +330,14 @@ describe('profile runtime resolver', () => {
     const root = await tmpRoot();
     await writeFile(
       join(root, 'config.json'),
-      `${JSON.stringify({
-        accounts: { app },
-        preferences: {},
-      }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          accounts: { app },
+          preferences: {},
+        },
+        null,
+        2,
+      )}\n`,
     );
 
     const runtime = await resolveProfileRuntime({
@@ -336,7 +346,9 @@ describe('profile runtime resolver', () => {
       allowBootstrap: true,
     });
 
-    const managed = await realpath(resolveAppPaths({ rootDir: root, profile: 'claude' }).defaultWorkspaceDir);
+    const managed = await realpath(
+      resolveAppPaths({ rootDir: root, profile: 'claude' }).defaultWorkspaceDir,
+    );
     const savedText = await readFile(join(root, 'config.json'), 'utf8');
     const saved = JSON.parse(savedText) as {
       profiles: Record<string, { workspaces?: { default?: string } }>;
@@ -351,10 +363,14 @@ describe('profile runtime resolver', () => {
     await mkdir(workspace, { recursive: true });
     await writeFile(
       join(root, 'config.json'),
-      `${JSON.stringify({
-        accounts: { app },
-        preferences: {},
-      }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          accounts: { app },
+          preferences: {},
+        },
+        null,
+        2,
+      )}\n`,
     );
 
     const runtime = await resolveProfileRuntime({
@@ -374,20 +390,24 @@ describe('profile runtime resolver', () => {
     await mkdir(workspace, { recursive: true });
     await writeFile(
       join(root, 'config.json'),
-      `${JSON.stringify({
-        accounts: { app },
-        preferences: {
-          messageReply: 'card',
-          showToolCalls: false,
-          maxConcurrentRuns: 3,
-          requireMentionInGroup: false,
-          access: {
-            allowedUsers: ['ou_allowed'],
-            allowedChats: ['oc_allowed'],
-            admins: ['ou_admin'],
+      `${JSON.stringify(
+        {
+          accounts: { app },
+          preferences: {
+            messageReply: 'card',
+            showToolCalls: false,
+            maxConcurrentRuns: 3,
+            requireMentionInGroup: false,
+            access: {
+              allowedUsers: ['ou_allowed'],
+              allowedChats: ['oc_allowed'],
+              admins: ['ou_admin'],
+            },
           },
         },
-      }, null, 2)}\n`,
+        null,
+        2,
+      )}\n`,
     );
 
     const runtime = await resolveProfileRuntime({
@@ -397,12 +417,15 @@ describe('profile runtime resolver', () => {
       allowBootstrap: false,
     });
     const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as {
-      profiles: Record<string, {
-        permissions?: unknown;
-        sandbox?: unknown;
-        access?: unknown;
-        preferences?: unknown;
-      }>;
+      profiles: Record<
+        string,
+        {
+          permissions?: unknown;
+          sandbox?: unknown;
+          access?: unknown;
+          preferences?: unknown;
+        }
+      >;
     };
 
     expect(runtime.profileConfig.permissions).toEqual({
@@ -448,10 +471,14 @@ describe('profile runtime resolver', () => {
     process.env.LARK_CHANNEL_HOME = root;
     await writeFile(
       join(root, 'config.json'),
-      `${JSON.stringify({
-        accounts: { app },
-        preferences: {},
-      }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          accounts: { app },
+          preferences: {},
+        },
+        null,
+        2,
+      )}\n`,
     );
 
     try {
@@ -487,10 +514,14 @@ describe('profile runtime resolver', () => {
     process.env.PATH = `${bin}${delimiter}${oldPath ?? ''}`;
     await writeFile(
       join(root, 'config.json'),
-      `${JSON.stringify({
-        accounts: { app },
-        preferences: {},
-      }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          accounts: { app },
+          preferences: {},
+        },
+        null,
+        2,
+      )}\n`,
     );
     await writeFile(
       join(root, 'sessions.json'),
@@ -512,8 +543,9 @@ describe('profile runtime resolver', () => {
       expect(runtime.profileConfig.codex?.realpath).toBeUndefined();
       expect(runtime.profileConfig.codex?.version).toBeUndefined();
       expect(runtime.profileConfig.codex?.sha256).toBeUndefined();
-      await expect(readFile(join(root, 'profiles', 'codex', 'sessions.json'), 'utf8')).resolves
-        .toContain('thread-1');
+      await expect(
+        readFile(join(root, 'profiles', 'codex', 'sessions.json'), 'utf8'),
+      ).resolves.toContain('thread-1');
       await expect(readFile(join(root, 'sessions.json'), 'utf8')).rejects.toMatchObject({
         code: 'ENOENT',
       });
@@ -528,17 +560,25 @@ describe('profile runtime resolver', () => {
     await mkdir(workspace, { recursive: true });
     await writeFile(
       join(root, 'config.json'),
-      `${JSON.stringify({
-        accounts: { app },
-        preferences: {},
-      }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          accounts: { app },
+          preferences: {},
+        },
+        null,
+        2,
+      )}\n`,
     );
     await writeFile(
       join(root, 'workspaces.json'),
-      `${JSON.stringify({
-        chats: { chat_a: { cwd: workspace } },
-        named: {},
-      }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          chats: { chat_a: { cwd: workspace } },
+          named: {},
+        },
+        null,
+        2,
+      )}\n`,
     );
 
     const runtime = await resolveProfileRuntime({
@@ -591,12 +631,15 @@ describe('profile runtime resolver', () => {
 
     const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
     const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as {
-      profiles: Record<string, {
-        permissions?: unknown;
-        sandbox?: unknown;
-        permissionSource?: unknown;
-        codex?: { inheritCodexHome?: boolean; ignoreUserConfig?: boolean };
-      }>;
+      profiles: Record<
+        string,
+        {
+          permissions?: unknown;
+          sandbox?: unknown;
+          permissionSource?: unknown;
+          codex?: { inheritCodexHome?: boolean; ignoreUserConfig?: boolean };
+        }
+      >;
     };
 
     expect(runtime.profileConfig.permissions).toEqual({
@@ -638,11 +681,14 @@ describe('profile runtime resolver', () => {
     const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
     const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as {
       migrations?: { permissionDefaultsV1?: string[] };
-      profiles: Record<string, {
-        permissions?: unknown;
-        sandbox?: unknown;
-        permissionSource?: unknown;
-      }>;
+      profiles: Record<
+        string,
+        {
+          permissions?: unknown;
+          sandbox?: unknown;
+          permissionSource?: unknown;
+        }
+      >;
     };
 
     expect(runtime.profileConfig.permissions).toEqual({
@@ -663,44 +709,47 @@ describe('profile runtime resolver', () => {
   });
 
   it('canonicalizes legacy Claude read-only sandbox without widening permissions', async () => {
-      const root = await tmpRoot();
-      const legacyClaude = createDefaultProfileConfig({
-        agentKind: 'claude',
-        accounts: { app },
-      }) as unknown as Record<string, unknown>;
-      legacyClaude.sandbox = {
-        default: 'read-only',
-        max: 'read-only',
-        defaultMode: 'read-only',
-        maxMode: 'read-only',
-      };
-      delete legacyClaude.permissions;
-      delete legacyClaude.permissionSource;
-      await writeProfileRoot(root, 'claude', { claude: legacyClaude });
+    const root = await tmpRoot();
+    const legacyClaude = createDefaultProfileConfig({
+      agentKind: 'claude',
+      accounts: { app },
+    }) as unknown as Record<string, unknown>;
+    legacyClaude.sandbox = {
+      default: 'read-only',
+      max: 'read-only',
+      defaultMode: 'read-only',
+      maxMode: 'read-only',
+    };
+    delete legacyClaude.permissions;
+    delete legacyClaude.permissionSource;
+    await writeProfileRoot(root, 'claude', { claude: legacyClaude });
 
-      const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
-      const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as {
-        profiles: Record<string, {
+    const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
+    const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as {
+      profiles: Record<
+        string,
+        {
           permissions?: unknown;
           sandbox?: unknown;
           permissionSource?: unknown;
-        }>;
-      };
+        }
+      >;
+    };
 
-      expect(runtime.profileConfig.permissions).toEqual({
-        defaultAccess: 'read-only',
-        maxAccess: 'read-only',
-      });
-      expect(runtime.profileConfig.sandbox).toMatchObject({
-        defaultMode: 'read-only',
-        maxMode: 'read-only',
-      });
-      expect(saved.profiles.claude?.permissions).toEqual({
-        defaultAccess: 'read-only',
-        maxAccess: 'read-only',
-      });
-      expect(saved.profiles.claude).not.toHaveProperty('sandbox');
-      expect(saved.profiles.claude).not.toHaveProperty('permissionSource');
+    expect(runtime.profileConfig.permissions).toEqual({
+      defaultAccess: 'read-only',
+      maxAccess: 'read-only',
+    });
+    expect(runtime.profileConfig.sandbox).toMatchObject({
+      defaultMode: 'read-only',
+      maxMode: 'read-only',
+    });
+    expect(saved.profiles.claude?.permissions).toEqual({
+      defaultAccess: 'read-only',
+      maxAccess: 'read-only',
+    });
+    expect(saved.profiles.claude).not.toHaveProperty('sandbox');
+    expect(saved.profiles.claude).not.toHaveProperty('permissionSource');
   });
 
   it('upgrades unmarked canonical Claude workspace defaults from internal migrations', async () => {
@@ -743,9 +792,14 @@ describe('profile runtime resolver', () => {
         maxAccess: 'workspace',
       },
     });
-    await writeProfileRoot(root, 'claude', { claude }, {
-      migrations: { permissionDefaultsV1: ['claude'] },
-    });
+    await writeProfileRoot(
+      root,
+      'claude',
+      { claude },
+      {
+        migrations: { permissionDefaultsV1: ['claude'] },
+      },
+    );
 
     const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
     const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as {
@@ -822,11 +876,14 @@ describe('profile runtime resolver', () => {
 
     const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
     const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as {
-      profiles: Record<string, {
-        permissions?: unknown;
-        sandbox?: unknown;
-        permissionSource?: unknown;
-      }>;
+      profiles: Record<
+        string,
+        {
+          permissions?: unknown;
+          sandbox?: unknown;
+          permissionSource?: unknown;
+        }
+      >;
     };
 
     expect(runtime.profileConfig.permissions).toEqual({
@@ -859,11 +916,14 @@ describe('profile runtime resolver', () => {
 
     const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
     const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as {
-      profiles: Record<string, {
-        permissions?: unknown;
-        sandbox?: unknown;
-        permissionSource?: unknown;
-      }>;
+      profiles: Record<
+        string,
+        {
+          permissions?: unknown;
+          sandbox?: unknown;
+          permissionSource?: unknown;
+        }
+      >;
     };
 
     expect(runtime.profileConfig.permissions).toEqual({
@@ -899,7 +959,10 @@ describe('profile runtime resolver', () => {
 
     const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
     const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as {
-      profiles: Record<string, { codex?: { inheritCodexHome?: boolean; ignoreUserConfig?: boolean } }>;
+      profiles: Record<
+        string,
+        { codex?: { inheritCodexHome?: boolean; ignoreUserConfig?: boolean } }
+      >;
     };
 
     expect(runtime.profileConfig.sandbox).toMatchObject({
@@ -933,7 +996,10 @@ describe('profile runtime resolver', () => {
 
     const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
     const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as {
-      profiles: Record<string, { codex?: { inheritCodexHome?: boolean; ignoreUserConfig?: boolean } }>;
+      profiles: Record<
+        string,
+        { codex?: { inheritCodexHome?: boolean; ignoreUserConfig?: boolean } }
+      >;
     };
 
     expect(runtime.profileConfig.codex?.inheritCodexHome).toBe(false);
@@ -953,7 +1019,9 @@ describe('profile runtime resolver', () => {
 
     const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
 
-    const managed = await realpath(resolveAppPaths({ rootDir: root, profile: 'claude' }).defaultWorkspaceDir);
+    const managed = await realpath(
+      resolveAppPaths({ rootDir: root, profile: 'claude' }).defaultWorkspaceDir,
+    );
     expect(runtime.profileConfig.workspaces.default).toBe(managed);
   });
 
@@ -1011,9 +1079,9 @@ describe('profile runtime resolver', () => {
       claude: createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } }),
     });
 
-    await expect(
-      resolveProfileRuntime({ config: join(root, 'config.json') }),
-    ).rejects.toThrow(/profile not found/i);
+    await expect(resolveProfileRuntime({ config: join(root, 'config.json') })).rejects.toThrow(
+      /profile not found/i,
+    );
   });
 
   it('bootstraps an explicit missing profile into an existing v2 root config', async () => {
@@ -1173,22 +1241,22 @@ async function writeProfileRoot(
   await mkdir(root, { recursive: true });
   await writeFile(
     join(root, 'config.json'),
-    `${JSON.stringify({
-      schemaVersion: 2,
-      activeProfile,
-      preferences: {},
-      ...extra,
-      profiles,
-    }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        schemaVersion: 2,
+        activeProfile,
+        preferences: {},
+        ...extra,
+        profiles,
+      },
+      null,
+      2,
+    )}\n`,
   );
   await writeFile(join(root, 'active-profile'), `${activeProfile}\n`);
 }
 
-async function withTty<T>(
-  stdinTTY: boolean,
-  stdoutTTY: boolean,
-  fn: () => Promise<T>,
-): Promise<T> {
+async function withTty<T>(stdinTTY: boolean, stdoutTTY: boolean, fn: () => Promise<T>): Promise<T> {
   const stdinDesc = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
   const stdoutDesc = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
   Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: stdinTTY });

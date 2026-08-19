@@ -16,10 +16,10 @@ describe('Claude stream-json translator', () => {
         cwd: '/repo',
         model: 'sonnet',
       }),
-    ]).toEqual([
-      { type: 'system', sessionId: 'sess-1', cwd: '/repo', model: 'sonnet' },
-    ]);
-    expect([...translateEvent({ type: 'system', subtype: 'init', session_id: 'sess-1' })][0]).not.toHaveProperty('threadId');
+    ]).toEqual([{ type: 'system', sessionId: 'sess-1', cwd: '/repo', model: 'sonnet' }]);
+    expect(
+      [...translateEvent({ type: 'system', subtype: 'init', session_id: 'sess-1' })][0],
+    ).not.toHaveProperty('threadId');
   });
 
   it('translates assistant text, thinking, and tool_use blocks in order', () => {
@@ -80,13 +80,22 @@ describe('Claude stream-json translator', () => {
       { type: 'usage', inputTokens: 12, outputTokens: 34, cachedInputTokens: 5, costUsd: 0.1234 },
       { type: 'done', sessionId: 'sess-2', terminationReason: 'normal' },
     ]);
-    expect([...translateEvent({ type: 'result', session_id: 'sess-2' })][0]).not.toHaveProperty('threadId');
+    expect([...translateEvent({ type: 'result', session_id: 'sess-2' })][0]).not.toHaveProperty(
+      'threadId',
+    );
   });
 
   it('ignores unknown, empty, and incomplete raw events', () => {
     expect([...translateEvent(null)]).toEqual([]);
-    expect([...translateEvent({ type: 'assistant', message: { content: [{ type: 'text', text: '' }] } })]).toEqual([]);
-    expect([...translateEvent({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't' }] } })]).toEqual([]);
+    expect([
+      ...translateEvent({ type: 'assistant', message: { content: [{ type: 'text', text: '' }] } }),
+    ]).toEqual([]);
+    expect([
+      ...translateEvent({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't' }] },
+      }),
+    ]).toEqual([]);
     expect([...translateEvent({ type: 'system', subtype: 'other' })]).toEqual([]);
   });
 });
@@ -101,10 +110,17 @@ describe('Claude stream-json reader behavior', () => {
 
   it('skips non-JSON stdout lines and reports non-zero stderr detail without redacting visible paths', async () => {
     const stderr = 'fatal stderr at /Users/example/work/repo/file.ts';
-    const binary = await createFakeBinary([
-      'not json',
-      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'kept' }] } }),
-    ], 7, stderr);
+    const binary = await createFakeBinary(
+      [
+        'not json',
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'kept' }] },
+        }),
+      ],
+      7,
+      stderr,
+    );
     cleanup = binary.cleanup;
 
     const run = new ClaudeAdapter({ binary: binary.path }).run({
@@ -131,7 +147,11 @@ async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]>
   return out;
 }
 
-async function createFakeBinary(lines: string[], exitCode: number, stderr: string): Promise<{
+async function createFakeBinary(
+  lines: string[],
+  exitCode: number,
+  stderr: string,
+): Promise<{
   path: string;
   cleanup(): Promise<void>;
 }> {

@@ -40,8 +40,12 @@ describe('resolveAppPaths', () => {
     expect(paths.registryDir).toBe(join(root, 'registry'));
     expect(paths.userRegistryFile).toBe(join(root, 'registry', 'processes.json'));
     expect(paths.userLockDir).toBe(join(root, 'registry', 'locks'));
-    expect(paths.profileLockFile).toBe(join(root, 'registry', 'locks', 'profile', 'codex-dev.lock'));
-    expect(paths.appLockFile('cli_app')).toBe(join(root, 'registry', 'locks', 'app', 'cli_app.lock'));
+    expect(paths.profileLockFile).toBe(
+      join(root, 'registry', 'locks', 'profile', 'codex-dev.lock'),
+    );
+    expect(paths.appLockFile('cli_app')).toBe(
+      join(root, 'registry', 'locks', 'app', 'cli_app.lock'),
+    );
   });
 
   it('places runtime state inside the selected profile directory', async () => {
@@ -59,7 +63,9 @@ describe('resolveAppPaths', () => {
     expect(paths.larkCliConfigDir).toBe(join(profileDir, 'lark-cli'));
     expect(paths.larkCliSourceDir).toBe(join(profileDir, 'lark-cli-source'));
     expect(paths.larkCliSourceConfigFile).toBe(join(profileDir, 'lark-cli-source', 'config.json'));
-    expect(paths.larkCliTargetConfigFile).toBe(join(profileDir, 'lark-cli', 'lark-channel', 'config.json'));
+    expect(paths.larkCliTargetConfigFile).toBe(
+      join(profileDir, 'lark-cli', 'lark-channel', 'config.json'),
+    );
     expect(paths.mediaDir).toBe(join(profileDir, 'media'));
     expect(paths.logsDir).toBe(join(profileDir, 'logs'));
     expect(paths.secretsGetterScript).toBe(join(root, 'secrets-getter'));
@@ -86,12 +92,20 @@ describe('resolveAppPaths', () => {
   it('rejects profile names that cannot be used directly in locks and service ids', async () => {
     const root = await tempRoot();
 
-    expect(() => resolveAppPaths({ rootDir: root, profile: 'codex dev' })).toThrow(/invalid profile name/i);
+    expect(() => resolveAppPaths({ rootDir: root, profile: 'codex dev' })).toThrow(
+      /invalid profile name/i,
+    );
     expect(() => resolveAppPaths({ rootDir: root, profile: 'b64_Y29kZXggZGV2' })).not.toThrow();
     // Path-dangerous / reserved chars are still rejected.
-    expect(() => resolveAppPaths({ rootDir: root, profile: 'a/b' })).toThrow(/invalid profile name/i);
-    expect(() => resolveAppPaths({ rootDir: root, profile: '..' })).toThrow(/invalid profile name/i);
-    expect(() => resolveAppPaths({ rootDir: root, profile: 'a:b' })).toThrow(/invalid profile name/i);
+    expect(() => resolveAppPaths({ rootDir: root, profile: 'a/b' })).toThrow(
+      /invalid profile name/i,
+    );
+    expect(() => resolveAppPaths({ rootDir: root, profile: '..' })).toThrow(
+      /invalid profile name/i,
+    );
+    expect(() => resolveAppPaths({ rootDir: root, profile: 'a:b' })).toThrow(
+      /invalid profile name/i,
+    );
   });
 
   it('accepts Unicode profile names (e.g. a Chinese bot name) as a directory segment', async () => {

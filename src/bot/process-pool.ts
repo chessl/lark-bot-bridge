@@ -30,7 +30,11 @@ export class ProcessPool {
       log.info('pool', 'acquired', { active: this.active, cap: this.cap() });
       return () => this.release();
     }
-    log.info('pool', 'wait', { active: this.active, cap: this.cap(), waiting: this.waiters.length + 1 });
+    log.info('pool', 'wait', {
+      active: this.active,
+      cap: this.cap(),
+      waiting: this.waiters.length + 1,
+    });
     await new Promise<void>((resolve) => this.waiters.push(resolve));
     this.active++;
     log.info('pool', 'acquired', { active: this.active, cap: this.cap() });

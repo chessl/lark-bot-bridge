@@ -6,10 +6,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../../../src/config/schema';
-import {
-  createDefaultProfileConfig,
-  type RootConfig,
-} from '../../../src/config/profile-schema';
+import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import { loadRootConfig, saveRootConfig } from '../../../src/config/profile-store';
 
 const mocks = vi.hoisted(() => ({
@@ -23,7 +20,9 @@ const mocks = vi.hoisted(() => ({
   }>,
   exitCodes: [] as number[],
   outputs: [] as string[],
-  onSpawn: undefined as undefined | ((callIndex: number, args: string[], env?: NodeJS.ProcessEnv) => void),
+  onSpawn: undefined as
+    | undefined
+    | ((callIndex: number, args: string[], env?: NodeJS.ProcessEnv) => void),
 }));
 
 vi.mock('../../../src/platform/atomic-write', async () => {
@@ -163,16 +162,20 @@ describe('lark-cli preflight', () => {
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'codex' });
     await writeFile(
       appPaths.configFile,
-      `${JSON.stringify({
-        schemaVersion: 2,
-        activeProfile: 'codex',
-        profiles: {
-          codex: {
-            accounts: bridgeConfig.accounts,
-            agentKind: 'codex',
+      `${JSON.stringify(
+        {
+          schemaVersion: 2,
+          activeProfile: 'codex',
+          profiles: {
+            codex: {
+              accounts: bridgeConfig.accounts,
+              agentKind: 'codex',
+            },
           },
         },
-      }, null, 2)}\n`,
+        null,
+        2,
+      )}\n`,
       { mode: 0o600 },
     );
     const originalRoot = await readFile(appPaths.configFile, 'utf8');
@@ -231,16 +234,20 @@ describe('lark-cli preflight', () => {
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'codex' });
     await writeFile(
       appPaths.configFile,
-      `${JSON.stringify({
-        schemaVersion: 2,
-        activeProfile: 'codex',
-        profiles: {
-          codex: {
-            accounts: bridgeConfig.accounts,
-            agentKind: 'codex',
+      `${JSON.stringify(
+        {
+          schemaVersion: 2,
+          activeProfile: 'codex',
+          profiles: {
+            codex: {
+              accounts: bridgeConfig.accounts,
+              agentKind: 'codex',
+            },
           },
         },
-      }, null, 2)}\n`,
+        null,
+        2,
+      )}\n`,
       { mode: 0o600 },
     );
     mocks.exitCodes = [2, 0];
@@ -276,16 +283,20 @@ describe('lark-cli preflight', () => {
   it('restores the bridge root config when legacy overlay bind fails', async () => {
     const root = await tempRoot();
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'codex' });
-    const originalRoot = `${JSON.stringify({
-      schemaVersion: 2,
-      activeProfile: 'codex',
-      profiles: {
-        codex: {
-          accounts: bridgeConfig.accounts,
-          agentKind: 'codex',
+    const originalRoot = `${JSON.stringify(
+      {
+        schemaVersion: 2,
+        activeProfile: 'codex',
+        profiles: {
+          codex: {
+            accounts: bridgeConfig.accounts,
+            agentKind: 'codex',
+          },
         },
       },
-    }, null, 2)}\n`;
+      null,
+      2,
+    )}\n`;
     await writeFile(appPaths.configFile, originalRoot, { mode: 0o600 });
     mocks.exitCodes = [2, 3];
     mocks.outputs = [
@@ -312,16 +323,20 @@ describe('lark-cli preflight', () => {
   it('does not overlay the bridge root config when lark-cli is too old for lark-channel source', async () => {
     const root = await tempRoot();
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'codex' });
-    const originalRoot = `${JSON.stringify({
-      schemaVersion: 2,
-      activeProfile: 'codex',
-      profiles: {
-        codex: {
-          accounts: bridgeConfig.accounts,
-          agentKind: 'codex',
+    const originalRoot = `${JSON.stringify(
+      {
+        schemaVersion: 2,
+        activeProfile: 'codex',
+        profiles: {
+          codex: {
+            accounts: bridgeConfig.accounts,
+            agentKind: 'codex',
+          },
         },
       },
-    }, null, 2)}\n`;
+      null,
+      2,
+    )}\n`;
     await writeFile(appPaths.configFile, originalRoot, { mode: 0o600 });
     mocks.exitCodes = [2];
     mocks.outputs = ['invalid --source "lark-channel"; valid values: env, file'];
@@ -347,26 +362,25 @@ describe('lark-cli preflight', () => {
   it('treats lark-cli builds without config bind source support as too old', async () => {
     const root = await tempRoot();
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'codex' });
-    const originalRoot = `${JSON.stringify({
-      schemaVersion: 2,
-      activeProfile: 'codex',
-      profiles: {
-        codex: {
-          accounts: bridgeConfig.accounts,
-          agentKind: 'codex',
+    const originalRoot = `${JSON.stringify(
+      {
+        schemaVersion: 2,
+        activeProfile: 'codex',
+        profiles: {
+          codex: {
+            accounts: bridgeConfig.accounts,
+            agentKind: 'codex',
+          },
         },
       },
-    }, null, 2)}\n`;
+      null,
+      2,
+    )}\n`;
     await writeFile(appPaths.configFile, originalRoot, { mode: 0o600 });
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     mocks.exitCodes = [1];
     mocks.outputs = [
-      [
-        'Usage:',
-        '  lark-cli config [command]',
-        '',
-        'Error: unknown flag: --source',
-      ].join('\n'),
+      ['Usage:', '  lark-cli config [command]', '', 'Error: unknown flag: --source'].join('\n'),
     ];
 
     let printed = '';
@@ -482,9 +496,7 @@ describe('lark-cli preflight', () => {
       appPaths,
     });
 
-    expect(mocks.calls.map((call) => call.args)).toEqual([
-      ['config', 'show'],
-    ]);
+    expect(mocks.calls.map((call) => call.args)).toEqual([['config', 'show']]);
     expect(mocks.calls[0]?.env).toMatchObject({
       LARK_CHANNEL_CONFIG: appPaths.larkCliSourceConfigFile,
       LARKSUITE_CLI_CONFIG_DIR: appPaths.larkCliConfigDir,
@@ -525,9 +537,7 @@ describe('lark-cli preflight', () => {
       appPaths,
     });
 
-    expect(mocks.calls.map((call) => call.args)).toEqual([
-      ['config', 'show'],
-    ]);
+    expect(mocks.calls.map((call) => call.args)).toEqual([['config', 'show']]);
     const saved = await loadRootConfig(appPaths.configFile);
     expect(saved?.profiles.codex?.larkCli).toMatchObject({
       identityPreset: 'user-default',
@@ -643,12 +653,15 @@ describe('lark-cli preflight', () => {
         reason: 'manual-bot-only',
       },
     };
-    await saveRootConfig({
-      schemaVersion: 2,
-      activeProfile: 'codex',
-      preferences: {},
-      profiles: { codex: profileConfig },
-    }, appPaths.configFile);
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'codex',
+        preferences: {},
+        profiles: { codex: profileConfig },
+      },
+      appPaths.configFile,
+    );
     await mkdir(join(appPaths.larkCliConfigDir, 'lark-channel'), { recursive: true });
     await writeFile(
       appPaths.larkCliTargetConfigFile,
@@ -789,17 +802,21 @@ describe('lark-cli preflight', () => {
     await mkdir(join(appPaths.larkCliConfigDir, 'lark-channel'), { recursive: true });
     await writeFile(
       appPaths.larkCliTargetConfigFile,
-      JSON.stringify({
-        apps: [
-          {
-            appId: 'cli_codex',
-            brand: 'feishu',
-            defaultAs: 'bot',
-            strictMode: 'bot',
-            users: null,
-          },
-        ],
-      }, null, 2),
+      JSON.stringify(
+        {
+          apps: [
+            {
+              appId: 'cli_codex',
+              brand: 'feishu',
+              defaultAs: 'bot',
+              strictMode: 'bot',
+              users: null,
+            },
+          ],
+        },
+        null,
+        2,
+      ),
       { mode: 0o600 },
     );
     mocks.exitCodes = [0, 0];
@@ -867,17 +884,21 @@ describe('lark-cli preflight', () => {
     await mkdir(join(appPaths.larkCliConfigDir, 'lark-channel'), { recursive: true });
     await writeFile(
       appPaths.larkCliTargetConfigFile,
-      JSON.stringify({
-        apps: [
-          {
-            appId: 'cli_codex',
-            brand: 'feishu',
-            defaultAs: 'bot',
-            strictMode: 'bot',
-            users: '(no logged-in users)',
-          },
-        ],
-      }, null, 2),
+      JSON.stringify(
+        {
+          apps: [
+            {
+              appId: 'cli_codex',
+              brand: 'feishu',
+              defaultAs: 'bot',
+              strictMode: 'bot',
+              users: '(no logged-in users)',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
       { mode: 0o600 },
     );
     mocks.exitCodes = [0, 0];
@@ -919,17 +940,21 @@ describe('lark-cli preflight', () => {
     await mkdir(join(appPaths.larkCliConfigDir, 'lark-channel'), { recursive: true });
     await writeFile(
       appPaths.larkCliTargetConfigFile,
-      JSON.stringify({
-        apps: [
-          {
-            appId: 'cli_codex',
-            brand: 'feishu',
-            defaultAs: 'bot',
-            strictMode: 'bot',
-            users: '(no logged-in users)',
-          },
-        ],
-      }, null, 2),
+      JSON.stringify(
+        {
+          apps: [
+            {
+              appId: 'cli_codex',
+              brand: 'feishu',
+              defaultAs: 'bot',
+              strictMode: 'bot',
+              users: '(no logged-in users)',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
       { mode: 0o600 },
     );
     mocks.atomicWriteFailures = [
@@ -950,9 +975,7 @@ describe('lark-cli preflight', () => {
       appPaths,
     });
 
-    expect(mocks.calls.map((call) => call.args)).toEqual([
-      ['config', 'show'],
-    ]);
+    expect(mocks.calls.map((call) => call.args)).toEqual([['config', 'show']]);
     expect(warn).toHaveBeenCalledWith(
       'lark-cli',
       'private-target-repair-failed',
@@ -974,15 +997,19 @@ describe('lark-cli preflight', () => {
     ];
     await writeFile(
       localConfig,
-      JSON.stringify({
-        apps: [
-          {
-            appId: 'cli_codex',
-            brand: 'feishu',
-            users,
-          },
-        ],
-      }, null, 2),
+      JSON.stringify(
+        {
+          apps: [
+            {
+              appId: 'cli_codex',
+              brand: 'feishu',
+              users,
+            },
+          ],
+        },
+        null,
+        2,
+      ),
       { mode: 0o600 },
     );
     await mkdir(join(appPaths.larkCliConfigDir, 'lark-channel'), { recursive: true });
@@ -990,17 +1017,21 @@ describe('lark-cli preflight', () => {
       if (callIndex !== 2) return;
       writeFileSync(
         appPaths.larkCliTargetConfigFile,
-        JSON.stringify({
-          apps: [
-            {
-              appId: 'cli_codex',
-              brand: 'feishu',
-              defaultAs: 'bot',
-              strictMode: 'bot',
-              users: null,
-            },
-          ],
-        }, null, 2),
+        JSON.stringify(
+          {
+            apps: [
+              {
+                appId: 'cli_codex',
+                brand: 'feishu',
+                defaultAs: 'bot',
+                strictMode: 'bot',
+                users: null,
+              },
+            ],
+          },
+          null,
+          2,
+        ),
       );
     };
     mocks.exitCodes = [0, 0, 0, 0, 0];
@@ -1141,12 +1172,15 @@ describe('lark-cli preflight', () => {
         reason: 'same-app-local-user',
       },
     };
-    await saveRootConfig({
-      schemaVersion: 2,
-      activeProfile: 'codex',
-      preferences: {},
-      profiles: { codex: profileConfig },
-    }, appPaths.configFile);
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'codex',
+        preferences: {},
+        profiles: { codex: profileConfig },
+      },
+      appPaths.configFile,
+    );
     mocks.atomicWriteFailures = [
       { path: appPaths.configFile, err: new Error('root config readonly') },
     ];
@@ -1217,7 +1251,10 @@ describe('lark-cli preflight', () => {
   });
 });
 
-async function writeRootConfig(configPath: string, profile: string): Promise<RootConfig['profiles'][string]> {
+async function writeRootConfig(
+  configPath: string,
+  profile: string,
+): Promise<RootConfig['profiles'][string]> {
   const profileConfig = createDefaultProfileConfig({
     agentKind: 'codex',
     accounts: bridgeConfig.accounts,

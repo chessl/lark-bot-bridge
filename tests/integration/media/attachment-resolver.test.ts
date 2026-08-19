@@ -45,7 +45,6 @@ describe('hash media attachment resolver', () => {
     expect(await readFile(attachment!.absPath, 'utf8')).toBe('image-bytes');
   });
 
-
   it('garbage-collects old cache files by TTL', async () => {
     const root = await tempDir();
     const oldPath = join(root, 'old.bin');

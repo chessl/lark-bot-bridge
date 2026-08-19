@@ -12,7 +12,9 @@ import {
 const ctx = { profile: 'claude', rootDir: '/tmp/lark-home' };
 
 /** Build a stub exec that returns canned output based on the args. */
-function stub(map: (args: string[]) => { code?: number; stdout?: string; stderr?: string }): LarkCliExec {
+function stub(
+  map: (args: string[]) => { code?: number; stdout?: string; stderr?: string },
+): LarkCliExec {
   return vi.fn(async (args: string[]) => ({
     code: 0,
     stdout: '',
@@ -50,7 +52,9 @@ describe('user-im lark-cli helpers', () => {
 
   it('reports not-logged-in when the user identity is unavailable', async () => {
     const exec = stub(() => ({
-      stdout: JSON.stringify({ identities: { user: { status: 'not_authorized', available: false } } }),
+      stdout: JSON.stringify({
+        identities: { user: { status: 'not_authorized', available: false } },
+      }),
     }));
     const status = await getUserAuthStatus(ctx, exec);
     expect(status.loggedIn).toBe(false);
@@ -82,14 +86,19 @@ describe('user-im lark-cli helpers', () => {
 
   it('throws a clear error when device login yields no URL', async () => {
     const exec = stub(() => ({ code: 1, stderr: 'app not bound' }));
-    await expect(startDeviceLogin(ctx, ['im:chat:read'], exec)).rejects.toThrow(/app not bound|验证链接/);
+    await expect(startDeviceLogin(ctx, ['im:chat:read'], exec)).rejects.toThrow(
+      /app not bound|验证链接/,
+    );
   });
 
   it('completes device login (ok on exit 0, error otherwise)', async () => {
     const okExec = stub(() => ({ code: 0, stdout: '{"ok":true}' }));
     expect(await completeDeviceLogin(ctx, 'dev-123', okExec)).toEqual({ ok: true });
 
-    const pendingExec = stub(() => ({ code: 1, stdout: JSON.stringify({ message: 'authorization_pending' }) }));
+    const pendingExec = stub(() => ({
+      code: 1,
+      stdout: JSON.stringify({ message: 'authorization_pending' }),
+    }));
     const r = await completeDeviceLogin(ctx, 'dev-123', pendingExec);
     expect(r.ok).toBe(false);
     expect(r.message).toContain('authorization_pending');
@@ -131,7 +140,11 @@ describe('user-im lark-cli helpers', () => {
     const exec = stub((args) => {
       expect(args).toContain('--page-token');
       expect(args[args.indexOf('--page-token') + 1]).toBe('tok-2');
-      return { stdout: JSON.stringify({ data: { has_more: false, page_token: '', chats: [{ chat_id: 'oc_9', name: 'g' }] } }) };
+      return {
+        stdout: JSON.stringify({
+          data: { has_more: false, page_token: '', chats: [{ chat_id: 'oc_9', name: 'g' }] },
+        }),
+      };
     });
     const page = await listUserChats(ctx, { pageToken: 'tok-2' }, exec);
     expect(page.chats).toEqual([{ id: 'oc_9', name: 'g' }]);

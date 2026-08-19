@@ -66,7 +66,10 @@ export function sendJs(res: ServerResponse, js: string): void {
 
 /** HTTP-shaped error the servers turn into a JSON error response. */
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
     super(message);
   }
 }

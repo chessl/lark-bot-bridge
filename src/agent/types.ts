@@ -44,7 +44,7 @@ export interface AgentRunOptions {
    * lark-cli mid-OAuth) clean up before the kernel reaps the tree.
    * Adapters that don't kill via signals are free to ignore this. Defaults
    * are adapter-specific.
-  */
+   */
   stopGraceMs?: number;
 }
 

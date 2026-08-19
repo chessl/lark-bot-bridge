@@ -5,10 +5,16 @@ import { unpackActivity } from '../../../src/meeting/types';
 import { matchTrigger, triggerPrefixes } from '../../../src/meeting/orchestrator';
 import type { RawActivityItem, VcRequestClient } from '../../../src/meeting/api';
 
-const noopClient: VcRequestClient = { request: vi.fn(async () => ({ code: 0, data: {} }) as never) };
+const noopClient: VcRequestClient = {
+  request: vi.fn(async () => ({ code: 0, data: {} }) as never),
+};
 
 function cfg(over: Partial<MeetingConfig> = {}): MeetingConfig {
-  return { ...MEETING_DEFAULTS, ...over, transcript: { ...MEETING_DEFAULTS.transcript, ...over.transcript } };
+  return {
+    ...MEETING_DEFAULTS,
+    ...over,
+    transcript: { ...MEETING_DEFAULTS.transcript, ...over.transcript },
+  };
 }
 
 function session(config = cfg(), botOpenId = 'ou_bot'): MeetingSession {
@@ -24,7 +30,11 @@ function session(config = cfg(), botOpenId = 'ou_bot'): MeetingSession {
 /** One activity item carrying N transcript lines (the real aggregated shape). */
 function transcriptItem(
   eventId: string,
-  items: { sentence_id: string | number; text: string; speaker?: { open_id?: string; name?: string } }[],
+  items: {
+    sentence_id: string | number;
+    text: string;
+    speaker?: { open_id?: string; name?: string };
+  }[],
 ): RawActivityItem {
   return {
     event_id: eventId,
@@ -53,7 +63,11 @@ describe('unpackActivity (two-layer unpack)', () => {
       '今天来讨论',
       '好的',
     ]);
-    expect(events[0]).toMatchObject({ kind: 'transcript', sentenceId: '100001', speaker: { name: '甲' } });
+    expect(events[0]).toMatchObject({
+      kind: 'transcript',
+      sentenceId: '100001',
+      speaker: { name: '甲' },
+    });
   });
 
   it('flags the bot own speech as selfEcho', () => {
@@ -73,7 +87,9 @@ describe('unpackActivity (two-layer unpack)', () => {
       unpackActivity({
         event_id: 'c1',
         activity_event_type: 'chat_received',
-        chat_received_items: [{ content: '@bot 什么进度', message_type: 1, sender: { name: '甲' } }],
+        chat_received_items: [
+          { content: '@bot 什么进度', message_type: 1, sender: { name: '甲' } },
+        ],
       }),
     ).toEqual([{ kind: 'chat', from: { name: '甲' }, content: '@bot 什么进度', messageType: 1 }]);
 
@@ -83,7 +99,14 @@ describe('unpackActivity (two-layer unpack)', () => {
         activity_event_type: 'participant_left',
         participant_left_items: [{ user: { open_id: 'ou_a', name: '甲' }, leave_reason: 'hangup' }],
       }),
-    ).toEqual([{ kind: 'participant', action: 'left', user: { id: 'ou_a', name: '甲' }, leaveReason: 'hangup' }]);
+    ).toEqual([
+      {
+        kind: 'participant',
+        action: 'left',
+        user: { id: 'ou_a', name: '甲' },
+        leaveReason: 'hangup',
+      },
+    ]);
 
     expect(
       unpackActivity({
@@ -96,7 +119,9 @@ describe('unpackActivity (two-layer unpack)', () => {
 
   it('ignores unknown activity types and missing arrays', () => {
     expect(unpackActivity({ event_id: 'x', activity_event_type: 'future_type' })).toEqual([]);
-    expect(unpackActivity({ event_id: 'x', activity_event_type: 'transcript_received' })).toEqual([]);
+    expect(unpackActivity({ event_id: 'x', activity_event_type: 'transcript_received' })).toEqual(
+      [],
+    );
     expect(unpackActivity({})).toEqual([]);
   });
 });
@@ -121,8 +146,12 @@ describe('MeetingSession ingest pipeline', () => {
     s.on('transcript', (e) => emitted.push(e.kind === 'transcript' ? e.text : ''));
 
     s.ingest(transcriptItem('e1', [{ sentence_id: 7, text: '今天', speaker: { name: '甲' } }]));
-    s.ingest(transcriptItem('e2', [{ sentence_id: 7, text: '今天来讨论', speaker: { name: '甲' } }]));
-    s.ingest(transcriptItem('e3', [{ sentence_id: 7, text: '今天来讨论', speaker: { name: '甲' } }]));
+    s.ingest(
+      transcriptItem('e2', [{ sentence_id: 7, text: '今天来讨论', speaker: { name: '甲' } }]),
+    );
+    s.ingest(
+      transcriptItem('e3', [{ sentence_id: 7, text: '今天来讨论', speaker: { name: '甲' } }]),
+    );
 
     // Every change is emitted (stabilizeMs = 0), but the repeat is dropped.
     expect(emitted).toEqual(['今天', '今天来讨论']);
@@ -150,7 +179,9 @@ describe('MeetingSession ingest pipeline', () => {
 
     s.ingest(transcriptItem('e1', [{ sentence_id: 9, text: '今天', speaker: { name: '甲' } }]));
     vi.advanceTimersByTime(500);
-    s.ingest(transcriptItem('e2', [{ sentence_id: 9, text: '今天来讨论', speaker: { name: '甲' } }]));
+    s.ingest(
+      transcriptItem('e2', [{ sentence_id: 9, text: '今天来讨论', speaker: { name: '甲' } }]),
+    );
     expect(emitted).toEqual([]); // still growing
 
     vi.advanceTimersByTime(800);
@@ -160,7 +191,9 @@ describe('MeetingSession ingest pipeline', () => {
   it('caps the rolling buffer at transcript.keep', () => {
     const s = session(cfg({ transcript: { keep: 3, stabilizeMs: 0 } }));
     for (let i = 1; i <= 5; i++) {
-      s.ingest(transcriptItem(`e${i}`, [{ sentence_id: i, text: `第${i}句`, speaker: { name: '甲' } }]));
+      s.ingest(
+        transcriptItem(`e${i}`, [{ sentence_id: i, text: `第${i}句`, speaker: { name: '甲' } }]),
+      );
     }
     expect(s.recentTranscript()).toEqual(['甲: 第3句', '甲: 第4句', '甲: 第5句']);
   });
@@ -182,7 +215,9 @@ describe('MeetingSession ingest pipeline', () => {
   });
 
   it('stops ingesting once the meeting ended, and leave() is idempotent', async () => {
-    const client: VcRequestClient = { request: vi.fn(async () => ({ code: 0, data: {} }) as never) };
+    const client: VcRequestClient = {
+      request: vi.fn(async () => ({ code: 0, data: {} }) as never),
+    };
     const s = new MeetingSession({
       client,
       meetingId: '70001',
@@ -222,7 +257,9 @@ describe('MeetingSession ingest pipeline', () => {
     s.ingest({
       event_id: 'p1',
       event_type: 'transcript_received',
-      payload: { transcript_received_items: [{ sentence_id: 5, text: '嵌套的', speaker: { name: '乙' } }] },
+      payload: {
+        transcript_received_items: [{ sentence_id: 5, text: '嵌套的', speaker: { name: '乙' } }],
+      },
     } as never);
     expect(s.recentTranscript()).toEqual(['乙: 嵌套的']);
   });
@@ -245,7 +282,12 @@ describe('MeetingSession ingest pipeline', () => {
     const item = {
       activity_event_type: 'chat_received',
       chat_received_items: [
-        { content: '@bot 在吗', message_type: 1, create_time: '1700000000', sender: { open_id: 'ou_a' } },
+        {
+          content: '@bot 在吗',
+          message_type: 1,
+          create_time: '1700000000',
+          sender: { open_id: 'ou_a' },
+        },
       ],
     };
     s.ingest({ ...item });

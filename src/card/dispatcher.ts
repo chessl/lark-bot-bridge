@@ -169,11 +169,7 @@ function forwardToAgent(
   mode: 'p2p' | 'group' | 'topic',
 ): void {
   // Strip the marker so the agent only sees the meaningful fields it set.
-  const {
-    [BRIDGE_CALLBACK_MARKER]: _marker,
-    bridge_token: _token,
-    ...agentPayload
-  } = payload;
+  const { [BRIDGE_CALLBACK_MARKER]: _marker, bridge_token: _token, ...agentPayload } = payload;
   const merged = formValue ? { ...agentPayload, form_value: formValue } : agentPayload;
   log.info('cardAction', 'forward-agent', {
     scope,
@@ -217,9 +213,7 @@ function verifyBridgeToken(
     operatorOpenId: deps.evt.operator.openId,
     action,
     policyFingerprint:
-      deps.callbackPolicyFingerprintForScope?.(scope) ??
-      deps.callbackPolicyFingerprint ??
-      '',
+      deps.callbackPolicyFingerprintForScope?.(scope) ?? deps.callbackPolicyFingerprint ?? '',
   });
   if (!result.ok) {
     log.info('cardAction', 'skip-callback-auth-failed', {
@@ -249,10 +243,7 @@ function composeArgs(sub: string, payload: Record<string, unknown>): string {
   return arg ? `${sub} ${arg}` : sub;
 }
 
-function makeFakeMsg(
-  evt: CardActionEvent,
-  threadId: string | undefined,
-): NormalizedMessage {
+function makeFakeMsg(evt: CardActionEvent, threadId: string | undefined): NormalizedMessage {
   return {
     messageId: evt.messageId,
     chatId: evt.chatId,

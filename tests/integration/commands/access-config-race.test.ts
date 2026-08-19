@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizedMessage } from '@larksuite/channel';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import type { CommandContext, Controls } from '../../../src/commands/index.js';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import {
+  createDefaultProfileConfig,
+  type ProfileConfig,
+} from '../../../src/config/profile-schema.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { createFakeAgent } from '../../helpers/fake-agent.js';
@@ -41,8 +44,7 @@ const saveGate = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/config/profile-store.js', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../../src/config/profile-store.js')>();
+  const actual = await importOriginal<typeof import('../../../src/config/profile-store.js')>();
   return {
     ...actual,
     saveRootConfig: vi.fn(async (...args: Parameters<typeof actual.saveRootConfig>) => {
@@ -88,7 +90,10 @@ async function createHarness(): Promise<{
   const profileConfig = appConfig(await realpath(tmp.workspace));
   const { createRootConfig } = await import('../../../src/config/profile-store.js');
   await mkdir(tmp.root, { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(createRootConfig('claude', profileConfig), null, 2)}\n`);
+  await writeFile(
+    configPath,
+    `${JSON.stringify(createRootConfig('claude', profileConfig), null, 2)}\n`,
+  );
 
   const channel = createFakeChannel();
   const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
@@ -142,10 +147,7 @@ function appConfig(defaultWorkspace: string): ProfileConfig {
   return config;
 }
 
-function message(
-  content: string,
-  mentions: NormalizedMessage['mentions'],
-): NormalizedMessage {
+function message(content: string, mentions: NormalizedMessage['mentions']): NormalizedMessage {
   return {
     messageId: `om-${content.replace(/\W+/g, '-').slice(0, 20)}`,
     chatId: 'chat-1',

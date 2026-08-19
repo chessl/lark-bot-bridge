@@ -62,7 +62,9 @@ export interface ResolveProfileRuntimeOptions {
   appSecret?: string;
   tenant?: string;
   allowBootstrap?: boolean;
-  selectAgent?: (detected: DetectedAgent[]) => AgentKind | undefined | Promise<AgentKind | undefined>;
+  selectAgent?: (
+    detected: DetectedAgent[],
+  ) => AgentKind | undefined | Promise<AgentKind | undefined>;
   handleActiveBridgeMigrationConflict?: (
     err: ActiveBridgeMigrationConflictError,
   ) => boolean | Promise<boolean>;
@@ -83,9 +85,7 @@ export interface MaterializeEnvSecretForServiceOptions {
 
 const ENV_SECRET_TEMPLATE_RE = /^\$\{[A-Z][A-Z0-9_]{0,127}\}$/;
 
-export function createRuntimeProfileConfig(
-  input: CreateDefaultProfileConfigInput,
-): ProfileConfig {
+export function createRuntimeProfileConfig(input: CreateDefaultProfileConfigInput): ProfileConfig {
   return createDefaultProfileConfig({
     ...input,
     ...(input.agentKind === 'codex'
@@ -133,19 +133,22 @@ export async function resolveProfileRuntime(
 
   const migrationAgent = resolveBootstrapAgent(requestedAgent, profile);
   const needsMigration = await hasLegacyConfig(configPath);
-  await migrateV1ToV2WithActiveBridgeHandling({
-    rootDir: appPaths.rootDir,
-    profile: appPaths.profile,
-    configFile: configPath,
-    workspace: opts.workspace,
-    ...(migrationAgent ? { agentKind: migrationAgent } : {}),
-    ...(needsMigration && migrationAgent === 'codex'
-      ? { codex: await createBootstrapCodexConfig(undefined) }
-      : {}),
-    ...(needsMigration && migrationAgent === 'omp'
-      ? { omp: await createBootstrapOmpConfig(undefined) }
-      : {}),
-  }, opts.handleActiveBridgeMigrationConflict);
+  await migrateV1ToV2WithActiveBridgeHandling(
+    {
+      rootDir: appPaths.rootDir,
+      profile: appPaths.profile,
+      configFile: configPath,
+      workspace: opts.workspace,
+      ...(migrationAgent ? { agentKind: migrationAgent } : {}),
+      ...(needsMigration && migrationAgent === 'codex'
+        ? { codex: await createBootstrapCodexConfig(undefined) }
+        : {}),
+      ...(needsMigration && migrationAgent === 'omp'
+        ? { omp: await createBootstrapOmpConfig(undefined) }
+        : {}),
+    },
+    opts.handleActiveBridgeMigrationConflict,
+  );
 
   let rootConfig = await loadRootConfig(configPath);
   if (rootConfig) {
@@ -172,7 +175,11 @@ export async function resolveProfileRuntime(
     if (runtimeUpgrade.changed) {
       rootConfig = runtimeUpgrade.rootConfig;
     }
-    const defaultWorkspaceUpgrade = await ensureProfileDefaultWorkspace(rootConfig, profile, appPaths);
+    const defaultWorkspaceUpgrade = await ensureProfileDefaultWorkspace(
+      rootConfig,
+      profile,
+      appPaths,
+    );
     if (defaultWorkspaceUpgrade.changed) {
       rootConfig = defaultWorkspaceUpgrade.rootConfig;
     }
@@ -205,7 +212,13 @@ export async function resolveProfileRuntime(
     const root = createRootConfig(profile, profileConfig, cfg.secrets);
     await saveRootConfig(root, configPath);
     await writeActiveProfile(appPaths.rootDir, profile);
-    return { cfg: runtimeProfileConfig(root, profile), profileConfig, configPath, appPaths, profile };
+    return {
+      cfg: runtimeProfileConfig(root, profile),
+      profileConfig,
+      configPath,
+      appPaths,
+      profile,
+    };
   }
 
   if (!opts.allowBootstrap) {
@@ -255,7 +268,7 @@ async function bootstrapProfileIntoExistingRoot(args: {
   });
   const nextRoot: RootConfig = {
     ...rootConfig,
-    ...(rootConfig.secrets ?? encrypted.secrets
+    ...((rootConfig.secrets ?? encrypted.secrets)
       ? { secrets: rootConfig.secrets ?? encrypted.secrets }
       : {}),
     profiles: {
@@ -594,7 +607,9 @@ async function selectDetectedAgent(
   return detected.some((agent) => agent.kind === selected) ? selected : undefined;
 }
 
-async function promptForDetectedAgentSelection(detected: DetectedAgent[]): Promise<AgentKind | undefined> {
+async function promptForDetectedAgentSelection(
+  detected: DetectedAgent[],
+): Promise<AgentKind | undefined> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) return undefined;
   p.intro('选择本地 agent');
   const selected = await p.select<AgentKind>({

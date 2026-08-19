@@ -190,7 +190,10 @@ export class MeetingManager {
    * regardless of push: it is the primary source until a push arrives, and the
    * gap-fill path afterwards.
    */
-  async join(meetingNo: string, opts: { originChatId?: string; password?: string } = {}): Promise<MeetingSession> {
+  async join(
+    meetingNo: string,
+    opts: { originChatId?: string; password?: string } = {},
+  ): Promise<MeetingSession> {
     const existing = this.byMeetingNo(meetingNo);
     if (existing && !existing.ended) return existing;
 

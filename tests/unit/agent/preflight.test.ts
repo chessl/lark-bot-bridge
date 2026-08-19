@@ -126,8 +126,14 @@ describe('agent preflight diagnostics', () => {
       ['agent-binary-not-readable', '✗ 本地 Codex CLI 二进制不可读取。'],
       ['agent-version-check-spawn-failed', '✗ 本地 Codex CLI 不可用：无法执行 `codex --version`。'],
       ['agent-version-check-timeout', '✗ 本地 Codex CLI 不可用：`codex --version` 超时未返回。'],
-      ['agent-version-check-nonzero-exit', '✗ 本地 Codex CLI 不可用：`codex --version` 退出码为 42。'],
-      ['agent-version-check-empty-output', '✗ 本地 Codex CLI 不可用：`codex --version` 没有返回版本信息。'],
+      [
+        'agent-version-check-nonzero-exit',
+        '✗ 本地 Codex CLI 不可用：`codex --version` 退出码为 42。',
+      ],
+      [
+        'agent-version-check-empty-output',
+        '✗ 本地 Codex CLI 不可用：`codex --version` 没有返回版本信息。',
+      ],
     ] as const;
 
     for (const [code, firstLine] of cases) {

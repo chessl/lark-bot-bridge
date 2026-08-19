@@ -31,7 +31,9 @@ export interface ServiceStartOptions {
    * single-profile service. */
   webUi?: boolean;
   confirmStopRuntimeLockProcess?: (meta: RuntimeLockMeta) => boolean | Promise<boolean>;
-  stopRuntimeLockProcess?: (meta: RuntimeLockMeta) => StopProcessEntryResult | Promise<StopProcessEntryResult>;
+  stopRuntimeLockProcess?: (
+    meta: RuntimeLockMeta,
+  ) => StopProcessEntryResult | Promise<StopProcessEntryResult>;
 }
 
 export interface ServiceProfileOptions {
@@ -67,7 +69,9 @@ async function resolveServiceTarget(
   // keeps respawning it after every `kill`. An explicit `--profile` is left
   // alone: the user asked for that per-profile service, not the machine-wide one.
   if (!opts.profile && !serviceFileExists(profile) && serviceFileExists(SUPERVISOR_SERVICE_ID)) {
-    console.log(`ℹ profile「${profile}」没有独立的后台服务,已指向控制面 supervisor 服务(等同 --web-ui)。`);
+    console.log(
+      `ℹ profile「${profile}」没有独立的后台服务,已指向控制面 supervisor 服务(等同 --web-ui)。`,
+    );
     return { serviceId: SUPERVISOR_SERVICE_ID, webUi: true };
   }
   return { serviceId: profile, profile, webUi: false };
@@ -95,9 +99,7 @@ async function lookupProfileEntry(profile: string): Promise<ProcessEntry | undef
 function requireAdapter(cmdName: string, serviceId: string, runArgs?: string[]): ServiceAdapter {
   const adapter = getServiceAdapter(serviceId, runArgs);
   if (!adapter) {
-    console.error(
-      `${cmdName}: 当前系统不支持后台运行。`,
-    );
+    console.error(`${cmdName}: 当前系统不支持后台运行。`);
     console.error('  目前支持: macOS (launchd) / Linux (systemd) / Windows (Task Scheduler)');
     process.exit(1);
   }
@@ -148,7 +150,10 @@ function printServiceFailure(verb: 'started' | 'restarted', stderr: string): voi
 async function ensureBridgeConfigured(
   opts: ServiceStartOptions,
 ): Promise<
-  Pick<Awaited<ReturnType<typeof resolveProfileRuntime>>, 'profile' | 'cfg' | 'profileConfig' | 'appPaths' | 'configPath'>
+  Pick<
+    Awaited<ReturnType<typeof resolveProfileRuntime>>,
+    'profile' | 'cfg' | 'profileConfig' | 'appPaths' | 'configPath'
+  >
 > {
   const { cfg, profile, profileConfig, appPaths, configPath } = await resolveProfileRuntime({
     profile: opts.profile,
@@ -184,7 +189,9 @@ async function assertLockNotHeldByAnotherRuntime(
     const lock = await checkRuntimeLock(target);
     if (!lock.locked) return;
 
-    const servicePid = adapter.isRunning() ? adapter.parseStatus(adapter.describeStatus()).pid : undefined;
+    const servicePid = adapter.isRunning()
+      ? adapter.parseStatus(adapter.describeStatus()).pid
+      : undefined;
     if (servicePid && lock.meta?.pid === Number(servicePid)) return;
 
     console.error(`✗ 当前 ${kind === 'profile' ? 'profile' : 'app'} 已有 bridge 进程占用。`);
@@ -327,7 +334,12 @@ export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<v
   const { profile, cfg, profileConfig, appPaths, configPath } = await ensureBridgeConfigured(opts);
   const adapter = requireAdapter('start', profile, classicRunArgs(profile));
   await assertLockNotHeldByAnotherRuntime('profile', appPaths.profileLockFile, adapter, opts);
-  await assertLockNotHeldByAnotherRuntime('app', appPaths.appLockFile(cfg.accounts.app.id), adapter, opts);
+  await assertLockNotHeldByAnotherRuntime(
+    'app',
+    appPaths.appLockFile(cfg.accounts.app.id),
+    adapter,
+    opts,
+  );
   const materializedEnvSecret = await materializeEnvSecretForService({ profile });
   const bridgeConfig = materializedEnvSecret
     ? (await resolveProfileRuntime({ profile, allowBootstrap: false })).cfg
@@ -443,7 +455,9 @@ export async function runServiceStop(opts: ServiceProfileOptions = {}): Promise<
   const { serviceId, profile, webUi } = await resolveServiceTarget(opts);
   const adapter = requireAdapter('stop', serviceId);
   if (!adapter.fileExists()) {
-    console.log(webUi ? 'supervisor 还没在后台运行过,无需停止。' : 'bot 还没在后台运行过,无需停止。');
+    console.log(
+      webUi ? 'supervisor 还没在后台运行过,无需停止。' : 'bot 还没在后台运行过,无需停止。',
+    );
     return;
   }
   if (!adapter.isRunning()) {
