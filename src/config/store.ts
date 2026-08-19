@@ -29,7 +29,7 @@ export async function loadConfig(path: string = paths.configFile): Promise<Parti
  * users don't lose unrelated settings on credential update.
  *
  * The provider command is a thin shell wrapper bridge writes under
- * `~/.lark-channel/secrets-getter` (always user-owned, never a symlink) so
+ * `~/.lark-bot-bridge/secrets-getter` (always user-owned, never a symlink) so
  * lark-cli's AssertSecurePath audit accepts it regardless of how node was
  * installed (Homebrew / Volta / system pkg may put node behind a symlink
  * or root-own it). The wrapper internally `exec`s the real node + bridge

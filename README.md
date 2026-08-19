@@ -46,7 +46,7 @@ The first run opens a QR-code wizard:
 2. Scan it with the Feishu / Lark app.
 3. Pick or create a PersonalAgent app.
 4. If prompted, choose which agent to initialize.
-5. Config is written to `~/.lark-channel/config.json`.
+5. Config is written to `~/.lark-bot-bridge/config.json`.
 
 You do not need to choose a project directory up front. The bridge creates a profile-managed default working directory; after startup, send `/cd <path>` in Feishu / Lark to switch to a real project.
 
@@ -87,7 +87,7 @@ Platform mapping:
 - **Linux**: systemd user unit `lark-channel-bridge.bot.<profile>.service` (stable legacy service id)
 - **Windows**: Task Scheduler task `LarkChannelBridge.Bot.<profile>` (stable legacy service id), launched through a `.cmd` wrapper
 
-Daemon logs are under `~/.lark-channel/profiles/<profile>/logs/daemon/`.
+Daemon logs are under `~/.lark-bot-bridge/profiles/<profile>/logs/daemon/`.
 
 ### Multiple profiles: Claude, Codex, and OMP
 
@@ -176,7 +176,7 @@ When COT is enabled, the bridge splits the process view and final answer into tw
 
 ## lark-cli identity policy
 
-Each profile uses a profile-local lark-cli directory at `~/.lark-channel/profiles/<profile>/lark-cli`. The agent process receives `LARKSUITE_CLI_CONFIG_DIR` for that directory, so personal authorization in one profile is not shared with another profile.
+Each profile uses a profile-local lark-cli directory at `~/.lark-bot-bridge/profiles/<profile>/lark-cli`. The agent process receives `LARKSUITE_CLI_CONFIG_DIR` for that directory, so personal authorization in one profile is not shared with another profile.
 
 The default policy is `bot-only`: lark-cli uses the app/bot identity and does not access personal resources. When a user authorizes personal resources such as calendar, mail, or drive, the current profile can switch to `user-default`, which keeps app identity available and also allows the authorized user identity. Owner/admin users can inspect or change this policy in `/config`; `/status` shows the current summary as `lark-cli: app` or `lark-cli: user-ready`.
 
@@ -189,7 +189,7 @@ This is a profile-field snippet. Do not replace the whole `config.json` with it;
 ```json
 {
   "workspaces": {
-    "default": "/Users/me/.lark-channel-workspaces/claude/default"
+    "default": "/Users/me/.lark-bot-bridge-workspaces/claude/default"
   }
 }
 ```
@@ -227,17 +227,17 @@ OMP profiles currently require `defaultAccess: "full"` because OMP RPC does not 
 
 | Path | Content |
 |---|---|
-| `~/.lark-channel/config.json` | Root config with profiles and active profile |
-| `~/.lark-channel/active-profile` | Last selected profile |
-| `~/.lark-channel/profiles/<profile>/sessions.json` | Session state |
-| `~/.lark-channel/profiles/<profile>/sessions.json.catalog.json` | Agent-aware session catalog |
-| `~/.lark-channel/profiles/<profile>/workspaces.json` | Current and named workspace bindings |
-| `~/.lark-channel/profiles/<profile>/secrets.enc` | Profile-local encrypted secrets |
-| `~/.lark-channel/profiles/<profile>/lark-cli/` | Profile-local lark-cli directory |
-| `~/.lark-channel/profiles/<profile>/media/` | Attachment cache |
-| `~/.lark-channel/profiles/<profile>/logs/` | Structured run logs |
-| `~/.lark-channel/registry/processes.json` | Local process registry |
-| `~/.lark-channel/registry/locks/` | Profile and app locks |
+| `~/.lark-bot-bridge/config.json` | Root config with profiles and active profile |
+| `~/.lark-bot-bridge/active-profile` | Last selected profile |
+| `~/.lark-bot-bridge/profiles/<profile>/sessions.json` | Session state |
+| `~/.lark-bot-bridge/profiles/<profile>/sessions.json.catalog.json` | Agent-aware session catalog |
+| `~/.lark-bot-bridge/profiles/<profile>/workspaces.json` | Current and named workspace bindings |
+| `~/.lark-bot-bridge/profiles/<profile>/secrets.enc` | Profile-local encrypted secrets |
+| `~/.lark-bot-bridge/profiles/<profile>/lark-cli/` | Profile-local lark-cli directory |
+| `~/.lark-bot-bridge/profiles/<profile>/media/` | Attachment cache |
+| `~/.lark-bot-bridge/profiles/<profile>/logs/` | Structured run logs |
+| `~/.lark-bot-bridge/registry/processes.json` | Local process registry |
+| `~/.lark-bot-bridge/registry/locks/` | Profile and app locks |
 
 Set `LARK_CHANNEL_HOME=/path/to/state` to move all local bridge state. `LARK_CHANNEL_LOG_DAYS` overrides log retention.
 
@@ -277,7 +277,7 @@ To let other people or groups in, add them to one of three lists:
 
 ### Advanced: editing the config file directly
 
-If you'd rather not do it inside Feishu, `/invite` and `/config` write the matching profile's `access` field in `~/.lark-channel/config.json`. Empty lists mean nobody from that list, not open access. This is a profile-field snippet; do not replace the whole `config.json` with it:
+If you'd rather not do it inside Feishu, `/invite` and `/config` write the matching profile's `access` field in `~/.lark-bot-bridge/config.json`. Empty lists mean nobody from that list, not open access. This is a profile-field snippet; do not replace the whole `config.json` with it:
 
 ```json
 {
@@ -299,7 +299,7 @@ If you'd rather not do it inside Feishu, `/invite` and `/config` write the match
 `allowedUsers` / `admins` take user `open_id`s; `allowedChats` takes group `chat_id`s. The easiest way to find an ID by hand: have the person message the bot (or `@` it in the group), then check the active profile's log:
 
 ```bash
-grep '"event":"enter"' ~/.lark-channel/profiles/<profile>/logs/bridge-$(date +%Y%m%d).jsonl | tail -5
+grep '"event":"enter"' ~/.lark-bot-bridge/profiles/<profile>/logs/bridge-$(date +%Y%m%d).jsonl | tail -5
 ```
 
 Each line carries `chatId` (group / DM id) and `senderId` (user `open_id`). After a manual edit, **restart the bridge** or send `/reconnect` from an allowed admin context to apply it. For day-to-day tweaks `/invite` / `/config` are easier; direct edits are mainly for deployment scripts that pre-seed access.
@@ -328,31 +328,6 @@ pnpm build
 
 `pnpm test` includes unit, integration, and process-level adapter tests. CI runs on macOS, Ubuntu, and Windows with `pnpm install --frozen-lockfile`, `pnpm test`, `pnpm typecheck`, and `pnpm build`.
 
-## Optional telemetry
-
-By default the bridge reports **nothing**: no metrics, no logs leave your machine, and it pulls in zero telemetry dependencies. The hook below is inert unless you opt in.
-
-To wire up your own monitoring, point an environment variable at a module that default-exports (or exports `createAdapter`) an `AdapterFactory`:
-
-```bash
-LARK_CHANNEL_TELEMETRY_MODULE=your-telemetry-package lark-bot-bridge start
-```
-
-That module receives every `log.*` event plus error/metric hooks and forwards them wherever you like. The interface is exported from the package root:
-
-```ts
-import type { AdapterFactory, TelemetryAdapter, TelemetryEvent } from 'lark-bot-bridge';
-
-const createAdapter: AdapterFactory = (meta) => ({
-  emit(event) {/* ship event */},
-  recordError(err, ctx) {/* ship exception */},
-  recordMetric(name, value, tags) {/* ship metric */},
-  flush(timeoutMs) {/* drain buffered events */},
-});
-export default createAdapter;
-```
-
-A missing module, a bad factory, or a throwing adapter all degrade to noop — telemetry can never stop the bridge from starting or break logging.
 
 ## License
 

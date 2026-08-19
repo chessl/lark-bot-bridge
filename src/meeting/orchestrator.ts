@@ -343,7 +343,7 @@ async function runMeetingAgent(
   }
 
   let answer = '';
-  for await (const event of result.execution.subscribe()) {
+  for await (const event of result.execution.events) {
     const chunk = textOf(event);
     if (chunk) answer += chunk;
     if (event.type === 'error') {

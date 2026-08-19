@@ -1,5 +1,4 @@
 import dns from 'node:dns';
-import os from 'node:os';
 import { createInterface } from 'node:readline';
 import pkg from '../../../package.json';
 import { ClaudeAdapter } from '../../agent/claude/adapter';
@@ -19,8 +18,7 @@ import {
 } from '../../config/profile-schema';
 import type { AppConfig } from '../../config/schema';
 import { isComplete } from '../../config/schema';
-import { configureLogger, gcOldLogs, log, reportError } from '../../core/logger';
-import { loadTelemetryAdapter, telemetry } from '../../core/telemetry';
+import { configureLogger, gcOldLogs, log } from '../../core/logger';
 import { gcMediaCache } from '../../media/cache';
 import { startUiServer } from '../../ui/server';
 import { readUiSidecar, removeUiSidecar, writeUiSidecar } from '../../ui/sidecar';
@@ -73,11 +71,9 @@ dns.setDefaultResultOrder('ipv4first');
 // keep the bot alive — losing a single reply is better than crashing.
 process.on('unhandledRejection', (reason) => {
   log.fail('process', reason, { kind: 'unhandledRejection' });
-  reportError(reason, { kind: 'unhandledRejection' });
 });
 process.on('uncaughtException', (err) => {
   log.fail('process', err, { kind: 'uncaughtException' });
-  reportError(err, { kind: 'uncaughtException' });
 });
 
 const MEDIA_GC_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -136,12 +132,6 @@ async function runClassic(opts: StartOptions): Promise<void> {
   });
   const { cfg, configPath, appPaths } = runtime;
   configureLogger({ logsDir: appPaths.logsDir });
-  await loadTelemetryAdapter({
-    version: pkg.version,
-    appId: cfg.accounts.app.id,
-    tenant: cfg.accounts.app.tenant,
-    hostname: os.hostname(),
-  });
   await gcOldLogs();
 
   const supervisor = new Supervisor({ configPath, rootDir: appPaths.rootDir });
@@ -195,12 +185,6 @@ async function runSupervisorConsole(opts: StartOptions): Promise<void> {
     return;
   }
 
-  await loadTelemetryAdapter({
-    version: pkg.version,
-    appId: cfg.accounts.app.id,
-    tenant: cfg.accounts.app.tenant,
-    hostname: os.hostname(),
-  });
   await gcOldLogs();
 
   const supervisor = new Supervisor({ configPath, rootDir: appPaths.rootDir });
@@ -252,14 +236,10 @@ function parkWithShutdown(
     }
     await supervisor.shutdown();
     if (hostLock) await hostLock.release().catch(() => {});
-    await flushTelemetry();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('beforeExit', () => {
-    void flushTelemetry();
-  });
   process.on('exit', () => {
     supervisor.unregisterAllSync();
     cleanupTmpFiles(appPaths.userRegistryFile);
@@ -380,13 +360,6 @@ async function confirmStopRuntimeLockProcess(err: RuntimeLockConflictError): Pro
   }
 }
 
-async function flushTelemetry(timeoutMs = 2000): Promise<void> {
-  try {
-    await telemetry().flush?.(timeoutMs);
-  } catch {
-    /* best effort during shutdown */
-  }
-}
 
 function formatAgo(ms: number): string {
   if (ms < 60_000) return `${Math.floor(ms / 1000)} 秒前`;

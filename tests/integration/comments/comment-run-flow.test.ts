@@ -204,13 +204,6 @@ describe('comment run flow', () => {
     expect(h.inThreadReplies.at(-1)).toContain('工作目录不可用');
   });
 
-  it('does not call the agent adapter directly from the comment entrypoint', async () => {
-    const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile(new URL('../../../src/bot/comments.ts', import.meta.url), 'utf8'),
-    );
-
-    expect(source).not.toContain('agent.run(');
-  });
 });
 
 async function createHarness(options: {

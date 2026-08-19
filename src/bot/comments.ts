@@ -288,7 +288,7 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
       let errorMsg: string | undefined;
       let terminal = false;
       let timedOut = false;
-      const eventStream = execution.subscribe()[Symbol.asyncIterator]();
+      const eventStream = execution.events[Symbol.asyncIterator]();
       try {
         while (true) {
           const next = await nextCommentEvent(eventStream, commentExpiresAt);

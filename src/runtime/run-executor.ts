@@ -37,7 +37,7 @@ export interface RunExecution {
   scopeId: string;
   run: AgentRun;
   handle: RunHandle;
-  subscribe(): AsyncIterable<AgentEvent>;
+  events: AsyncIterable<AgentEvent>;
   stop(): Promise<void>;
 }
 
@@ -179,12 +179,11 @@ export class RunExecutor {
         }
       }
     };
-    const fanout = new EventFanout(observeRunEvents(run.events, {
+    const events = observeRunEvents(run.events, {
       dimensions,
       startedAt,
       now: this.now,
-    }), async () => {
-      await cleanup(!handle.interrupted);
+      onDone: async () => cleanup(!handle.interrupted),
     });
 
     return {
@@ -192,7 +191,7 @@ export class RunExecutor {
       scopeId: input.scopeId,
       run,
       handle,
-      subscribe: () => fanout.subscribe(),
+      events,
       stop: async () => {
         handle.interrupted = true;
         await run.stop();
@@ -209,107 +208,38 @@ function observeRunEvents(
     dimensions: Record<string, unknown>;
     startedAt: number;
     now: () => number;
+    onDone: () => Promise<void>;
   },
 ): AsyncIterable<AgentEvent> {
   return {
     async *[Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
-      for await (const event of events) {
-        if (event.type === 'done') {
-          log.info('run', 'completed', {
-            ...opts.dimensions,
-            result: event.terminationReason,
-            durationMs: opts.now() - opts.startedAt,
-          });
+      try {
+        for await (const event of events) {
+          if (event.type === 'done') {
+            log.info('run', 'completed', {
+              ...opts.dimensions,
+              result: event.terminationReason,
+              durationMs: opts.now() - opts.startedAt,
+            });
+            yield event;
+            return;
+          }
+          if (event.type === 'error') {
+            log.warn('run', 'failed', {
+              ...opts.dimensions,
+              result: event.terminationReason,
+              durationMs: opts.now() - opts.startedAt,
+              error: event.message,
+            });
+            yield event;
+            return;
+          }
           yield event;
-          return;
         }
-        if (event.type === 'error') {
-          log.warn('run', 'failed', {
-            ...opts.dimensions,
-            result: event.terminationReason,
-            durationMs: opts.now() - opts.startedAt,
-            error: event.message,
-          });
-          yield event;
-          return;
-        }
-        yield event;
+      } finally {
+        await opts.onDone();
       }
     },
   };
 }
 
-class EventFanout {
-  private readonly source: AsyncIterable<AgentEvent>;
-  private readonly onDone: () => Promise<void>;
-  private readonly buffer: AgentEvent[] = [];
-  private readonly waiters = new Set<() => void>();
-  private started = false;
-  private done = false;
-  private error: unknown;
-
-  constructor(source: AsyncIterable<AgentEvent>, onDone: () => Promise<void>) {
-    this.source = source;
-    this.onDone = onDone;
-  }
-
-  subscribe(): AsyncIterable<AgentEvent> {
-    return {
-      [Symbol.asyncIterator]: () => {
-        let index = 0;
-        return {
-          next: async (): Promise<IteratorResult<AgentEvent>> => {
-            this.start();
-            if (index < this.buffer.length) {
-              return { done: false, value: this.buffer[index++]! };
-            }
-            if (this.error) throw this.error;
-            if (this.done) return { done: true, value: undefined };
-            await new Promise<void>((resolve) => {
-              const wake = (): void => {
-                this.waiters.delete(wake);
-                resolve();
-              };
-              this.waiters.add(wake);
-            });
-            if (index < this.buffer.length) {
-              return { done: false, value: this.buffer[index++]! };
-            }
-            if (this.error) throw this.error;
-            return { done: true, value: undefined };
-          },
-        };
-      },
-    };
-  }
-
-  private start(): void {
-    if (this.started) return;
-    this.started = true;
-    void this.pump();
-  }
-
-  private async pump(): Promise<void> {
-    try {
-      for await (const event of this.source) {
-        this.buffer.push(event);
-        this.wakeAll();
-        if (isTerminalEvent(event)) break;
-      }
-    } catch (err) {
-      this.error = err;
-    } finally {
-      await this.onDone();
-      this.done = true;
-      this.wakeAll();
-    }
-  }
-
-  private wakeAll(): void {
-    for (const wake of [...this.waiters]) wake();
-  }
-}
-
-function isTerminalEvent(event: AgentEvent): boolean {
-  return event.type === 'done' || event.type === 'error';
-}

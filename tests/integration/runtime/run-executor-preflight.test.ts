@@ -25,7 +25,7 @@ describe('RunExecutor prepareRun preflight', () => {
 
     expect(h.agent.order).toEqual(['prepare:run-1', 'run:run-1']);
     expect(h.pool.snapshot()).toMatchObject({ active: 1, waiting: 0 });
-    await collect(execution.subscribe());
+    await collect(execution.events);
   });
 
   it('releases pool slots and does not register active runs when prepareRun fails', async () => {

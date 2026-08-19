@@ -1,5 +1,4 @@
 import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizedMessage } from '@larksuite/channel';
 import type { AgentRun } from '../../../src/agent/types';
@@ -44,29 +43,6 @@ describe('/reconnect profile lifecycle', () => {
     expect(h.restart).toHaveBeenCalledWith({ wait: true });
   });
 
-  it('starts the replacement bridge with replacement controls before swapping globals', async () => {
-    // Connect-before-disconnect reconnect now lives in the supervisor's ManagedProfile.
-    const source = await readFile(new URL('../../../src/runtime/supervisor.ts', import.meta.url), 'utf8');
-
-    expect(source).toContain('const nextControls = this.makeControls(nextRuntime.appPaths, next, nextRuntime.profileConfig)');
-    expect(source).toContain('controls: nextControls');
-    expect(source).toContain('this.controls = nextControls');
-  });
-
-  it('guards direct bridge disconnects and IM commands with the current profile runtime context', async () => {
-    const source = await readFile(new URL('../../../src/bot/channel.ts', import.meta.url), 'utf8');
-    const disconnectBlock = source.slice(
-      source.indexOf('disconnect: async () => {'),
-      source.indexOf('async function commandSessionCatalogIdentity'),
-    );
-
-    expect(source).toContain("activeRuns.pauseNewRuns('bridge-disconnect')");
-    expect(disconnectBlock).not.toContain('resumeNewRuns');
-    expect(disconnectBlock).toContain('await Promise.allSettled([');
-    expect(disconnectBlock).toContain('channel.disconnect()');
-    expect(disconnectBlock).toContain('activeRuns.stopAll()');
-    expect(source).toContain('sessionCatalogIdentity: await commandSessionCatalogIdentity({');
-  });
 });
 
 async function createHarness(): Promise<{

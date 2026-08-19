@@ -2,7 +2,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 import { open, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { telemetry } from './telemetry';
 
 export interface LoggerOptions {
   logsDir?: string;
@@ -27,21 +26,21 @@ let loggerOptions: LoggerOptions = {
  * Add `phase.event` keys here to surface a new line, but keep the list
  * short — every entry adds noise.
  */
-const STDOUT_INFO_ALLOWLIST = new Set<string>([
-  'ws.connected',
-  'ws.reconnecting',
-  'ws.reconnected',
-  'intake.enter',
-  'intake.command',
-  'run.started',
-  'run.completed',
-  'run.failed',
-  'cot.created',
-  'cot.completed',
-  'outbound.sent',
-  'outbound.markdown-stream-fallback',
-  'card.final',
-]);
+const STDOUT_INFO_ALLOWLIST: Record<string, true> = {
+  'ws.connected': true,
+  'ws.reconnecting': true,
+  'ws.reconnected': true,
+  'intake.enter': true,
+  'intake.command': true,
+  'run.started': true,
+  'run.completed': true,
+  'run.failed': true,
+  'cot.created': true,
+  'cot.completed': true,
+  'outbound.sent': true,
+  'outbound.markdown-stream-fallback': true,
+  'card.final': true,
+};
 
 /**
  * Structured logger.
@@ -110,60 +109,50 @@ export type LogFields = Record<string, unknown>;
  * the caller-supplied value is renamed to `_<key>` so the info isn't lost
  * but `grep '"phase":"comment"'` still finds the entry.
  */
-const RESERVED_KEYS = new Set([
-  'ts',
-  'level',
-  'phase',
-  'event',
-  'traceId',
-  'chatId',
-  'msgId',
-]);
+const RESERVED_KEYS: Record<string, true> = {
+  ts: true,
+  level: true,
+  phase: true,
+  event: true,
+  traceId: true,
+  chatId: true,
+  msgId: true,
+};
 
-const TELEMETRY_ENVELOPE_KEYS = new Set([
-  'ts',
-  'level',
-  'phase',
-  'event',
-  'traceId',
-  'chatId',
-  'msgId',
-]);
+const RAW_PAYLOAD_KEYS: Record<string, true> = {
+  prompt: true,
+  stdout: true,
+  stderr: true,
+  env: true,
+  environment: true,
+  proxy: true,
+};
 
-const RAW_PAYLOAD_KEYS = new Set([
-  'prompt',
-  'stdout',
-  'stderr',
-  'env',
-  'environment',
-  'proxy',
-]);
+const RESOURCE_ID_KEYS: Record<string, true> = { fileKey: true, sourceFileKey: true };
 
-const RESOURCE_ID_KEYS = new Set(['fileKey', 'sourceFileKey']);
-
-const ID_KEYS = new Set([
-  'chatId',
-  'senderId',
-  'sender',
-  'openId',
-  'operatorId',
-  'userId',
-  'msgId',
-  'messageId',
-  'sourceMessageId',
-  'sessionId',
-  'threadId',
-  'docToken',
-  'fileToken',
-  'fileKey',
-  'sourceFileKey',
-  'commentId',
-  'rootCommentId',
-  'replyId',
-  'reactionId',
-  'scope',
-  'appId',
-]);
+const ID_KEYS: Record<string, true> = {
+  chatId: true,
+  senderId: true,
+  sender: true,
+  openId: true,
+  operatorId: true,
+  userId: true,
+  msgId: true,
+  messageId: true,
+  sourceMessageId: true,
+  sessionId: true,
+  threadId: true,
+  docToken: true,
+  fileToken: true,
+  fileKey: true,
+  sourceFileKey: true,
+  commentId: true,
+  rootCommentId: true,
+  replyId: true,
+  reactionId: true,
+  scope: true,
+  appId: true,
+};
 
 const MAX_LOG_STRING_CHARS = 4096;
 const CREDENTIAL_JSON_FIELD_RE =
@@ -200,13 +189,13 @@ function sanitizeLogValue(
 ): unknown {
   const normalizedKey = key.startsWith('_') ? key.slice(1) : key;
   if (value === undefined) return undefined;
-  if (RAW_PAYLOAD_KEYS.has(normalizedKey)) return '[REDACTED]';
+  if (Object.hasOwn(RAW_PAYLOAD_KEYS, normalizedKey)) return '[REDACTED]';
   if (/token|secret|authorization/i.test(normalizedKey)) return '[REDACTED]';
   if (/attachment.*path|media.*path|^(cwd|cwdRealpath|path|absPath)$/i.test(normalizedKey)) {
     return '[REDACTED_PATH]';
   }
-  if (RESOURCE_ID_KEYS.has(normalizedKey)) return '[REDACTED_RESOURCE]';
-  if (options.redactIds && ID_KEYS.has(normalizedKey)) return redactId(value);
+  if (Object.hasOwn(RESOURCE_ID_KEYS, normalizedKey)) return '[REDACTED_RESOURCE]';
+  if (options.redactIds && Object.hasOwn(ID_KEYS, normalizedKey)) return redactId(value);
   if (Array.isArray(value)) {
     return value.map((item) => sanitizeLogValue(key, item, options));
   }
@@ -243,15 +232,14 @@ function emit(level: Level, phase: string, event: string, fields: LogFields = {}
     ...ctx,
   }, LOCAL_LOG_SANITIZE);
   for (const [k, v] of Object.entries(fields)) {
-    if (RESERVED_KEYS.has(k)) {
+    if (Object.hasOwn(RESERVED_KEYS, k)) {
       entry[`_${k}`] = sanitizeLogValue(`_${k}`, v, LOCAL_LOG_SANITIZE);
     } else {
       entry[k] = sanitizeLogValue(k, v, LOCAL_LOG_SANITIZE);
     }
   }
 
-  const externalEntry = sanitizeLogEntry(entry, EXTERNAL_SANITIZE);
-  const telemetrySafe = telemetryPayloadFromEntry(externalEntry);
+  const stdoutSafe = displayPayloadFromEntry(sanitizeLogEntry(entry, EXTERNAL_SANITIZE));
   const s = getStream();
   if (s) {
     try {
@@ -261,43 +249,18 @@ function emit(level: Level, phase: string, event: string, fields: LogFields = {}
     }
   }
 
-  try {
-    telemetry().emit({
-      level,
-      phase,
-      event,
-      fields: telemetrySafe.fields,
-      ctx: telemetrySafe.ctx,
-      ts: String(entry.ts),
-    });
-  } catch {
-    /* never break logging */
-  }
-  if (level === 'error') {
-    try {
-      telemetry().recordError(telemetrySafe.fields.err ?? `${phase}.${event}`, {
-        phase,
-        event,
-        ...telemetrySafe.ctx,
-        ...telemetrySafe.fields,
-      });
-    } catch {
-      /* never break logging */
-    }
-  }
-
   // Stdout is the user-facing tail: warns, errors, and a curated list
   // of info events (WS lifecycle, message intake, run final). The full
   // detail always lives in the file regardless.
   const showOnStdout =
-    level !== 'info' || STDOUT_INFO_ALLOWLIST.has(`${phase}.${event}`);
+    level !== 'info' || Object.hasOwn(STDOUT_INFO_ALLOWLIST, `${phase}.${event}`);
   if (!showOnStdout) return;
 
   const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
-  fn(formatStdout(level, phase, event, telemetrySafe.ctx, telemetrySafe.fields));
+  fn(formatStdout(level, phase, event, stdoutSafe.ctx, stdoutSafe.fields));
 }
 
-function telemetryPayloadFromEntry(entry: Record<string, unknown>): {
+function displayPayloadFromEntry(entry: Record<string, unknown>): {
   ctx: LogContext;
   fields: LogFields;
 } {
@@ -308,7 +271,7 @@ function telemetryPayloadFromEntry(entry: Record<string, unknown>): {
 
   const fields: LogFields = {};
   for (const [key, value] of Object.entries(entry)) {
-    if (TELEMETRY_ENVELOPE_KEYS.has(key) || value === undefined) continue;
+    if (Object.hasOwn(RESERVED_KEYS, key) || value === undefined) continue;
     fields[key] = value;
   }
   return { ctx, fields };
@@ -710,54 +673,3 @@ async function readTail(path: string, maxBytes: number): Promise<string> {
   }
 }
 
-export function reportMetric(
-  name: string,
-  value: number,
-  tags?: Record<string, string>,
-): void {
-  try {
-    telemetry().recordMetric(name, value, sanitizeMetricTags(tags));
-  } catch {
-    /* never break runtime behavior */
-  }
-}
-
-export function reportError(err: unknown, ctx?: Record<string, unknown>): void {
-  try {
-    telemetry().recordError(sanitizeTelemetryError(err), sanitizeTelemetryContext(ctx));
-  } catch {
-    /* never break runtime behavior */
-  }
-}
-
-function sanitizeMetricTags(tags?: Record<string, string>): Record<string, string> | undefined {
-  if (!tags) return undefined;
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(tags)) {
-    const sanitized = sanitizeLogValue(key, value);
-    out[key] = typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
-  }
-  return out;
-}
-
-function sanitizeTelemetryContext(
-  ctx?: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  if (!ctx) return undefined;
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(ctx)) {
-    out[key] = sanitizeLogValue(key, value);
-  }
-  return out;
-}
-
-function sanitizeTelemetryError(err: unknown): unknown {
-  if (err instanceof Error) {
-    return {
-      name: err.name,
-      message: sanitizeLogValue('err', err.message),
-      ...(err.stack ? { stack: sanitizeLogValue('stack', err.stack) } : {}),
-    };
-  }
-  return sanitizeLogValue('err', err);
-}

@@ -37,7 +37,7 @@ describe('agent-aware run-flow resume', () => {
     const first = await start(h);
     expect(first.ok).toBe(true);
     if (!first.ok) throw new Error('expected initial run');
-    await collect(first.execution.subscribe());
+    await collect(first.execution.events);
 
     h.catalog.upsertActive({
       scopeId: 'chat-1',
@@ -82,7 +82,7 @@ describe('agent-aware run-flow resume', () => {
     const probe = await start(h);
     expect(probe.ok).toBe(true);
     if (!probe.ok) throw new Error('expected probe run');
-    await collect(probe.execution.subscribe());
+    await collect(probe.execution.events);
     h.catalog.upsertActive({
       scopeId: 'chat-1',
       agentId: 'codex',
@@ -108,7 +108,7 @@ describe('agent-aware run-flow resume', () => {
     const first = await start(h);
     expect(first.ok).toBe(true);
     if (!first.ok) throw new Error('expected initial OMP run');
-    await collect(first.execution.subscribe());
+    await collect(first.execution.events);
     h.catalog.upsertActive({
       scopeId: 'chat-1',
       agentId: 'omp',
@@ -133,7 +133,7 @@ describe('agent-aware run-flow resume', () => {
     const first = await start(h);
     expect(first.ok).toBe(true);
     if (!first.ok) throw new Error('expected initial run');
-    await collect(first.execution.subscribe());
+    await collect(first.execution.events);
     h.catalog.upsertActive({
       scopeId: 'chat-1',
       agentId: 'claude',
@@ -159,7 +159,7 @@ describe('agent-aware run-flow resume', () => {
     const claudeRun = await start(claude);
     expect(claudeRun.ok).toBe(true);
     if (!claudeRun.ok) throw new Error('expected claude run');
-    await collect(claudeRun.execution.subscribe());
+    await collect(claudeRun.execution.events);
 
     recordRunSessionEvent({
       scopeId: 'chat-1',
@@ -184,7 +184,7 @@ describe('agent-aware run-flow resume', () => {
     const codexRun = await start(codex);
     expect(codexRun.ok).toBe(true);
     if (!codexRun.ok) throw new Error('expected codex run');
-    await collect(codexRun.execution.subscribe());
+    await collect(codexRun.execution.events);
 
     recordRunSessionEvent({
       scopeId: 'chat-1',

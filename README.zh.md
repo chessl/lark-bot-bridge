@@ -46,7 +46,7 @@ lark-bot-bridge run
 2. 用飞书 App 扫码。
 3. 选择或创建 PersonalAgent 应用。
 4. 如果终端提示，选择本次要初始化的 agent。
-5. 成功后配置写入 `~/.lark-channel/config.json`。
+5. 成功后配置写入 `~/.lark-bot-bridge/config.json`。
 
 没有指定项目目录也可以启动。bridge 会创建一个 profile 托管的默认工作目录；启动后在飞书里发送 `/cd <path>` 切到实际项目。
 
@@ -87,7 +87,7 @@ lark-bot-bridge unregister [--profile <name>]
 - **Linux**：systemd 用户单元 `lark-channel-bridge.bot.<profile>.service`（为兼容现有安装保留的稳定 service id）
 - **Windows**：Task Scheduler 任务 `LarkChannelBridge.Bot.<profile>`（为兼容现有安装保留的稳定 service id），launcher 是 `.cmd`
 
-daemon 日志在 `~/.lark-channel/profiles/<profile>/logs/daemon/`。
+daemon 日志在 `~/.lark-bot-bridge/profiles/<profile>/logs/daemon/`。
 
 ### 多 profile：分别运行 Claude、Codex 和 OMP
 
@@ -176,7 +176,7 @@ lark-bot-bridge profile export <name> --include-secrets --yes
 
 ## lark-cli 身份策略
 
-每个 profile 都使用当前 profile 的 lark-cli 目录：`~/.lark-channel/profiles/<profile>/lark-cli`。agent 子进程会收到指向这个目录的 `LARKSUITE_CLI_CONFIG_DIR`，所以一个 profile 里的个人授权不会共享给另一个 profile。
+每个 profile 都使用当前 profile 的 lark-cli 目录：`~/.lark-bot-bridge/profiles/<profile>/lark-cli`。agent 子进程会收到指向这个目录的 `LARKSUITE_CLI_CONFIG_DIR`，所以一个 profile 里的个人授权不会共享给另一个 profile。
 
 默认策略是 `bot-only`：lark-cli 使用应用 / bot 身份，不访问个人资源。当用户为了日历、邮箱、云盘等个人资源完成授权后，当前 profile 可以切到 `user-default`，保留应用身份，同时允许已授权的用户身份。owner/admin 可以在 `/config` 查看或切换这个策略；`/status` 会用 `lark-cli: app` 或 `lark-cli: user-ready` 展示当前摘要。
 
@@ -189,7 +189,7 @@ lark-bot-bridge profile export <name> --include-secrets --yes
 ```json
 {
   "workspaces": {
-    "default": "/Users/me/.lark-channel-workspaces/claude/default"
+    "default": "/Users/me/.lark-bot-bridge-workspaces/claude/default"
   }
 }
 ```
@@ -227,17 +227,17 @@ OMP profile 当前必须使用 `defaultAccess: "full"`，因为 OMP RPC 尚未�
 
 | 路径 | 内容 |
 |---|---|
-| `~/.lark-channel/config.json` | root config，包含 profiles 和 active profile |
-| `~/.lark-channel/active-profile` | 最近选择的 profile |
-| `~/.lark-channel/profiles/<profile>/sessions.json` | 会话状态 |
-| `~/.lark-channel/profiles/<profile>/sessions.json.catalog.json` | agent-aware 会话索引 |
-| `~/.lark-channel/profiles/<profile>/workspaces.json` | 当前和命名工作空间绑定 |
-| `~/.lark-channel/profiles/<profile>/secrets.enc` | profile 本地加密 secret |
-| `~/.lark-channel/profiles/<profile>/lark-cli/` | 当前 profile 的 lark-cli 目录 |
-| `~/.lark-channel/profiles/<profile>/media/` | 附件缓存 |
-| `~/.lark-channel/profiles/<profile>/logs/` | 结构化运行日志 |
-| `~/.lark-channel/registry/processes.json` | 本机进程注册表 |
-| `~/.lark-channel/registry/locks/` | profile lock 和 app lock |
+| `~/.lark-bot-bridge/config.json` | root config，包含 profiles 和 active profile |
+| `~/.lark-bot-bridge/active-profile` | 最近选择的 profile |
+| `~/.lark-bot-bridge/profiles/<profile>/sessions.json` | 会话状态 |
+| `~/.lark-bot-bridge/profiles/<profile>/sessions.json.catalog.json` | agent-aware 会话索引 |
+| `~/.lark-bot-bridge/profiles/<profile>/workspaces.json` | 当前和命名工作空间绑定 |
+| `~/.lark-bot-bridge/profiles/<profile>/secrets.enc` | profile 本地加密 secret |
+| `~/.lark-bot-bridge/profiles/<profile>/lark-cli/` | 当前 profile 的 lark-cli 目录 |
+| `~/.lark-bot-bridge/profiles/<profile>/media/` | 附件缓存 |
+| `~/.lark-bot-bridge/profiles/<profile>/logs/` | 结构化运行日志 |
+| `~/.lark-bot-bridge/registry/processes.json` | 本机进程注册表 |
+| `~/.lark-bot-bridge/registry/locks/` | profile lock 和 app lock |
 
 设置 `LARK_CHANNEL_HOME=/path/to/state` 可以迁移整棵本地状态目录。`LARK_CHANNEL_LOG_DAYS` 可以调整日志保留天数。
 
@@ -277,7 +277,7 @@ OMP profile 当前必须使用 `defaultAccess: "full"`，因为 OMP RPC 尚未�
 
 ### 高级：直接改配置文件
 
-不想在飞书里点的话，`/invite`、`/config` 背后写的是 `~/.lark-channel/config.json` 中对应 profile 的 `access` 字段。空白名单表示这个名单没人，不表示所有人都能用。下面只是 profile 里的字段片段，不要整段覆盖 `config.json`：
+不想在飞书里点的话，`/invite`、`/config` 背后写的是 `~/.lark-bot-bridge/config.json` 中对应 profile 的 `access` 字段。空白名单表示这个名单没人，不表示所有人都能用。下面只是 profile 里的字段片段，不要整段覆盖 `config.json`：
 
 ```json
 {
@@ -299,7 +299,7 @@ OMP profile 当前必须使用 `defaultAccess: "full"`，因为 OMP RPC 尚未�
 `allowedUsers` / `admins` 填用户 `open_id`，`allowedChats` 填群 `chat_id`。手动找 ID 最简单的办法：让对方给 bot 发条消息（群里就 @ 它一下），然后看当前 profile 的日志：
 
 ```bash
-grep '"event":"enter"' ~/.lark-channel/profiles/<profile>/logs/bridge-$(date +%Y%m%d).jsonl | tail -5
+grep '"event":"enter"' ~/.lark-bot-bridge/profiles/<profile>/logs/bridge-$(date +%Y%m%d).jsonl | tail -5
 ```
 
 每行都带 `chatId`（群 / 私聊 ID）和 `senderId`（用户 `open_id`）。手改完后**重启 bridge**，或在允许的 admin 上下文里发 `/reconnect` 让它生效。日常调整还是 `/invite` / `/config` 更省事，直接改文件主要用于部署脚本预填。
@@ -328,31 +328,6 @@ pnpm build
 
 `pnpm test` 包含 unit、integration 和 process-level adapter 测试。CI 在 macOS、Ubuntu、Windows 上执行 `pnpm install --frozen-lockfile`、`pnpm test`、`pnpm typecheck` 和 `pnpm build`。
 
-## 可选：遥测（Telemetry）
-
-默认情况下 bridge **不上报任何数据**：没有指标、没有日志离开你的机器，也不引入任何遥测依赖。下面这个钩子在你主动开启前完全是空操作。
-
-想接自己的监控时，用环境变量指向一个 default export（或导出 `createAdapter`）`AdapterFactory` 的模块：
-
-```bash
-LARK_CHANNEL_TELEMETRY_MODULE=your-telemetry-package lark-bot-bridge start
-```
-
-该模块会收到每一条 `log.*` 事件，以及错误 / 指标钩子，转发到任何你想要的地方。接口从包根导出：
-
-```ts
-import type { AdapterFactory, TelemetryAdapter, TelemetryEvent } from 'lark-bot-bridge';
-
-const createAdapter: AdapterFactory = (meta) => ({
-  emit(event) {/* 上报事件 */},
-  recordError(err, ctx) {/* 上报异常 */},
-  recordMetric(name, value, tags) {/* 上报指标 */},
-  flush(timeoutMs) {/* 冲刷缓冲事件 */},
-});
-export default createAdapter;
-```
-
-模块不存在、工厂函数不合法、或者 adapter 抛错，都会降级为空操作——遥测永远不会阻止 bridge 启动，也不会打断日志。
 
 ## 许可
 

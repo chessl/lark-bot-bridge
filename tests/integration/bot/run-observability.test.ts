@@ -49,7 +49,7 @@ describe('bot run observability', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('expected run flow to start');
-    await collect(result.execution.subscribe());
+    await collect(result.execution.events);
     await flushLogger();
 
     const started = (await readLogLines(h.logsDir)).find(

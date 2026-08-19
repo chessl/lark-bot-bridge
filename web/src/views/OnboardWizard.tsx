@@ -5,14 +5,6 @@ import { apiGet, apiPost } from "@/lib/api";
 import type { AgentKind, OnboardState } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "@/components/ui/sonner";
 
 // New-profile wizard: scan a Feishu QR to create a fresh app (same flow as the
@@ -127,19 +119,22 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
           <CheckCircle2 className="size-4" /> 应用已创建{botName ? `：${botName}` : ""}，确认后完成
         </div>
         <div className="space-y-1.5">
-          <Label>AI Agent</Label>
-          <Select value={agentKind} onValueChange={(v) => setAgentKind(v as AgentKind)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="claude">Claude Code</SelectItem>
-              <SelectItem value="codex">Codex</SelectItem>
-              <SelectItem value="omp">Oh My Pi</SelectItem>
-            </SelectContent>
-          </Select>
+          <label className="text-sm font-medium leading-none" htmlFor="onboard-agent">AI Agent</label>
+          <select
+            id="onboard-agent"
+            className="h-9 w-full cursor-pointer rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
+            value={agentKind}
+            onChange={(e) => setAgentKind(e.target.value as AgentKind)}
+          >
+            <option value="claude">Claude Code</option>
+            <option value="codex">Codex</option>
+            <option value="omp">Oh My Pi</option>
+          </select>
         </div>
         <div className="space-y-1.5">
-          <Label>Profile 名称</Label>
+          <label className="text-sm font-medium leading-none" htmlFor="onboard-profile">Profile 名称</label>
           <Input
+            id="onboard-profile"
             value={profileName}
             onChange={(e) => setProfileName(e.target.value)}
             placeholder={agentKind}

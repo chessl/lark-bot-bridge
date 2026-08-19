@@ -39,7 +39,7 @@ import {
   getShowToolCalls,
 } from '../config/schema';
 import { resolveAppSecret } from '../config/secret-resolver';
-import { log, reportMetric, withTrace } from '../core/logger';
+import { log, withTrace } from '../core/logger';
 import { MediaCache, type LocalAttachment } from '../media/cache';
 import {
   toPolicyAttachment,
@@ -69,7 +69,7 @@ import { addWorkingReaction, removeReaction } from './reaction';
 import { fetchKnownChats } from './lark-info';
 import type { AppPaths } from '../config/app-paths';
 import {
-  consumeCotEvents,
+  withCotEvents,
   CotClient,
   CotPublisher,
   finalAnswerOnlyState,
@@ -393,7 +393,6 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     reconnecting: () => {
       consecutiveReconnects++;
       log.warn('ws', 'reconnecting', { consecutive: consecutiveReconnects });
-      reportMetric('ws_reconnect', 1, { kind: 'ws' });
       // Stdout escalation — surface jitter that's hidden in the file log.
       if (consecutiveReconnects === 3) {
         console.error('⚠️ 已连续重连 3 次,网络可能不稳。');
@@ -991,7 +990,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const { execution, cwdRealpath: cwd } = flow;
   activePolicyFingerprints.set(scope, flow.policy.policyFingerprint);
   const handle = execution.handle;
-  const eventStream = execution.subscribe();
+  const eventStream = execution.events;
   if (flow.resumeFrom) {
     log.info('session', 'resume', { sessionId: flow.resumeFrom, cwd });
   } else {
@@ -1086,18 +1085,14 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       });
       await cotPublisher.start();
       if (!cotPublisher.disabled) {
-        const cotDone = consumeCotEvents(execution.subscribe(), cotPublisher, {
-          detail: cotMessages,
-        });
         const finalState = await processAgentStream(
           handle,
-          eventStream,
+          withCotEvents(eventStream, cotPublisher, { detail: cotMessages }),
           scope,
           idleTimeoutMs,
           recordSession,
           async () => {},
         );
-        await cotDone;
         if (cotPublisher.degradedReason) {
           await sendCotDegradedNotice({
             channel,
@@ -1552,7 +1547,6 @@ async function processAgentStream(
   recordSession: (event: AgentEvent) => void,
   flush: (state: RunState) => Promise<void>,
 ): Promise<RunState> {
-  const runStart = Date.now();
   let state: RunState = initialState;
 
   // Idle watchdog: claude going silent for `idleTimeoutMs` is treated as
@@ -1619,9 +1613,6 @@ async function processAgentStream(
             ...(inputTokens !== undefined ? { inputTokens } : {}),
             ...(outputTokens !== undefined ? { outputTokens } : {}),
           });
-          if (costUsd !== undefined) reportMetric('cost_usd', costUsd);
-          if (inputTokens !== undefined) reportMetric('tokens_in', inputTokens);
-          if (outputTokens !== undefined) reportMetric('tokens_out', outputTokens);
         }
         continue;
       }
@@ -1656,7 +1647,6 @@ async function processAgentStream(
     }
   }
   log.info('card', 'final', { scope, terminal: state.terminal, interrupted: handle.interrupted });
-  reportMetric('run_e2e_ms', Date.now() - runStart, { terminal: state.terminal });
   await flush(state);
   if (handle.interrupted) {
     await handle.run.stop();

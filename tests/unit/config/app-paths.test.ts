@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveAppPaths } from '../../../src/config/app-paths';
@@ -17,6 +17,17 @@ afterEach(async () => {
 });
 
 describe('resolveAppPaths', () => {
+  it('defaults to ~/.lark-bot-bridge', () => {
+    const previous = process.env.LARK_CHANNEL_HOME;
+    delete process.env.LARK_CHANNEL_HOME;
+    try {
+      expect(resolveAppPaths().rootDir).toBe(join(homedir(), '.lark-bot-bridge'));
+    } finally {
+      if (previous === undefined) delete process.env.LARK_CHANNEL_HOME;
+      else process.env.LARK_CHANNEL_HOME = previous;
+    }
+  });
+
   it('keeps root config, active profile, registry, and locks under the user root', async () => {
     const root = await tempRoot();
 

@@ -35,6 +35,7 @@ import {
   type MessageReplyMode,
 } from '../config/schema';
 import {
+  type AgentKind,
   effectiveLarkCliIdentity,
   type MeetingConfig,
   type LarkCliIdentityPreset,
@@ -52,7 +53,7 @@ export class ApiError extends HttpError {}
 /** The settings payload the SPA reads and writes. */
 export interface ConfigView {
   profile: string;
-  agentKind: string;
+  agentKind: AgentKind;
   mode: ProfileMode;
   model: string;
   models: { value: string; label: string }[];

@@ -40,31 +40,10 @@ describe('RunExecutor', () => {
     });
     expect(h.activeRuns.get('scope-1')?.run.runId).toBe('run-1');
 
-    await collect(execution.subscribe());
+    await collect(execution.events);
     expect(h.activeRuns.get('scope-1')).toBeUndefined();
   });
 
-  it('fans out one agent event stream to multiple consumers without spawning twice', async () => {
-    const events = [
-      { type: 'system' as const, sessionId: 'sess-1', cwd: '/repo' },
-      { type: 'text' as const, delta: 'hello' },
-      { type: 'done' as const, sessionId: 'sess-1', terminationReason: 'normal' as const },
-    ];
-    const h = await createHarness({ events });
-    const execution = await h.executor.submit({
-      scopeId: 'scope-1',
-      policy: policy(h.tmp.workspace),
-    });
-
-    const [rendererEvents, sessionEvents] = await Promise.all([
-      collect(execution.subscribe()),
-      collect(execution.subscribe()),
-    ]);
-
-    expect(h.agent.runs).toHaveLength(1);
-    expect(rendererEvents).toEqual(events);
-    expect(sessionEvents).toEqual(events);
-  });
 
   it('fast-fails nowait when the pool is full and queues normal submissions FIFO', async () => {
     const h = await createHarness({
@@ -93,10 +72,10 @@ describe('RunExecutor', () => {
     });
     expect(h.pool.snapshot()).toMatchObject({ active: 1, waiting: 1 });
 
-    await collect(first.subscribe());
+    await collect(first.events);
     const second = await secondPromise;
     expect(second.runId).toBe('run-2');
-    await collect(second.subscribe());
+    await collect(second.events);
   });
 
   it('rejects expired policy before spawning the adapter', async () => {
@@ -144,7 +123,7 @@ describe('RunExecutor', () => {
     ).rejects.toMatchObject({ code: 'run-already-active' });
     expect(h.agent.runs).toHaveLength(1);
 
-    await collect(first.subscribe());
+    await collect(first.events);
   });
 
   it('accepts new submissions after reconnect drain is released', async () => {
@@ -160,7 +139,7 @@ describe('RunExecutor', () => {
     });
 
     expect(execution.runId).toBe('run-1');
-    await collect(execution.subscribe());
+    await collect(execution.events);
   });
 
   it('rejects submissions that were queued before reconnect drain started', async () => {
@@ -184,7 +163,7 @@ describe('RunExecutor', () => {
 
     const resume = h.activeRuns.pauseNewRuns('reconnect');
     try {
-      await collect(first.subscribe());
+      await collect(first.events);
       await expect(second).rejects.toMatchObject({ code: 'reconnect-in-progress' });
       expect(h.agent.runs).toHaveLength(1);
       expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
@@ -256,7 +235,7 @@ describe('RunExecutor', () => {
       policy: policy(h.tmp.workspace),
     });
 
-    await collect(execution.subscribe());
+    await collect(execution.events);
 
     const run = execution.run as FakeAgentRun;
     expect(run.waitForExitCalls).toBe(1);

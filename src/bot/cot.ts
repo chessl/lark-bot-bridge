@@ -260,11 +260,11 @@ export function finalAnswerOnlyState(state: RunState): RunState {
   };
 }
 
-export async function consumeCotEvents(
+export async function* withCotEvents(
   events: AsyncIterable<AgentEvent>,
   publisher: CotPublisher,
   opts: { detail: CotMessagesMode },
-): Promise<void> {
+): AsyncGenerator<AgentEvent> {
   let reasoningOpen = false;
   let textStepOpen = false;
   let textMessageOpen = false;
@@ -273,10 +273,14 @@ export async function consumeCotEvents(
   const toolBrief = new Map<string, { name: string; input: unknown }>();
   const reasoningMessageId = `reasoning-${publisher.runId}`;
   const finalStepId = `step-process-${publisher.runId}`;
+  let finishReason = 'done';
 
   try {
     for await (const evt of events) {
-      if (evt.type === 'system' || evt.type === 'usage') continue;
+      if (evt.type === 'system' || evt.type === 'usage') {
+        yield evt;
+        continue;
+      }
       if (evt.type === 'thinking') {
         closeTextIfNeeded();
         if (!reasoningOpen) {
@@ -291,6 +295,7 @@ export async function consumeCotEvents(
           messageId: reasoningMessageId,
           delta: truncateCot(evt.delta, COT_TEXT_MAX),
         });
+        yield evt;
         continue;
       }
       if (evt.type === 'tool_use') {
@@ -314,6 +319,7 @@ export async function consumeCotEvents(
           });
         }
         publisher.enqueue('TOOL_CALL_END', { toolCallId });
+        yield evt;
         continue;
       }
       if (evt.type === 'tool_result') {
@@ -330,6 +336,7 @@ export async function consumeCotEvents(
               : '工具调用已完成',
         });
         toolBrief.delete(evt.id);
+        yield evt;
         continue;
       }
       if (evt.type === 'text') {
@@ -350,9 +357,13 @@ export async function consumeCotEvents(
           messageId: textMessageId,
           delta: truncateCot(evt.delta, COT_TEXT_MAX),
         });
+        yield evt;
         continue;
       }
-      if (evt.type === 'final_text') continue;
+      if (evt.type === 'final_text') {
+        yield evt;
+        continue;
+      }
       if (evt.type === 'done' || evt.type === 'error') {
         closeReasoningIfNeeded();
         closeTextIfNeeded();
@@ -363,26 +374,29 @@ export async function consumeCotEvents(
           });
         }
         if (evt.type === 'error') {
+          finishReason = 'error';
           publisher.enqueue('RUN_ERROR', { message: evt.message, code: evt.terminationReason ?? 'error' });
-          await publisher.finish('error');
         } else {
           const status = evt.terminationReason === 'normal' ? 'done' : evt.terminationReason ?? 'done';
+          finishReason = status === 'done' ? 'done' : 'error';
           publisher.enqueue('RUN_FINISHED', {
             threadId: publisher.scope,
             runId: publisher.runId,
             status,
           });
-          await publisher.finish(status === 'done' ? 'done' : 'error');
         }
+        yield evt;
         return;
       }
     }
+  } catch (err) {
+    finishReason = 'error';
+    log.warn('cot', 'consume-failed', { err: err instanceof Error ? err.message : String(err) });
+    throw err;
+  } finally {
     closeReasoningIfNeeded();
     closeTextIfNeeded();
-    await publisher.finish('done');
-  } catch (err) {
-    log.warn('cot', 'consume-failed', { err: err instanceof Error ? err.message : String(err) });
-    await publisher.finish('error');
+    await publisher.finish(finishReason);
   }
 
   function closeReasoningIfNeeded(): void {

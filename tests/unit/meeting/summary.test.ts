@@ -32,12 +32,12 @@ function fakeRun(text: string) {
   return {
     ok: true as const,
     execution: {
-      subscribe: () => ({
+      events: {
         async *[Symbol.asyncIterator]() {
           yield { type: 'text', delta: text };
           yield { type: 'done' };
         },
-      }),
+      },
     },
     policy: {},
     cwdRealpath: '/repo',

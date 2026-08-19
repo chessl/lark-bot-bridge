@@ -1,10 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, open, rm } from 'node:fs/promises';
+import { chmod, mkdir, open, rename as fsRename, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { promisify } from 'node:util';
-import gracefulFs from 'graceful-fs';
-
-const gracefulRename = promisify(gracefulFs.rename);
 
 export interface AtomicWriteOptions {
   mode?: number;
@@ -58,11 +54,11 @@ async function renameWithRetry(
 ): Promise<void> {
   const maxAttempts = opts.maxRenameAttempts ?? DEFAULT_RENAME_ATTEMPTS;
   const delayMs = opts.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
-  const rename = opts.rename ?? ((src, dest, fallback) => fallback(src, dest));
+  const rename = opts.rename ?? ((src, dest) => fsRename(src, dest));
   let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      await rename(from, to, gracefulRename);
+      await rename(from, to, fsRename);
       return;
     } catch (err) {
       lastErr = err;

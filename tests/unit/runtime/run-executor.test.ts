@@ -33,7 +33,7 @@ describe('RunExecutor policy runtime options', () => {
       permissionMode: 'acceptEdits',
     });
 
-    await collect(execution.subscribe());
+    await collect(execution.events);
   });
 });
 

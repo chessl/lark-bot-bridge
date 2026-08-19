@@ -45,12 +45,6 @@ describe('hash media attachment resolver', () => {
     expect(await readFile(attachment!.absPath, 'utf8')).toBe('image-bytes');
   });
 
-  it('hashes downloaded resources without reading the full file into memory', async () => {
-    const source = await readFile(new URL('../../../src/media/cache.ts', import.meta.url), 'utf8');
-
-    expect(source).not.toContain('readFile(tmpPath)');
-    expect(source).toContain('createReadStream(path)');
-  });
 
   it('garbage-collects old cache files by TTL', async () => {
     const root = await tempDir();

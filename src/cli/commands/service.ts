@@ -239,7 +239,7 @@ async function confirmStopRuntimeLockProcess(): Promise<boolean> {
 }
 
 /**
- * Poll `~/.lark-channel/processes.json` for a freshly-registered bridge
+ * Poll `~/.lark-bot-bridge/registry/processes.json` for a freshly-registered bridge
  * instance whose appId matches our config and whose `botName` is filled —
  * the latter only happens AFTER the WS handshake to Feishu succeeds, so
  * by the time we see it the daemon is genuinely online.
@@ -555,7 +555,7 @@ export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promis
  * `bridge unregister` — stop, disable autostart, and remove the service
  * definition file.
  *
- * Idempotent. Leaves ~/.lark-channel/ state untouched (keystore, sessions,
+ * Idempotent. Leaves ~/.lark-bot-bridge/ state untouched (keystore, sessions,
  * logs etc) — that's the user's data, not service-manager hooks.
  */
 export async function runServiceUnregister(opts: ServiceProfileOptions = {}): Promise<void> {

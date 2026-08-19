@@ -16,7 +16,7 @@ import { promptPassword } from '../prompt';
  *    `lark-bot-bridge secrets get` reads a JSON-RPC request
  *    from stdin and writes the decrypted secret to stdout. This is what
  *    `accounts.app.secret = { source: "exec", ... }` resolves through when
- *    lark-cli binds against ~/.lark-channel/config.json.
+ *    lark-cli binds against ~/.lark-bot-bridge/config.json.
  */
 
 interface ExecRequest {
@@ -95,7 +95,7 @@ export async function runSecretsSet(
     process.exit(1);
   }
   await setAppSecret(appId, plaintext, opts);
-  console.log(`✓ 已加密存到 ~/.lark-channel/secrets.enc`);
+  console.log(`✓ 已加密存到 ~/.lark-bot-bridge/secrets.enc`);
 }
 
 export async function runSecretsList(opts: SecretProfileOptions = {}): Promise<void> {

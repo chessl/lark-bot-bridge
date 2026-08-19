@@ -14,10 +14,7 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -26,14 +23,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "@/components/ui/sonner";
+
+const SELECT_CLASS = "h-9 w-full cursor-pointer rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
+const CHECKBOX_CLASS = "size-4 cursor-pointer accent-primary";
+const LINK_BUTTON_CLASS = "inline-flex h-8 cursor-pointer items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
 
 export function ConfigView({ profile }: { profile: string }) {
   const [cfg, setCfg] = useState<ConfigData | null>(null);
@@ -200,7 +194,7 @@ export function ConfigView({ profile }: { profile: string }) {
           )}
           <AccessList label="允许私聊的用户（open_id）" placeholder="ou_..." ids={cfg.access.allowedUsers}
             onAdd={(id) => access("add", "user", id)} onRemove={(id) => access("remove", "user", id)} />
-          <Separator />
+          <hr className="border-border" />
           <AllowedChats
             profile={profile}
             ids={cfg.access.allowedChats}
@@ -214,7 +208,7 @@ export function ConfigView({ profile }: { profile: string }) {
             onRemove={(id) => access("remove", "chat", id)}
             onSetMention={setMention}
           />
-          <Separator />
+          <hr className="border-border" />
           <AccessList label="管理员（open_id）" placeholder="ou_..." ids={cfg.access.admins}
             onAdd={(id) => access("add", "admin", id)} onRemove={(id) => access("remove", "admin", id)} />
         </CardContent>
@@ -288,9 +282,7 @@ function MeetingPreflightPanel({ pre, checking, onRecheck }: {
       {pre.consoleUrl && (
         <div className="flex items-start gap-4">
           <div className="space-y-2">
-            <Button asChild size="sm">
-              <a href={pre.consoleUrl} target="_blank" rel="noreferrer">去开通权限</a>
-            </Button>
+            <a className={LINK_BUTTON_CLASS} href={pre.consoleUrl} target="_blank" rel="noreferrer">去开通权限</a>
             <p className="text-xs text-muted-foreground">开通后点「重新检查」；生效后需重启该 profile。</p>
           </div>
           <div className="rounded-md border bg-white p-2">
@@ -302,9 +294,7 @@ function MeetingPreflightPanel({ pre, checking, onRecheck }: {
       {pre.betaChatUrl && (
         <div className="flex items-start gap-4">
           <div className="space-y-2">
-            <Button asChild size="sm">
-              <a href={pre.betaChatUrl} target="_blank" rel="noreferrer">加入内测群申请开通</a>
-            </Button>
+            <a className={LINK_BUTTON_CLASS} href={pre.betaChatUrl} target="_blank" rel="noreferrer">加入内测群申请开通</a>
             <p className="text-xs text-muted-foreground">开通后点「重新检查」。</p>
           </div>
           <div className="rounded-md border bg-white p-2">
@@ -400,7 +390,7 @@ function MeetingCard({ profile, cfg, onChange }: {
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle>会议智能体</CardTitle>
-        <Switch checked={cfg.enabled} onCheckedChange={(v) => set("enabled", v)} />
+        <input aria-label="启用会议智能体" className={CHECKBOX_CLASS} type="checkbox" checked={cfg.enabled} onChange={(e) => set("enabled", e.target.checked)} />
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground">
@@ -457,7 +447,7 @@ function MeetingCard({ profile, cfg, onChange }: {
               </Field>
             )}
 
-            <Separator />
+            <hr className="border-border" />
 
             {/* Live state — needs the profile to be online. */}
             {!live?.available ? (
@@ -465,7 +455,7 @@ function MeetingCard({ profile, cfg, onChange }: {
             ) : (
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Label>在会会议（{live.sessions.length}）</Label>
+                  <label className="text-sm font-medium leading-none">在会会议（{live.sessions.length}）</label>
                   <Badge variant={live.push.hooked ? (live.push.received > 0 ? "success" : "secondary") : "destructive"}>
                     {live.push.hooked
                       ? live.push.received > 0
@@ -522,7 +512,7 @@ function MeetingCard({ profile, cfg, onChange }: {
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
+      <label className="text-sm font-medium leading-none">{label}</label>
       {children}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </div>
@@ -535,10 +525,10 @@ function ToggleRow({ label, hint, checked, onChange }: {
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="space-y-0.5">
-        <Label>{label}</Label>
+        <label className="text-sm font-medium leading-none">{label}</label>
         {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       </div>
-      <Switch checked={checked} onCheckedChange={onChange} />
+      <input aria-label={label} className={CHECKBOX_CLASS} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
     </div>
   );
 }
@@ -547,14 +537,9 @@ function SelectRow({ value, onChange, options }: {
   value: string; onChange: (v: string) => void; options: [string, string][];
 }) {
   return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger><SelectValue /></SelectTrigger>
-      <SelectContent>
-        {options.map(([v, l]) => (
-          <SelectItem key={v} value={v}>{l}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <select className={SELECT_CLASS} value={value} onChange={(e) => onChange(e.target.value)}>
+      {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+    </select>
   );
 }
 
@@ -582,7 +567,7 @@ function AllowedChats({
 
   return (
     <div className="space-y-2">
-      <Label>允许响应的群（{ids.length}）</Label>
+      <label className="text-sm font-medium leading-none">允许响应的群（{ids.length}）</label>
       <div className="divide-y rounded-md border">
         {ids.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">（暂无）</p>}
         {ids.map((id) => {
@@ -594,17 +579,16 @@ function AllowedChats({
                 {chatNames[id] && <div className="truncate text-sm">{chatNames[id]}</div>}
                 <div className="truncate font-mono text-xs text-muted-foreground">{id}</div>
               </div>
-              <Select
+              <select
+                aria-label={`${id} 的 @ 设置`}
+                className="h-8 w-[150px] cursor-pointer rounded-md border bg-transparent px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
                 value={value}
-                onValueChange={(v) => onSetMention(id, v === "global" ? null : v === "on")}
+                onChange={(e) => onSetMention(id, e.target.value === "global" ? null : e.target.value === "on")}
               >
-                <SelectTrigger className="h-8 w-[150px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="global">@：跟随全局（{globalRequire ? "需@" : "无需@"}）</SelectItem>
-                  <SelectItem value="on">需要 @</SelectItem>
-                  <SelectItem value="off">无需 @</SelectItem>
-                </SelectContent>
-              </Select>
+                <option value="global">@：跟随全局（{globalRequire ? "需@" : "无需@"}）</option>
+                <option value="on">需要 @</option>
+                <option value="off">无需 @</option>
+              </select>
               <Button variant="ghost" size="sm" onClick={() => onRemove(id)}>移除</Button>
             </div>
           );
@@ -925,7 +909,7 @@ function AccessList({ label, placeholder, ids, onAdd, onRemove }: {
   const [draft, setDraft] = useState("");
   return (
     <div className="space-y-2">
-      <Label>{label}（{ids.length}）</Label>
+      <label className="text-sm font-medium leading-none">{label}（{ids.length}）</label>
       <div className="rounded-md border divide-y">
         {ids.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">（暂无）</p>}
         {ids.map((id) => (

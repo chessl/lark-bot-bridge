@@ -30,7 +30,7 @@ describe('run observability events', () => {
         stage: 'submit',
       },
     });
-    await collect(execution.subscribe());
+    await collect(execution.events);
     await flushLogger();
 
     const lines = (await readLogLines(h.logsDir)).filter((line) => line.phase === 'run');

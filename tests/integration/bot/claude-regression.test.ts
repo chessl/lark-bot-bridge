@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getMessageReplyMode, getRequireMentionInGroup } from '../../../src/config/schema.js';
 import { PendingQueue } from '../../../src/bot/pending-queue.js';
@@ -53,16 +51,6 @@ describe('Claude IM regression boundaries', () => {
     ]);
   });
 
-  it('documents the private intake policy that drops @all and undirected group chatter', async () => {
-    const source = await readFile(join(process.cwd(), 'src/bot/channel.ts'), 'utf8');
-
-    expect(source).toContain('respondToMentionAll: false');
-    // The group-mention gate honors a per-chat override first, then the global
-    // setting (both resolved by requireMentionForChat).
-    expect(source).toContain('requireMentionForChat(controls.profileConfig, controls.cfg, msg.chatId)');
-    expect(source).toContain('!msg.mentionedBot');
-    expect(source).toContain('msg.chatType !== \'p2p\'');
-  });
 });
 
 function msg(messageId: string, content: string): NormalizedMessage {

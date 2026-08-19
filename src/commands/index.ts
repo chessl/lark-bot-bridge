@@ -52,7 +52,7 @@ import {
 } from '../policy/access';
 import { buildEncryptedAccountConfig } from '../config/store';
 import * as configOps from '../config/config-ops';
-import { log, reportMetric } from '../core/logger';
+import { log } from '../core/logger';
 import { renderCard } from '../card/run-renderer';
 import {
   finalizeIfRunning,
@@ -236,7 +236,6 @@ export async function tryHandleCommand(ctx: CommandContext): Promise<boolean> {
     await h(args, ctx);
   } catch (err) {
     log.fail('command', err, { cmd });
-    reportMetric('command_fail', 1, { step: 'dispatch' });
   }
   return true;
 }
@@ -267,7 +266,6 @@ export async function runCommandHandler(
     await h(args, ctx);
   } catch (err) {
     log.fail('command', err, { cmd: name });
-    reportMetric('command_fail', 1, { step: 'handler' });
   }
   return true;
 }
@@ -282,7 +280,6 @@ async function reply(ctx: CommandContext, markdown: string): Promise<void> {
     await ctx.channel.send(ctx.msg.chatId, { markdown }, commandReplyOptions(ctx));
   } catch (err) {
     log.fail('command', err, { step: 'reply' });
-    reportMetric('command_fail', 1, { step: 'reply' });
     if (!isMessageAuditReject(err) || markdown === AUDIT_SAFE_COMMAND_REPLY) return;
     try {
       await ctx.channel.send(
@@ -292,7 +289,6 @@ async function reply(ctx: CommandContext, markdown: string): Promise<void> {
       );
     } catch (fallbackErr) {
       log.fail('command', fallbackErr, { step: 'reply-audit-fallback' });
-      reportMetric('command_fail', 1, { step: 'reply-audit-fallback' });
     }
   }
 }
@@ -1075,7 +1071,6 @@ async function handleReconnect(args: string, ctx: CommandContext): Promise<void>
     log.info('command', 'reconnect-ok');
   } catch (err) {
     log.fail('command', err, { step: 'reconnect' });
-    reportMetric('command_fail', 1, { step: 'reconnect' });
     await reply(ctx, `❌ 重连失败:${err instanceof Error ? err.message : String(err)}`);
   } finally {
     resumeNewRuns?.();
@@ -1214,7 +1209,6 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
       return;
     }
     log.fail('command', err, { step: 'doctor.submit' });
-    reportMetric('command_fail', 1, { step: 'doctor.submit' });
     await reply(ctx, doctorReport('failed'));
     return;
   }
@@ -1233,7 +1227,7 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
               const echoStatus = (): string => formatDoctorEchoStatus(echoText, state);
               const flush = (): Promise<void> =>
                 ctrl.update(renderCard(withDoctorReport(state, doctorReport(echoStatus()))));
-              for await (const evt of execution.subscribe()) {
+              for await (const evt of execution.events) {
                 if (execution.handle.interrupted) break;
                 // /doctor runs are session-less: skip 'system' so we don't
                 // persist a doctor's sessionId over the user's real session.
@@ -1262,7 +1256,7 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
       // ack reply above.
       let state: RunState = initialState;
       let echoText = '';
-      for await (const evt of execution.subscribe()) {
+      for await (const evt of execution.events) {
         if (execution.handle.interrupted) break;
         if (evt.type === 'system') continue;
         if (evt.type === 'usage') {
@@ -1285,7 +1279,6 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
     }
   } catch (err) {
     log.fail('command', err, { step: 'doctor' });
-    reportMetric('command_fail', 1, { step: 'doctor' });
   } finally {
     doctorInFlightProfiles.delete(profileKey);
   }
@@ -1941,7 +1934,6 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
         }
       }
       log.fail('command', err, { step: failureStep });
-      reportMetric('command_fail', 1, { step: failureStep });
       await waitForSettle();
       await showResultCardInPlace(
         ctx,

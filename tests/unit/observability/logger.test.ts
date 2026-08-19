@@ -1,6 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   closeLogger,
@@ -8,11 +7,7 @@ import {
   flushLogger,
   getLoggerConfig,
   log,
-  reportError,
-  reportMetric,
 } from '../../../src/core/logger.js';
-import { loadTelemetryAdapter } from '../../../src/core/telemetry.js';
-import { REQUIRED_OBSERVABILITY_EVENTS } from '../../../src/observability/events.js';
 import { createTmpProfile } from '../../helpers/tmp-profile.js';
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -193,140 +188,4 @@ describe('profile logger observability', () => {
     expect(entry.trace).toContain('[truncated]');
   });
 
-  it('sends sanitized events and errors to the optional telemetry adapter', async () => {
-    const tmp = await createTmpProfile('logger-telemetry-redact-');
-    cleanups.push(tmp.cleanup);
-    const logsDir = join(tmp.profile, 'logs');
-    const adapterPath = join(tmp.root, 'telemetry-adapter.mjs');
-    await writeFile(
-      adapterPath,
-      `
-        globalThis.__bridgeTelemetryEvents = [];
-        globalThis.__bridgeTelemetryErrors = [];
-        export function createAdapter() {
-          return {
-            emit(event) { globalThis.__bridgeTelemetryEvents.push(event); },
-            recordError(err, ctx) { globalThis.__bridgeTelemetryErrors.push({ err, ctx }); },
-            recordMetric() {},
-          };
-        }
-      `,
-    );
-    process.env.LARK_CHANNEL_TELEMETRY_MODULE = pathToFileURL(adapterPath).href;
-    await loadTelemetryAdapter({
-      version: 'test',
-      appId: 'cli_secret_app',
-      tenant: 'feishu',
-      hostname: 'host',
-    });
-
-    configureLogger({
-      logsDir,
-      now: () => new Date('2026-05-25T00:00:00.000Z'),
-    });
-
-    log.fail('agent', new Error('failed token=raw-token /Users/example/private/repo'), {
-      prompt: 'raw prompt secret',
-      cwd: '/opt/private/repo',
-      chatId: 'oc_1234567890',
-      fileKey: 'file_v2_rawsecret',
-      sourceFileKey: 'file_v2_sourcesecret',
-    });
-    reportError(new Error('direct file_v2_errorsecret /Users/example/private/repo'), {
-      fileKey: 'file_v2_ctxsecret',
-      sourceFileKey: 'file_v2_ctxsourcesecret',
-    });
-    await flushLogger();
-
-    const globals = globalThis as typeof globalThis & {
-      __bridgeTelemetryEvents?: unknown[];
-      __bridgeTelemetryErrors?: unknown[];
-    };
-    const telemetryText = JSON.stringify({
-      events: globals.__bridgeTelemetryEvents,
-      errors: globals.__bridgeTelemetryErrors,
-    });
-    expect(telemetryText).not.toContain('raw prompt secret');
-    expect(telemetryText).not.toContain('raw-token');
-    expect(telemetryText).not.toContain('/Users/example/private/repo');
-    expect(telemetryText).not.toContain('/opt/private/repo');
-    expect(telemetryText).not.toContain('file_v2_rawsecret');
-    expect(telemetryText).not.toContain('file_v2_sourcesecret');
-    expect(telemetryText).not.toContain('file_v2_errorsecret');
-    expect(telemetryText).not.toContain('file_v2_ctxsecret');
-    expect(telemetryText).not.toContain('file_v2_ctxsourcesecret');
-    expect(telemetryText).toContain('[REDACTED]');
-    expect(telemetryText).toContain('[REDACTED_PATH]');
-    expect(telemetryText).toContain('[REDACTED_RESOURCE]');
-
-    delete process.env.LARK_CHANNEL_TELEMETRY_MODULE;
-  });
-
-  it('sanitizes optional telemetry metric tags', async () => {
-    const tmp = await createTmpProfile('logger-telemetry-metric-');
-    cleanups.push(tmp.cleanup);
-    const adapterPath = join(tmp.root, 'telemetry-metric-adapter.mjs');
-    await writeFile(
-      adapterPath,
-      `
-        globalThis.__bridgeTelemetryMetrics = [];
-        export function createAdapter() {
-          return {
-            emit() {},
-            recordError() {},
-            recordMetric(name, value, tags) {
-              globalThis.__bridgeTelemetryMetrics.push({ name, value, tags });
-            },
-          };
-        }
-      `,
-    );
-    process.env.LARK_CHANNEL_TELEMETRY_MODULE = pathToFileURL(adapterPath).href;
-    await loadTelemetryAdapter({
-      version: 'test',
-      appId: 'cli_secret_app',
-      tenant: 'feishu',
-      hostname: 'host',
-    });
-
-    reportMetric('command_fail', 1, {
-      chatId: 'oc_1234567890',
-      token: 'raw-token',
-      cwd: '/Users/example/private/repo',
-      fileKey: 'file_v2_metricsecret',
-      sourceFileKey: 'file_v2_metricsourcesecret',
-    });
-
-    const globals = globalThis as typeof globalThis & {
-      __bridgeTelemetryMetrics?: unknown[];
-    };
-    const metricsText = JSON.stringify(globals.__bridgeTelemetryMetrics);
-    expect(metricsText).not.toContain('oc_1234567890');
-    expect(metricsText).not.toContain('raw-token');
-    expect(metricsText).not.toContain('/Users/example/private/repo');
-    expect(metricsText).not.toContain('file_v2_metricsecret');
-    expect(metricsText).not.toContain('file_v2_metricsourcesecret');
-    expect(metricsText).toContain('...567890');
-    expect(metricsText).toContain('[REDACTED]');
-    expect(metricsText).toContain('[REDACTED_PATH]');
-    expect(metricsText).toContain('[REDACTED_RESOURCE]');
-
-    delete process.env.LARK_CHANNEL_TELEMETRY_MODULE;
-  });
-
-  it('declares the required low-sensitivity event names', () => {
-    expect(REQUIRED_OBSERVABILITY_EVENTS).toEqual(
-      expect.arrayContaining([
-        'run.started',
-        'run.completed',
-        'run.failed',
-        'policy.denied',
-        'callback.denied',
-        'access.owner_refresh_failed',
-        'jsonl.unknown_event',
-        'attachment.decision',
-        'comment.reply_failed',
-      ]),
-    );
-  });
 });

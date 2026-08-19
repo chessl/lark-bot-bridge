@@ -101,12 +101,12 @@ describe('logger redaction', () => {
 
   it('redacts home-relative local paths inside arbitrary strings', async () => {
     log.warn('agent', 'stderr', {
-      line: 'artifact saved to ~/.lark-channel/profiles/claude/media/private.bin',
+      line: 'artifact saved to ~/.lark-bot-bridge/profiles/claude/media/private.bin',
     });
     await flushLogger();
 
     const text = await readTodayLog();
-    expect(text).not.toContain('~/.lark-channel/profiles/claude/media/private.bin');
+    expect(text).not.toContain('~/.lark-bot-bridge/profiles/claude/media/private.bin');
     expect(text).toContain('[REDACTED_PATH]');
   });
 

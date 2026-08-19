@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { consumeCotEvents, CotClient, CotPublisher, cotBriefToolTitle, finalAnswerOnlyState } from '../../../src/bot/cot.js';
+import { withCotEvents, CotClient, CotPublisher, cotBriefToolTitle, finalAnswerOnlyState } from '../../../src/bot/cot.js';
 import type { AgentEvent } from '../../../src/agent/types.js';
 import type { RunState } from '../../../src/card/run-state.js';
 
@@ -16,13 +16,13 @@ describe('COT event mapping', () => {
     });
     await publisher.start();
 
-    await consumeCotEvents(iterate([
+    await drain(withCotEvents(iterate([
       { type: 'text', delta: '我会先生成图片。' },
       { type: 'tool_use', id: 'tool-1', name: 'command_execution', input: { command: 'echo bear' } },
       { type: 'tool_result', id: 'tool-1', output: 'ok', isError: false },
       { type: 'text', delta: '图片已经生成。' },
       { type: 'done', terminationReason: 'normal' },
-    ]), publisher, { detail: 'brief' });
+    ]), publisher, { detail: 'brief' }));
 
     const eventTypes = client.events.map((event) => event.event_type);
     expect(eventTypes).toContain('TEXT_MESSAGE_START');
@@ -54,11 +54,11 @@ describe('COT event mapping', () => {
     });
     await publisher.start();
 
-    await consumeCotEvents(iterate([
+    await drain(withCotEvents(iterate([
       { type: 'tool_use', id: 'tool-1', name: 'command_execution', input: { command: 'pwd' } },
       { type: 'tool_result', id: 'tool-1', output: 'workspace', isError: false },
       { type: 'done', terminationReason: 'normal' },
-    ]), publisher, { detail: 'detailed' });
+    ]), publisher, { detail: 'detailed' }));
 
     expect(client.events.map((event) => event.event_type)).toContain('TOOL_CALL_ARGS');
     const result = client.events.find((event) => event.event_type === 'TOOL_CALL_RESULT');
@@ -176,10 +176,10 @@ describe('COT event mapping', () => {
     });
     await publisher.start();
 
-    await consumeCotEvents(iterate([
+    await drain(withCotEvents(iterate([
       { type: 'text', delta: 'working' },
       { type: 'done', terminationReason: 'normal' },
-    ]), publisher, { detail: 'brief' });
+    ]), publisher, { detail: 'brief' }));
 
     expect(publisher.disabled).toBe(true);
     expect(publisher.degradedReason).toBe('field validation failed');
@@ -208,6 +208,12 @@ class FakeCotClient {
 
   async complete(_ref: unknown, reason: string): Promise<void> {
     this.completed.push(reason);
+  }
+}
+
+async function drain(events: AsyncIterable<AgentEvent>): Promise<void> {
+  for await (const _ of events) {
+    // consume
   }
 }
 

@@ -11,7 +11,7 @@ import { saveConfig } from './store';
 import { secretKeyForApp, type AppConfig, type AppPreferences } from './schema';
 import type { ProfileAccess, ProfileConfig, ProfileMode } from './profile-schema';
 import { applyLarkCliIdentityPolicy } from '../lark-cli/identity-policy';
-import { log, reportMetric } from '../core/logger';
+import { log } from '../core/logger';
 
 /**
  * The mutable per-profile runtime state these ops read and keep in sync. The
@@ -72,52 +72,47 @@ export async function saveAccessConfig(
   state: MutableProfileState,
   mutate: (access: ProfileAccess) => ProfileAccess,
 ): Promise<ProfileAccess> {
-  try {
-    return await withConfigFileLock(state.configPath, async () => {
-      const root = await loadRootConfig(state.configPath);
-      if (!root) {
-        const access = mutate(state.profileConfig.access);
-        state.profileConfig = {
-          ...state.profileConfig,
-          access,
-        };
-        state.cfg.preferences = {
-          ...(state.cfg.preferences ?? {}),
-          access: {
-            allowedUsers: access.allowedUsers,
-            allowedChats: access.allowedChats,
-            admins: access.admins,
-            ...(access.chatRequireMention && Object.keys(access.chatRequireMention).length > 0
-              ? { chatRequireMention: access.chatRequireMention }
-              : {}),
-          },
-          requireMentionInGroup: access.requireMentionInGroup,
-        };
-        await saveConfig(state.cfg, state.configPath);
-        return access;
-      }
-
-      const profile = root.profiles[state.profile];
-      if (!profile) throw new Error(`profile not found: ${state.profile}`);
-      const access = mutate(profile.access);
-      root.profiles[state.profile] = {
-        ...profile,
+  return withConfigFileLock(state.configPath, async () => {
+    const root = await loadRootConfig(state.configPath);
+    if (!root) {
+      const access = mutate(state.profileConfig.access);
+      state.profileConfig = {
+        ...state.profileConfig,
         access,
       };
-      await saveRootConfig(root, state.configPath);
-      state.profileConfig = root.profiles[state.profile]!;
-      state.cfg = runtimeProfileConfig(root, state.profile);
-      log.info('config-ops', 'access-mutated', {
-        allowedUsers: access.allowedUsers.length,
-        allowedChats: access.allowedChats.length,
-        admins: access.admins.length,
-      });
+      state.cfg.preferences = {
+        ...(state.cfg.preferences ?? {}),
+        access: {
+          allowedUsers: access.allowedUsers,
+          allowedChats: access.allowedChats,
+          admins: access.admins,
+          ...(access.chatRequireMention && Object.keys(access.chatRequireMention).length > 0
+            ? { chatRequireMention: access.chatRequireMention }
+            : {}),
+        },
+        requireMentionInGroup: access.requireMentionInGroup,
+      };
+      await saveConfig(state.cfg, state.configPath);
       return access;
+    }
+
+    const profile = root.profiles[state.profile];
+    if (!profile) throw new Error(`profile not found: ${state.profile}`);
+    const access = mutate(profile.access);
+    root.profiles[state.profile] = {
+      ...profile,
+      access,
+    };
+    await saveRootConfig(root, state.configPath);
+    state.profileConfig = root.profiles[state.profile]!;
+    state.cfg = runtimeProfileConfig(root, state.profile);
+    log.info('config-ops', 'access-mutated', {
+      allowedUsers: access.allowedUsers.length,
+      allowedChats: access.allowedChats.length,
+      admins: access.admins.length,
     });
-  } catch (err) {
-    reportMetric('command_fail', 1, { step: 'access.save' });
-    throw err;
-  }
+    return access;
+  });
 }
 
 /**
