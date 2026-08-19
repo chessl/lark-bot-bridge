@@ -192,7 +192,7 @@ function initializeRequest() {
       clientInfo: {
         name: 'lark-bot-bridge',
         title: 'Lark Bot Bridge',
-        version: '0.7.0',
+        version: '0.1.0',
       },
       capabilities: null,
     },

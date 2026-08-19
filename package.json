@@ -1,6 +1,6 @@
 {
   "name": "lark-bot-bridge",
-  "version": "0.7.0",
+  "version": "0.1.0",
   "description": "Bridge Feishu/Lark messenger with local CLI coding agents",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/chessl/lark-bot-bridge#readme",
   "bin": {
-    "lark-bot-bridge": "./bin/lark-bot-bridge.mjs"
+    "lark-bot-bridge": "bin/lark-bot-bridge.mjs"
   },
   "exports": {
     ".": {
