@@ -70,7 +70,7 @@ lark-bot-bridge status
 lark-bot-bridge stop
 ```
 
-Install globally before using service commands. The daemon's launchd plist / systemd unit / Windows task records the bridge CLI path; if that path comes from an npm temp cache through `npx`, the daemon can break when the cache is cleaned. `run` is fine through `npx` as a one-shot foreground process.
+Install globally before using service commands. The daemon's launchd plist or systemd unit records the bridge CLI path; if that path comes from an npm temp cache through `npx`, the daemon can break when the cache is cleaned. `run` is fine through `npx` as a one-shot foreground process.
 
 Service commands install a per-profile service:
 
@@ -85,7 +85,6 @@ lark-bot-bridge unregister [--profile <name>]
 Platform mapping:
 - **macOS**: launchd user agent `ai.lark-bot-bridge.bot.<profile>`
 - **Linux**: systemd user unit `lark-bot-bridge.bot.<profile>.service`
-- **Windows**: Task Scheduler task `LarkBotBridge.Bot.<profile>`, launched through a `.cmd` wrapper
 
 Daemon logs are under `~/.lark-bot-bridge/profiles/<profile>/logs/daemon/`.
 
@@ -324,7 +323,7 @@ pnpm typecheck
 pnpm build
 ```
 
-`pnpm test` includes unit, integration, and process-level adapter tests. CI runs on macOS, Ubuntu, and Windows with `pnpm install --frozen-lockfile`, `pnpm test`, `pnpm typecheck`, and `pnpm build`.
+`pnpm test` includes unit, integration, and process-level adapter tests. CI runs on macOS and Ubuntu with `pnpm install --frozen-lockfile`, `pnpm test`, `pnpm typecheck`, and `pnpm build`.
 
 
 ## License

@@ -43,8 +43,7 @@ describe('ClaudeAdapter process contract', () => {
 
     expect(await realpath(record.cwd)).toBe(await realpath(fake.dir));
     expect(record.env.LARK_CHANNEL).toBe('1');
-    // The prompt goes via stdin, and the bridge system prompt via a temp file,
-    // so neither ever touches argv (which cmd.exe would mangle on Windows).
+    // The prompt and system prompt stay out of argv.
     expect(record.stdin).toBe('hello');
     expect(record.argv.slice(0, 7)).toEqual([
       '-p',
@@ -157,27 +156,12 @@ describe('ClaudeAdapter process contract', () => {
   });
 
   it('surfaces spawn errors as stream error events', async () => {
-    let run: ReturnType<ClaudeAdapter['run']>;
-    if (process.platform === 'win32') {
-      const fake = await createFakeClaude({
-        lines: [],
-        stderr: 'missing command\n',
-        exitCode: 1,
-      });
-      cleanup.push(fake.dir);
-      run = new ClaudeAdapter({ binary: fake.path }).run({
-        runId: 'run-missing',
-        prompt: 'hi',
-        cwd: fake.dir,
-      });
-    } else {
-      const missing = join(tmpdir(), `missing-claude-${Date.now()}`);
-      run = new ClaudeAdapter({ binary: missing }).run({
-        runId: 'run-missing',
-        prompt: 'hi',
-        cwd: tmpdir(),
-      });
-    }
+    const missing = join(tmpdir(), `missing-claude-${Date.now()}`);
+    const run = new ClaudeAdapter({ binary: missing }).run({
+      runId: 'run-missing',
+      prompt: 'hi',
+      cwd: tmpdir(),
+    });
 
     const events = await collect(run.events);
 

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { detectInstalledAgents, resolveExecutablePath } from '../../../src/cli/agent-detection';
+import { detectInstalledAgents } from '../../../src/cli/agent-detection';
 import { createBootstrapProfileConfig } from '../../../src/cli/profile-bootstrap';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
 
@@ -137,7 +137,7 @@ describe('first-run profile bootstrap', () => {
     const oldCodex = process.env.LARK_CHANNEL_CODEX_BIN;
     process.env.PATH = root;
     process.env.LARK_CHANNEL_CLAUDE_BIN = 'missing-claude';
-    process.env.LARK_CHANNEL_CODEX_BIN = process.platform === 'win32' ? codex : 'codex';
+    process.env.LARK_CHANNEL_CODEX_BIN = 'codex';
     try {
       await expect(detectInstalledAgents()).resolves.toEqual([
         { kind: 'codex', binaryPath: codex },
@@ -156,29 +156,4 @@ describe('first-run profile bootstrap', () => {
       }
     }
   });
-
-  it('resolves Windows-style PATHEXT command shims from PATH', async () => {
-    const root = await makeRoot();
-    await writeExecutable(root, 'codex.cmd', '@echo off\r\necho codex 1.2.3\r\n');
-    const oldPath = process.env.PATH;
-    const oldPathExt = process.env.PATHEXT;
-    process.env.PATH = root;
-    process.env.PATHEXT = '.cmd;.exe';
-    try {
-      await expect(resolveExecutablePath('codex')).resolves.toBe(join(root, 'codex.cmd'));
-    } finally {
-      process.env.PATH = oldPath;
-      if (oldPathExt === undefined) {
-        delete process.env.PATHEXT;
-      } else {
-        process.env.PATHEXT = oldPathExt;
-      }
-    }
-  });
 });
-
-async function writeExecutable(root: string, name: string, content: string): Promise<string> {
-  const file = join(root, name);
-  await writeFile(file, content, { mode: 0o755 });
-  return file;
-}

@@ -164,7 +164,7 @@ program
     await runKillCli(target);
   });
 
-// === service-level commands (OS-managed daemon: launchd/systemd/schtasks) ===
+// === service-level commands (OS-managed daemon: launchd/systemd) ===
 
 program
   .command('start')
@@ -230,7 +230,7 @@ program
 
 program
   .command('unregister')
-  .description('Remove the OS service registration (bootout + delete plist)')
+  .description('Remove the OS service registration and definition')
   .option('--profile <name>', 'profile name (defaults to active profile)')
   .option('--web-ui', 'target the supervisor service instead of a per-profile one')
   .action(async (opts: { profile?: string; webUi?: boolean }) => {

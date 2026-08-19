@@ -6,9 +6,7 @@ import {
   launchAgentLabel,
   serviceProfileId,
   systemdUnitName,
-  windowsTaskName,
 } from '../../../src/daemon/paths';
-import { buildLauncherCmd } from '../../../src/daemon/schtasks';
 import { buildUnit } from '../../../src/daemon/systemd';
 
 describe('profile-scoped daemon paths and arguments', () => {
@@ -23,14 +21,10 @@ describe('profile-scoped daemon paths and arguments', () => {
     expect(() => serviceProfileId('.')).toThrow(/invalid profile name/i);
     expect(launchAgentLabel('codex-dev')).toContain('codex-dev');
     expect(systemdUnitName('claude')).not.toBe(systemdUnitName('codex-dev'));
-    expect(windowsTaskName('claude')).not.toBe(windowsTaskName('codex-dev'));
     expect(launchAgentLabel('claude')).toBe('ai.lark-bot-bridge.bot.claude');
     expect(systemdUnitName('claude')).toBe('lark-bot-bridge.bot.claude.service');
-    expect(windowsTaskName('claude')).toBe('LarkBotBridge.Bot.claude');
     expect(daemonStdoutPath('claude')).not.toBe(daemonStdoutPath('codex-dev'));
-    expect(daemonStderrPath('codex-dev').replace(/\\/g, '/')).toContain(
-      '/profiles/codex-dev/logs/daemon/',
-    );
+    expect(daemonStderrPath('codex-dev')).toContain('/profiles/codex-dev/logs/daemon/');
   });
 
   it('classic service pins `run --profile <profile>` and LARK_CHANNEL_HOME', () => {
@@ -53,8 +47,6 @@ describe('profile-scoped daemon paths and arguments', () => {
     );
     expect(buildUnit(inputs)).toContain('run --profile codex-dev');
     expect(buildUnit(inputs)).toContain('Environment="LARK_CHANNEL_HOME=/tmp/lark-channel-home"');
-    expect(buildLauncherCmd(inputs)).toContain('run --profile codex-dev');
-    expect(buildLauncherCmd(inputs)).toContain('set "LARK_CHANNEL_HOME=/tmp/lark-channel-home"');
   });
 
   it('supervisor service runs `run --web-ui` with no --profile', () => {
@@ -71,7 +63,5 @@ describe('profile-scoped daemon paths and arguments', () => {
     expect(buildPlist(inputs)).not.toContain('--profile');
     expect(buildUnit(inputs)).toContain('run --web-ui');
     expect(buildUnit(inputs)).not.toContain('--profile');
-    expect(buildLauncherCmd(inputs)).toContain('run --web-ui');
-    expect(buildLauncherCmd(inputs)).not.toContain('--profile');
   });
 });

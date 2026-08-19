@@ -560,8 +560,7 @@ async function writeExecutable(root: string, name: string): Promise<string> {
 }
 
 function expectedSecretsGetter(root: string): string {
-  const script = join(root, 'secrets-getter');
-  return process.platform === 'win32' ? `${script}.cmd` : script;
+  return join(root, 'secrets-getter');
 }
 
 async function writeProfileRoot(

@@ -70,24 +70,6 @@ export function systemdUnitPath(profile: string = paths.profile): string {
   return join(base, 'systemd', 'user', systemdUnitName(profile));
 }
 
-// === Windows Task Scheduler ===
-
-/** Windows Task Scheduler task name. */
-export const WINDOWS_TASK_NAME = windowsTaskName();
-
-export function windowsTaskName(profile: string = paths.profile): string {
-  return `LarkBotBridge.Bot.${serviceProfileId(profile)}`;
-}
-
-/**
- * The wrapper .cmd script schtasks invokes. schtasks `/TR` accepts a
- * command line directly, but we want stdout/stderr redirection + a PATH
- * override, which means wrapping in a script.
- */
-export function windowsLauncherCmdPath(profile: string = paths.profile): string {
-  return join(paths.appDir, 'daemon', serviceProfileId(profile), 'launcher.cmd');
-}
-
 // === Daemon log paths (platform-agnostic) ===
 
 /**

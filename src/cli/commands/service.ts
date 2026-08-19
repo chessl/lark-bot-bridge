@@ -6,7 +6,7 @@ import { daemonStderrPath, daemonStdoutPath, SUPERVISOR_SERVICE_ID } from '../..
 import {
   getServiceAdapter,
   type ServiceAdapter,
-  type ServiceResultLike,
+  type ServiceResult,
 } from '../../daemon/service-adapter';
 import { checkRuntimeLock, type RuntimeLockMeta } from '../../runtime/locks';
 import {
@@ -99,7 +99,7 @@ function requireAdapter(cmdName: string, serviceId: string, runArgs?: string[]):
   const adapter = getServiceAdapter(serviceId, runArgs);
   if (!adapter) {
     console.error(`${cmdName}: 当前系统不支持后台运行。`);
-    console.error('  目前支持: macOS (launchd) / Linux (systemd) / Windows (Task Scheduler)');
+    console.error('  目前支持: macOS (launchd) / Linux (systemd)');
     process.exit(1);
   }
   return adapter;
@@ -278,7 +278,7 @@ async function waitForServiceConnect(
 async function reportConnectAfter(
   verb: 'started' | 'restarted',
   profile: string,
-  fn: () => ServiceResultLike,
+  fn: () => ServiceResult,
 ): Promise<void> {
   const { cfg } = await resolveProfileRuntime({ profile, allowBootstrap: false });
   const appId = cfg.accounts?.app?.id ?? '';

@@ -4,7 +4,6 @@ const appPaths = resolveAppPaths();
 
 export const paths = {
   ...appPaths,
-  appDir: appPaths.rootDir,
   cacheDir: appPaths.rootDir,
   processesFile: appPaths.userRegistryFile,
   /**

@@ -145,7 +145,7 @@ async function resolveExecRef(
 
 function isSelfBridgeCommand(command: string, secretPaths: SecretResolverPaths): boolean {
   const wrapper = secretPaths.secretsGetterScript ?? paths.secretsGetterScript;
-  return command === wrapper || command === `${wrapper}.cmd`;
+  return command === wrapper;
 }
 
 async function spawnExecProvider(pc: ProviderConfig, ref: SecretRef): Promise<string> {

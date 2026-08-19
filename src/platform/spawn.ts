@@ -1,18 +1,19 @@
-import type {
-  ChildProcess,
-  ChildProcessByStdio,
-  SpawnOptions,
-  SpawnSyncOptions,
+import {
+  type ChildProcess,
+  type ChildProcessByStdio,
+  type SpawnOptions,
+  type SpawnSyncOptions,
+  spawn,
+  spawnSync,
 } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
-import crossSpawn from 'cross-spawn';
 
 export function spawnProcess(
   command: string,
   args: readonly string[] = [],
   options: SpawnOptions = {},
 ): ChildProcess {
-  return crossSpawn(command, [...args], options);
+  return spawn(command, [...args], options);
 }
 
 export function spawnProcessSync(
@@ -20,7 +21,7 @@ export function spawnProcessSync(
   args: readonly string[] = [],
   options: SpawnSyncOptions = {},
 ) {
-  return crossSpawn.sync(command, [...args], options);
+  return spawnSync(command, [...args], options);
 }
 
 export function mergeProcessEnv(
@@ -29,12 +30,8 @@ export function mergeProcessEnv(
 ): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...base };
   for (const [key, value] of Object.entries(overrides)) {
-    for (const existing of Object.keys(out)) {
-      if (existing.toLowerCase() === key.toLowerCase()) {
-        delete out[existing];
-      }
-    }
-    if (value !== undefined) out[key] = value;
+    if (value === undefined) delete out[key];
+    else out[key] = value;
   }
   return out;
 }

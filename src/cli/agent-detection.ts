@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { delimiter, extname, isAbsolute, join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 import type { AgentKind } from '../config/profile-schema';
 
 export type { AgentKind } from '../config/profile-schema';
@@ -17,32 +17,15 @@ export async function resolveExecutablePath(command: string): Promise<string> {
   }
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
     if (!dir) continue;
-    for (const candidate of executableCandidates(dir, command)) {
-      try {
-        await access(candidate, constants.X_OK);
-        return candidate;
-      } catch {
-        // Continue searching PATH.
-      }
+    const candidate = join(dir, command);
+    try {
+      await access(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Continue searching PATH.
     }
   }
   throw new Error(`executable not found: ${command}`);
-}
-
-function executableCandidates(dir: string, command: string): string[] {
-  const candidates = [join(dir, command)];
-  if (extname(command)) return candidates;
-  for (const ext of pathExts()) {
-    candidates.push(join(dir, `${command}${ext}`));
-  }
-  return candidates;
-}
-
-function pathExts(): string[] {
-  return (process.env.PATHEXT ?? '')
-    .split(';')
-    .map((ext) => ext.trim())
-    .filter(Boolean);
 }
 
 export async function detectInstalledAgents(): Promise<DetectedAgent[]> {

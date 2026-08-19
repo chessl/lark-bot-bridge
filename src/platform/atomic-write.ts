@@ -1,20 +1,10 @@
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, open, rename as fsRename, rm } from 'node:fs/promises';
+import { chmod, mkdir, open, rename, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 export interface AtomicWriteOptions {
   mode?: number;
-  maxRenameAttempts?: number;
-  retryDelayMs?: number;
-  rename?: (
-    from: string,
-    to: string,
-    fallbackRename: (from: string, to: string) => Promise<void>,
-  ) => Promise<void>;
 }
-
-const DEFAULT_RENAME_ATTEMPTS = 5;
-const DEFAULT_RETRY_DELAY_MS = 25;
 
 export async function writeFileAtomic(
   path: string,
@@ -30,50 +20,17 @@ export async function writeFileAtomic(
     const handle = await open(tmp, 'w', opts.mode ?? 0o600);
     try {
       await handle.writeFile(data);
-      try {
-        await handle.sync();
-      } catch (err) {
-        if (!isIgnorableWindowsFsyncError(err)) throw err;
-      }
+      await handle.sync();
     } finally {
       await handle.close();
     }
     await chmod(tmp, opts.mode ?? 0o600);
-    await renameWithRetry(tmp, path, opts);
+    await rename(tmp, path);
     await fsyncDir(dirname(path));
   } catch (err) {
     await rm(tmp, { force: true }).catch(() => {});
     throw err;
   }
-}
-
-async function renameWithRetry(from: string, to: string, opts: AtomicWriteOptions): Promise<void> {
-  const maxAttempts = opts.maxRenameAttempts ?? DEFAULT_RENAME_ATTEMPTS;
-  const delayMs = opts.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
-  const rename = opts.rename ?? ((src, dest) => fsRename(src, dest));
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      await rename(from, to, fsRename);
-      return;
-    } catch (err) {
-      lastErr = err;
-      if (!isTransientRenameError(err) || attempt === maxAttempts) break;
-      await sleep(delayMs * attempt);
-    }
-  }
-  throw lastErr;
-}
-
-export function isTransientRenameError(err: unknown): boolean {
-  const code = (err as NodeJS.ErrnoException | undefined)?.code;
-  return code === 'EPERM' || code === 'EBUSY';
-}
-
-function isIgnorableWindowsFsyncError(err: unknown): boolean {
-  return (
-    process.platform === 'win32' && (err as NodeJS.ErrnoException | undefined)?.code === 'EPERM'
-  );
 }
 
 async function fsyncDir(path: string): Promise<void> {
@@ -87,8 +44,4 @@ async function fsyncDir(path: string): Promise<void> {
   } catch {
     // Directory fsync is best-effort across platforms.
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

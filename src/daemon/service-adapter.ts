@@ -1,6 +1,5 @@
 import * as launchd from './launchd';
-import { launchAgentPlistPath, systemdUnitPath, windowsTaskName } from './paths';
-import * as schtasks from './schtasks';
+import { launchAgentPlistPath, systemdUnitPath } from './paths';
 import * as systemd from './systemd';
 
 export interface ServiceResult {
@@ -8,20 +7,16 @@ export interface ServiceResult {
   stderr: string;
 }
 
-/** Some platforms' restart is sync (spawnSync), others (schtasks) are
- * naturally async. Adapter methods can return either; callers await. */
-export type ServiceResultLike = ServiceResult | Promise<ServiceResult>;
-
 /**
- * Platform-agnostic interface over OS service managers (launchd / systemd /
- * schtasks). All methods are best-effort idempotent — calling stop()
- * on an already-stopped service returns ok=true.
+ * Platform-agnostic interface over launchd and systemd. All methods are
+ * best-effort idempotent — calling stop() on an already-stopped service
+ * returns ok=true.
  */
 export interface ServiceAdapter {
   /** Display name used in error / status messages. */
   readonly platformName: string;
 
-  /** Whether the service file (plist / unit / task) is on disk / registered. */
+  /** Whether the service file (plist / unit) is on disk. */
   fileExists(): boolean;
 
   /** Whether the service is currently running (process alive). */
@@ -34,23 +29,23 @@ export interface ServiceAdapter {
   install(): Promise<void>;
 
   /** Start the service (enables autostart where applicable). */
-  start(): ServiceResultLike;
+  start(): ServiceResult;
 
   /** Stop the service. Does NOT disable autostart on its own. */
-  stop(): ServiceResultLike;
+  stop(): ServiceResult;
 
   /** Stop + disable autostart. Used by `unregister` flow. */
-  stopAndDisableAutostart(): ServiceResultLike;
+  stopAndDisableAutostart(): ServiceResult;
 
   /**
    * Turn off autostart on an already-stopped service, without trying to stop
    * it again. `stop` needs this: a service that is registered but not running
    * would otherwise keep its login-time autostart and come back by itself.
    */
-  disableAutostart(): ServiceResultLike;
+  disableAutostart(): ServiceResult;
 
   /** Restart the running service in place. */
-  restart(): ServiceResultLike;
+  restart(): ServiceResult;
 
   /** Poll until the service is no longer running, or timeout. */
   waitUntilStopped(timeoutMs?: number): Promise<boolean>;
@@ -135,46 +130,6 @@ function makeSystemdAdapter(profile: string, runArgs: string[]): ServiceAdapter 
   };
 }
 
-function makeSchtasksAdapter(profile: string, runArgs: string[]): ServiceAdapter {
-  return {
-    platformName: 'Task Scheduler (Windows)',
-    fileExists: () => schtasks.isTaskRegistered(profile),
-    isRunning: () => schtasks.isTaskRunning(profile),
-    // Windows doesn't have a single "service file" — there's the task
-    // registration (queryable via schtasks) and the launcher .cmd we wrote.
-    // The task name is what the user would search for in Task Scheduler UI.
-    servicePath: () => windowsTaskName(profile),
-    install: async () => {
-      const r = await schtasks.installTask(profile, runArgs);
-      if (!r.ok) throw new Error(r.stderr || 'schtasks /Create failed');
-    },
-    // Mirror launchd: a previous `stop` disabled the task, and a disabled
-    // task refuses to run. Re-enable before starting it.
-    start: () => {
-      schtasks.enableTask(profile);
-      return schtasks.runTask(profile);
-    },
-    stop: () => schtasks.endTask(profile),
-    stopAndDisableAutostart: () => schtasks.endAndDisable(profile),
-    disableAutostart: () => schtasks.disableTask(profile),
-    // schtasks has no native /Restart — adapter awaits end+wait+run.
-    restart: () => schtasks.restartTask(profile),
-    waitUntilStopped: (timeoutMs) => schtasks.waitUntilStopped(profile, timeoutMs),
-    deleteFile: async () => {
-      await schtasks.deleteTask(profile);
-    },
-    describeStatus: () => schtasks.describeTask(profile),
-    parseStatus: (text) => ({
-      // `Process ID: <n>` shows up in verbose listing only when task is running.
-      pid: text.match(/Process ID:\s*(\d+)/i)?.[1],
-      // `Last Result: <0|nonzero>` — `0` means last run succeeded.
-      // Filter the `1056` ("task already running") and `267011` ("task hasn't
-      // run") sentinels that aren't real exit codes.
-      lastExit: text.match(/Last Result:\s*(\d+)/i)?.[1],
-    }),
-  };
-}
-
 /**
  * Return the right adapter for the current platform, or null if this OS
  * isn't supported. Callers should null-check and surface a friendly error.
@@ -190,6 +145,5 @@ export function getServiceAdapter(
 ): ServiceAdapter | null {
   if (process.platform === 'darwin') return makeLaunchdAdapter(profile, runArgs);
   if (process.platform === 'linux') return makeSystemdAdapter(profile, runArgs);
-  if (process.platform === 'win32') return makeSchtasksAdapter(profile, runArgs);
   return null;
 }

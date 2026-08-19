@@ -60,14 +60,8 @@ export class ClaudeAdapter implements AgentAdapter {
       throw new Error('cwd is required for ClaudeAdapter.run');
     }
 
-    // The prompt and bridge system prompt must NOT go through argv. On Windows,
-    // `claude` resolves to a `claude.cmd` shim and cross-spawn routes it through
-    // `cmd.exe /d /s /c`, which interprets `<` and `>` as redirection operators
-    // — that silently eats the prompt's `<bridge_context>` XML, so claude runs
-    // with an empty request and replies with its default greeting instead of a
-    // stream-json response. Pass the prompt via stdin and the appended system
-    // prompt via a temp file (the same approach the Codex adapter uses) so no
-    // special characters ever reach the shell.
+    // Keep the prompt on stdin and the system prompt in a temporary file so
+    // neither appears in argv or depends on command-line quoting and length limits.
     const systemPromptFile = writeSystemPromptFile(buildBridgeSystemPrompt(this.botIdentity));
 
     const args = [
@@ -112,11 +106,6 @@ export class ClaudeAdapter implements AgentAdapter {
         const line = stderrBuffer.slice(0, nl);
         stderrBuffer = stderrBuffer.slice(nl + 1);
         if (line.trim()) log.warn('agent', 'stderr', { line });
-        if (isWindowsCommandNotFoundLine(line)) {
-          runtimeError = new Error(`failed to spawn claude: ${line.trim()}`);
-          child.stdout.destroy();
-          child.kill();
-        }
         nl = stderrBuffer.indexOf('\n');
       }
     });
@@ -285,13 +274,4 @@ function writeSystemPromptFile(content: string): { path: string; cleanup: () => 
       }
     },
   };
-}
-
-function isWindowsCommandNotFoundLine(line: string): boolean {
-  return (
-    process.platform === 'win32' &&
-    /is not recognized as an internal or external command|operable program or batch file/i.test(
-      line,
-    )
-  );
 }

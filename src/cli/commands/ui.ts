@@ -1,4 +1,3 @@
-import { platform } from 'node:os';
 import { resolveAppPaths } from '../../config/app-paths';
 import { spawnProcess } from '../../platform/spawn';
 import { isAlive } from '../../runtime/registry';
@@ -46,17 +45,11 @@ export async function runUi(opts: RunUiOptions = {}): Promise<void> {
   process.exitCode = 1;
 }
 
-/** Best-effort cross-platform "open this URL in the default browser". */
+/** Best-effort "open this URL in the default browser". */
 function openBrowser(url: string): void {
-  const os = platform();
-  const [cmd, args] =
-    os === 'darwin'
-      ? ['open', [url]]
-      : os === 'win32'
-        ? ['cmd', ['/c', 'start', '', url]]
-        : ['xdg-open', [url]];
+  const command = process.platform === 'darwin' ? 'open' : 'xdg-open';
   try {
-    const child = spawnProcess(cmd as string, args as string[], { stdio: 'ignore' });
+    const child = spawnProcess(command, [url], { stdio: 'ignore' });
     child.on('error', () => {
       console.log(`若浏览器未自动打开，请手动访问上面的地址。`);
     });

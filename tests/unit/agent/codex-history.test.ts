@@ -2,8 +2,11 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CodexHistoryError, listCodexThreadHistory } from '../../../src/session/codex-history.js';
 import { buildAgentPrompt } from '../../../src/agent/prompt.js';
+import {
+  type CodexHistoryError,
+  listCodexThreadHistory,
+} from '../../../src/session/codex-history.js';
 
 interface FakeCodex {
   dir: string;
@@ -157,9 +160,7 @@ async function createFakeCodex(
   options: { failList?: boolean; firstPreview?: string } = {},
 ): Promise<FakeCodex> {
   const dir = await mkdtemp(join(tmpdir(), 'codex-history-test-'));
-  const scriptPath =
-    process.platform === 'win32' ? join(dir, 'codex-app-server.mjs') : join(dir, 'codex');
-  const path = process.platform === 'win32' ? join(dir, 'codex.cmd') : scriptPath;
+  const path = join(dir, 'codex');
   const recordPath = join(dir, 'record.json');
   const firstPreview = options.firstPreview ?? 'new thread prompt';
   const script = `#!/usr/bin/env node
@@ -275,11 +276,7 @@ rl.on('line', (line) => {
   }
 });
 `;
-  await writeFile(scriptPath, script, 'utf8');
-  if (process.platform === 'win32') {
-    await writeFile(path, `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`, 'utf8');
-  } else {
-    await chmod(path, 0o755);
-  }
+  await writeFile(path, script, 'utf8');
+  await chmod(path, 0o755);
   return { dir, path, recordPath };
 }

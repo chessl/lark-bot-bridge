@@ -349,27 +349,12 @@ describe('CodexAdapter process contract', () => {
   });
 
   it('surfaces spawn errors as stream error events', async () => {
-    let run: ReturnType<CodexAdapter['run']>;
-    if (process.platform === 'win32') {
-      const fake = await createFakeCodex({
-        lines: [],
-        stderr: 'missing command\n',
-        exitCode: 1,
-      });
-      cleanup.push(fake.dir);
-      run = new CodexAdapter({ binary: fake.path, profileStateDir: fake.dir }).run({
-        runId: 'run-missing',
-        prompt: 'hi',
-        cwd: await realpath(fake.dir),
-      });
-    } else {
-      const missing = join(tmpdir(), `missing-codex-${Date.now()}`);
-      run = new CodexAdapter({ binary: missing, profileStateDir: tmpdir() }).run({
-        runId: 'run-missing',
-        prompt: 'hi',
-        cwd: tmpdir(),
-      });
-    }
+    const missing = join(tmpdir(), `missing-codex-${Date.now()}`);
+    const run = new CodexAdapter({ binary: missing, profileStateDir: tmpdir() }).run({
+      runId: 'run-missing',
+      prompt: 'hi',
+      cwd: tmpdir(),
+    });
 
     const events = await collect(run.events);
 

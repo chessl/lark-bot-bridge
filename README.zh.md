@@ -70,7 +70,7 @@ lark-bot-bridge status
 lark-bot-bridge stop
 ```
 
-服务层命令必须先全局安装，不能直接用 `npx`。daemon 的 launchd plist / systemd unit / Windows 任务会记录 bridge CLI 的路径；如果这个路径来自 npm 临时缓存，缓存清掉后 daemon 就起不来。`run` 用 `npx` 单次启动没问题。
+服务层命令必须先全局安装，不能直接用 `npx`。daemon 的 launchd plist 或 systemd unit 会记录 bridge CLI 的路径；如果这个路径来自 npm 临时缓存，缓存清掉后 daemon 就起不来。`run` 用 `npx` 单次启动没问题。
 
 服务层命令按 profile 注册，每个 profile 有独立服务：
 
@@ -85,7 +85,6 @@ lark-bot-bridge unregister [--profile <name>]
 平台映射：
 - **macOS**：launchd 用户代理 `ai.lark-bot-bridge.bot.<profile>`
 - **Linux**：systemd 用户单元 `lark-bot-bridge.bot.<profile>.service`
-- **Windows**：Task Scheduler 任务 `LarkBotBridge.Bot.<profile>`，launcher 是 `.cmd`
 
 daemon 日志在 `~/.lark-bot-bridge/profiles/<profile>/logs/daemon/`。
 
@@ -324,7 +323,7 @@ pnpm typecheck
 pnpm build
 ```
 
-`pnpm test` 包含 unit、integration 和 process-level adapter 测试。CI 在 macOS、Ubuntu、Windows 上执行 `pnpm install --frozen-lockfile`、`pnpm test`、`pnpm typecheck` 和 `pnpm build`。
+`pnpm test` 包含 unit、integration 和 process-level adapter 测试。CI 在 macOS 和 Ubuntu 上执行 `pnpm install --frozen-lockfile`、`pnpm test`、`pnpm typecheck` 和 `pnpm build`。
 
 
 ## 许可

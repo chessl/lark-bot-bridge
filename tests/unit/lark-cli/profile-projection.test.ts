@@ -83,7 +83,7 @@ describe('writeLarkCliSourceProjection', () => {
         providers: {
           bridge: {
             source: 'exec',
-            command: expectedSecretsGetterWrapper(appPaths.secretsGetterScript),
+            command: appPaths.secretsGetterScript,
             args: [],
             env: {
               LARK_CHANNEL_HOME: root,
@@ -94,10 +94,6 @@ describe('writeLarkCliSourceProjection', () => {
       },
     });
     const mode = (await stat(path)).mode & 0o777;
-    if (process.platform !== 'win32') expect(mode).toBe(0o600);
+    expect(mode).toBe(0o600);
   });
 });
-
-function expectedSecretsGetterWrapper(script: string): string {
-  return process.platform === 'win32' ? `${script}.cmd` : script;
-}

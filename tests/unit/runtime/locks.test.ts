@@ -30,9 +30,7 @@ describe('runtime locks', () => {
       expect(acquired.map((lock) => lock.kind)).toEqual(['profile', 'app']);
       for (const lock of acquired) {
         const mode = (await stat(lock.target)).mode & 0o777;
-        if (process.platform !== 'win32') {
-          expect(mode).toBe(0o600);
-        }
+        expect(mode).toBe(0o600);
         const metaFile = `${lock.target}.meta.json`;
         metaFiles.push(metaFile);
         const meta = JSON.parse(await readFile(metaFile, 'utf8')) as {

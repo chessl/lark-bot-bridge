@@ -68,8 +68,8 @@ export async function runKillCli(target: string | undefined): Promise<void> {
 /**
  * Detect that a registry entry IS the process an OS service manager owns.
  *
- * launchd (KeepAlive) / systemd (Restart) / Task Scheduler treat a SIGTERM'd
- * daemon as a crash and respawn it within seconds, on a fresh pid — so a plain
+ * launchd (KeepAlive) and systemd (Restart) treat a SIGTERM'd daemon as a
+ * crash and respawn it within seconds, on a fresh pid — so a plain
  * `kill` reports "✓ 已关闭" and the bot is back before the user can blink.
  * Both service shapes are checked: the machine-wide supervisor (whose pid is
  * shared by every profile it hosts in-process) and a classic per-profile one.

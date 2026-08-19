@@ -89,21 +89,18 @@ describe('resolveAppPaths', () => {
     }
   });
 
-  it('rejects profile names that cannot be used directly in locks and service ids', async () => {
+  it('rejects profile names that are unsafe POSIX path segments', async () => {
     const root = await tempRoot();
 
     expect(() => resolveAppPaths({ rootDir: root, profile: 'codex dev' })).toThrow(
       /invalid profile name/i,
     );
     expect(() => resolveAppPaths({ rootDir: root, profile: 'b64_Y29kZXggZGV2' })).not.toThrow();
-    // Path-dangerous / reserved chars are still rejected.
+    // POSIX path separators and reserved dot segments are still rejected.
     expect(() => resolveAppPaths({ rootDir: root, profile: 'a/b' })).toThrow(
       /invalid profile name/i,
     );
     expect(() => resolveAppPaths({ rootDir: root, profile: '..' })).toThrow(
-      /invalid profile name/i,
-    );
-    expect(() => resolveAppPaths({ rootDir: root, profile: 'a:b' })).toThrow(
       /invalid profile name/i,
     );
   });

@@ -83,11 +83,10 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
 function normalizeProfileName(profile: string): string {
   const trimmed = profile.trim();
   if (!trimmed) throw new Error('profile name is required');
-  // Allow Unicode letters/digits (so a non-ASCII bot name can be used directly as
-  // the profile name) but reject anything unsafe as a single path segment:
-  // whitespace, path separators, control chars, and Windows-reserved chars.
-  // Service labels sanitize non-ASCII names separately (see serviceProfileId).
-  if (/[\u0000-\u001f\s/\\:*?"<>|]/.test(trimmed) || trimmed === '.' || trimmed === '..') {
+  // Allow Unicode letters/digits but reject whitespace, POSIX path separators,
+  // control characters, and the special dot segments.
+  const hasControlCharacter = [...trimmed].some((char) => char.charCodeAt(0) < 0x20);
+  if (hasControlCharacter || /[\s/]/.test(trimmed) || trimmed === '.' || trimmed === '..') {
     throw new Error(`invalid profile name: ${profile}`);
   }
   return trimmed;

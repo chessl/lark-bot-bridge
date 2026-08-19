@@ -1,13 +1,13 @@
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
-import { join } from 'node:path';
 import type { SandboxMode } from '../../config/profile-schema';
 import { log } from '../../core/logger';
-import { mergeProcessEnv, spawnProcess, type SpawnedProcessByStdio } from '../../platform/spawn';
+import { mergeProcessEnv, type SpawnedProcessByStdio, spawnProcess } from '../../platform/spawn';
 import { SpawnFailed } from '../../runtime/errors';
 import { prefixBridgeSystemPrompt } from '../bridge-system-prompt';
 import { buildLarkChannelEnv, type LarkChannelEnvContext } from '../lark-channel-env';
-import { checkAgentAvailability, type AgentAvailability } from '../preflight';
+import { type AgentAvailability, checkAgentAvailability } from '../preflight';
 import type {
   AgentAdapter,
   AgentBotIdentity,
@@ -16,7 +16,7 @@ import type {
   AgentRunOptions,
 } from '../types';
 import { buildCodexArgs } from './argv';
-import { CodexJsonlTranslator, type CodexFinishReason } from './jsonl';
+import { type CodexFinishReason, CodexJsonlTranslator } from './jsonl';
 
 export interface CodexAdapterOptions {
   binary: string;
@@ -134,11 +134,6 @@ export class CodexAdapter implements AgentAdapter {
         const line = stderrBuffer.slice(0, nl);
         stderrBuffer = stderrBuffer.slice(nl + 1);
         if (line.trim()) log.warn('agent', 'stderr', { line });
-        if (isWindowsCommandNotFoundLine(line)) {
-          runtimeError = new Error(`failed to spawn codex: ${line.trim()}`);
-          child.stdout.destroy();
-          child.kill();
-        }
         nl = stderrBuffer.indexOf('\n');
       }
     });
@@ -290,13 +285,4 @@ async function waitForExitCode(child: CodexChild): Promise<number | null> {
   return new Promise<number | null>((resolve) => {
     child.once('exit', (code) => resolve(code));
   });
-}
-
-function isWindowsCommandNotFoundLine(line: string): boolean {
-  return (
-    process.platform === 'win32' &&
-    /is not recognized as an internal or external command|operable program or batch file/i.test(
-      line,
-    )
-  );
 }
