@@ -75,6 +75,17 @@ UI 路由位于 `src/ui/api.ts:522-620`。这一组能力必须使用 user acces
 - 官方 Node SDK 生成了完整 OpenAPI client；其 README 的“配置请求选项”说明可用 `withUserAccessToken` 注入用户令牌：<https://github.com/larksuite/oapi-sdk-nodejs/blob/main/README.zh.md#配置请求选项>。
 - 本机 `@larksuiteoapi/node-sdk@1.73.0` 类型导出也包含 `Client`、`withUserAccessToken`、`withTenantToken`。
 
+准确的 SDK/client entry points 是：
+
+| 能力 | 同进程入口 |
+|---|---|
+| 列出当前身份所在群 | `channel.rawClient.im.v1.chat.list(payload, options?)` |
+| 搜索当前身份可见群 | `channel.rawClient.im.v1.chat.search(payload, options?)` |
+| 拉用户或 bot 入群 | `channel.rawClient.im.v1.chatMembers.create(payload, options?)` |
+| SDK 尚未生成的 OpenAPI | `channel.rawClient.request({ method, url, data, params }, options?)` |
+
+前三项由官方 Node SDK 的 [IM generated client](https://github.com/larksuite/node-sdk/blob/f54b49f3566c52b54c598194b7ed3015e3e24224/code-gen/projects/im.ts) 提供；user 身份须通过同一物理 SDK 的 `withUserAccessToken` 传入 UAT，否则这些入口默认使用 TAT，语义是 bot 身份。
+
 边界：SDK 能**使用** user access token，但不会替 bridge 完成当前 CLI 的 device flow、OS keychain 存储、跨进程 refresh 锁和身份策略。
 
 ### 2. 官方 `lark-openapi-mcp`
