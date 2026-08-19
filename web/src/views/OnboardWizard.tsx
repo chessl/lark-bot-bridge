@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { CheckCircle2 } from "lucide-react";
-import { apiGet, apiPost } from "@/lib/api";
-import type { AgentKind, OnboardState } from "@/lib/types";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
+import { apiGet, apiPost } from "@/lib/api";
+import type { AgentKind, OnboardState } from "@/lib/types";
 
 // New-profile wizard: scan a Feishu QR to create a fresh app (same flow as the
 // CLI `registerApp` wizard). The QR renders immediately; once scanned, the user
@@ -37,8 +36,8 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
       .then((s) => {
         setDetected(s.detectedAgents);
         setExisting(s.profiles);
-        if (s.detectedAgents.length && !s.detectedAgents.includes("claude"))
-          setAgentKind(s.detectedAgents[0]!);
+        const firstDetected = s.detectedAgents[0];
+        if (firstDetected && !s.detectedAgents.includes("claude")) setAgentKind(firstDetected);
       })
       .catch(() => {});
   }, []);
@@ -106,20 +105,22 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
   }
 
   // Auto-render the QR on open.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: this starts one registration session when the wizard opens
   useEffect(() => {
     void generate();
     return stopPolling;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (phase === "confirm" || phase === "creating") {
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2 text-sm text-success">
-          <CheckCircle2 className="size-4" /> 应用已创建{botName ? `：${botName}` : ""}，确认后完成
+          <span aria-hidden="true">✓</span> 应用已创建{botName ? `：${botName}` : ""}，确认后完成
         </div>
         <div className="space-y-1.5">
-          <label className="text-sm font-medium leading-none" htmlFor="onboard-agent">AI Agent</label>
+          <label className="text-sm font-medium leading-none" htmlFor="onboard-agent">
+            AI Agent
+          </label>
           <select
             id="onboard-agent"
             className="h-9 w-full cursor-pointer rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
@@ -132,7 +133,9 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
           </select>
         </div>
         <div className="space-y-1.5">
-          <label className="text-sm font-medium leading-none" htmlFor="onboard-profile">Profile 名称</label>
+          <label className="text-sm font-medium leading-none" htmlFor="onboard-profile">
+            Profile 名称
+          </label>
           <Input
             id="onboard-profile"
             value={profileName}
@@ -140,13 +143,17 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
             placeholder={agentKind}
           />
           {existing.includes(profileName.trim()) && (
-            <p className="text-xs text-destructive">已存在同名 profile，请换个名字（不会覆盖现有的）。</p>
+            <p className="text-xs text-destructive">
+              已存在同名 profile，请换个名字（不会覆盖现有的）。
+            </p>
           )}
         </div>
         <div className="flex justify-end">
           <Button
             onClick={confirmCreate}
-            disabled={phase === "creating" || !profileName.trim() || existing.includes(profileName.trim())}
+            disabled={
+              phase === "creating" || !profileName.trim() || existing.includes(profileName.trim())
+            }
           >
             {phase === "creating" ? "创建中…" : "确定创建"}
           </Button>
@@ -173,17 +180,25 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
         {qr && (
           <p className="text-xs text-muted-foreground">
             有效期约 {Math.max(1, Math.round(qr.expireIn / 60))} 分钟 ·{" "}
-            <a href={qr.qrUrl} target="_blank" rel="noreferrer" className="text-primary underline">在浏览器打开</a>
+            <a href={qr.qrUrl} target="_blank" rel="noreferrer" className="text-primary underline">
+              在浏览器打开
+            </a>
           </p>
         )}
         {(phase === "error" || phase === "waiting") && (
-          <Button variant="outline" size="sm" onClick={generate}>重新生成</Button>
+          <Button variant="outline" size="sm" onClick={generate}>
+            重新生成
+          </Button>
         )}
       </div>
       {detected.length === 0 && (
-        <p className="text-center text-xs text-muted-foreground">未检测到已安装的 agent，请确保 claude、codex 或 omp 已安装。</p>
+        <p className="text-center text-xs text-muted-foreground">
+          未检测到已安装的 agent，请确保 claude、codex 或 omp 已安装。
+        </p>
       )}
-      <p className="text-center text-xs text-muted-foreground">扫码人会成为应用 owner，自动豁免访问控制。</p>
+      <p className="text-center text-xs text-muted-foreground">
+        扫码人会成为应用 owner，自动豁免访问控制。
+      </p>
     </div>
   );
 }

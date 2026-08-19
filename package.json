@@ -31,37 +31,38 @@
     "build:web": "vite build web",
     "build": "pnpm build:web && tsup",
     "typecheck": "tsc --noEmit",
+    "check": "biome check --changed --since=main --no-errors-on-unmatched",
+    "format": "biome format --write --staged --no-errors-on-unmatched",
     "pretest": "pnpm build:web",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit --passWithNoTests",
     "test:integration": "vitest run tests/integration --passWithNoTests",
     "test:process": "vitest run tests/process --passWithNoTests",
-    "ci:local": "git diff --check && pnpm test && pnpm typecheck && pnpm build",
-    "ci:platform": "pnpm test && pnpm typecheck && pnpm build",
-    "prepare": "npm run build",
-    "prepublishOnly": "pnpm typecheck && pnpm build"
+    "ci:local": "git diff --check && pnpm check && pnpm test && pnpm typecheck && pnpm build",
+    "ci:platform": "pnpm check && pnpm test && pnpm typecheck && pnpm build",
+    "prepare": "pnpm build",
+    "prepublishOnly": "pnpm check && pnpm typecheck && pnpm build"
   },
   "dependencies": {
     "@clack/prompts": "^1.4.0",
-    "@larksuite/channel": "^0.4.1",
+    "@larksuite/channel": "^0.5.0",
     "commander": "^12.1.0",
     "cross-spawn": "^7.0.6",
     "proper-lockfile": "^4.1.2",
     "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.9",
     "@radix-ui/react-dialog": "^1.1.19",
     "@radix-ui/react-tabs": "^1.1.17",
     "@tailwindcss/vite": "^4.3.2",
     "@types/cross-spawn": "^6.0.6",
-    "@types/node": "^22.10.0",
+    "@types/node": "^24.13.3",
     "@types/proper-lockfile": "^4.1.4",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
-    "clsx": "^2.1.1",
-    "lucide-react": "^1.24.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -75,13 +76,7 @@
     "vitest": "^2.1.8"
   },
   "engines": {
-    "node": ">=20.12.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "protobufjs"
-    ]
+    "node": ">=24"
   },
   "keywords": [
     "feishu",

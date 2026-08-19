@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
-import { ChevronRight } from "lucide-react";
-import { apiGet, apiPost } from "@/lib/api";
-import type { ProfileInfo } from "@/lib/types";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +10,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/sonner";
+import { apiGet, apiPost } from "@/lib/api";
+import type { ProfileInfo } from "@/lib/types";
 import { OnboardWizard } from "./OnboardWizard";
 
 export function ProfilesView({ onOpen }: { onOpen: (profile: string) => void }) {
@@ -25,9 +24,13 @@ export function ProfilesView({ onOpen }: { onOpen: (profile: string) => void }) 
 
   const load = () =>
     apiGet<{ profiles: ProfileInfo[] }>("/api/profiles")
-      .then((d) => { setProfiles(d.profiles); setError(null); })
+      .then((d) => {
+        setProfiles(d.profiles);
+        setError(null);
+      })
       .catch((e) => setError(String(e.message ?? e)));
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: poll the profile list for this mounted view
   useEffect(() => {
     load();
     const t = setInterval(load, 5000);
@@ -82,6 +85,7 @@ export function ProfilesView({ onOpen }: { onOpen: (profile: string) => void }) 
         )}
         {profiles?.map((p) => (
           <button
+            type="button"
             key={p.name}
             onClick={() => onOpen(p.name)}
             className="flex w-full items-center gap-3 rounded-lg border p-4 text-left transition-colors hover:bg-accent"
@@ -90,23 +94,37 @@ export function ProfilesView({ onOpen }: { onOpen: (profile: string) => void }) 
               <div className="flex items-center gap-2">
                 <span className="font-medium">{p.name}</span>
                 <Badge variant="secondary">{p.agentKind}</Badge>
-                {p.running ? <Badge variant="success">在线</Badge> : <Badge variant="outline">未运行</Badge>}
+                {p.running ? (
+                  <Badge variant="success">在线</Badge>
+                ) : (
+                  <Badge variant="outline">未运行</Badge>
+                )}
               </div>
             </div>
             {p.running ? (
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={(e) => { e.stopPropagation(); setStopTarget(p.name); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setStopTarget(p.name);
+                }}
               >
                 停止
               </Button>
             ) : (
-              <Button variant="outline" size="sm" disabled={busy === p.name} onClick={(e) => start(p.name, e)}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy === p.name}
+                onClick={(e) => start(p.name, e)}
+              >
                 {busy === p.name ? "启动中…" : "启动"}
               </Button>
             )}
-            <ChevronRight className="text-muted-foreground" />
+            <span aria-hidden="true" className="text-xl text-muted-foreground">
+              ›
+            </span>
           </button>
         ))}
       </div>
@@ -131,12 +149,14 @@ export function ProfilesView({ onOpen }: { onOpen: (profile: string) => void }) 
           <DialogHeader>
             <DialogTitle>停止 {stopTarget}？</DialogTitle>
             <DialogDescription>
-              将停止该 profile 正在运行的 bot。若它是后台服务，会一并禁用自动重启（不会被 KeepAlive 拉起）；
-              下次可用 <code>lark-bot-bridge start</code> 重新启动。
+              将停止该 profile 正在运行的 bot。若它是后台服务，会一并禁用自动重启（不会被 KeepAlive
+              拉起）； 下次可用 <code>lark-bot-bridge start</code> 重新启动。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setStopTarget(null)} disabled={stopping}>取消</Button>
+            <Button variant="outline" onClick={() => setStopTarget(null)} disabled={stopping}>
+              取消
+            </Button>
             <Button variant="destructive" onClick={confirmStop} disabled={stopping}>
               {stopping ? "停止中…" : "确认停止"}
             </Button>
