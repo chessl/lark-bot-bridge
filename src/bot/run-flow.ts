@@ -120,15 +120,15 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
       cwdRealpath: workspace.cwdRealpath,
       policyFingerprint: policy.policyFingerprint,
     });
-    if (catalogEntry?.agentId === 'claude') {
-      sessionId = catalogEntry.sessionId;
-      resumeFrom = sessionId;
-    } else if (catalogEntry?.agentId === 'codex') {
+    if (catalogEntry && input.capability.sessionKind === 'codex-thread') {
       threadId = catalogEntry.threadId;
       resumeFrom = threadId;
+    } else if (catalogEntry) {
+      sessionId = catalogEntry.sessionId;
+      resumeFrom = sessionId;
     }
   }
-  if (!resumeFrom && input.capability.agentId === 'claude') {
+  if (!resumeFrom && input.capability.sessionKind !== 'codex-thread') {
     resumeFrom = input.sessions.resumeFor(input.scopeId, workspace.cwdRealpath);
     sessionId = resumeFrom;
     const stale = input.sessions.getRaw(input.scopeId);
@@ -149,7 +149,7 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
         input.profileConfig.preferences.model,
       ),
       images:
-        input.capability.agentId === 'codex'
+        input.capability.agentId === 'codex' || input.capability.agentId === 'omp'
           ? policy.attachments
               .filter((attachment) => attachment.kind === 'image' && attachment.decision === 'accepted')
               .map((attachment) => attachment.path)
@@ -188,22 +188,22 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
 
 export function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
   if (input.event.type !== 'system') return;
-  if (input.capability.agentId === 'claude' && input.event.sessionId) {
+  if (input.capability.sessionKind !== 'codex-thread' && input.event.sessionId) {
     const cwdRealpath = input.event.cwd ?? input.policy.cwdRealpath;
     input.sessions.set(input.scopeId, input.event.sessionId, cwdRealpath);
     input.sessionCatalog?.upsertActive({
       scopeId: input.scopeId,
-      agentId: 'claude',
+      agentId: input.capability.agentId,
       cwdRealpath,
       policyFingerprint: input.policy.policyFingerprint,
       sessionId: input.event.sessionId,
     });
     return;
   }
-  if (input.capability.agentId === 'codex' && input.event.threadId) {
+  if (input.capability.sessionKind === 'codex-thread' && input.event.threadId) {
     input.sessionCatalog?.upsertActive({
       scopeId: input.scopeId,
-      agentId: 'codex',
+      agentId: input.capability.agentId,
       cwdRealpath: input.policy.cwdRealpath,
       policyFingerprint: input.policy.policyFingerprint,
       threadId: input.event.threadId,

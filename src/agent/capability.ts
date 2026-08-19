@@ -2,8 +2,8 @@ import type { AccessMode } from '../config/permissions';
 import type { ProfileConfig } from '../config/profile-schema';
 import { BRIDGE_SYSTEM_PROMPT } from './bridge-system-prompt';
 
-export type AgentCapabilityId = 'claude' | 'codex';
-export type AgentSessionKind = 'claude-session' | 'codex-thread';
+export type AgentCapabilityId = 'claude' | 'codex' | 'omp';
+export type AgentSessionKind = 'claude-session' | 'codex-thread' | 'omp-session';
 export type PromptInjectionMode = 'append-system-prompt' | 'stdin-prefix';
 
 export interface AgentCapability {
@@ -18,6 +18,7 @@ export interface AgentCapability {
   };
   permissions: {
     maxAccess: AccessMode;
+    supportedAccess?: readonly AccessMode[];
   };
 }
 
@@ -55,4 +56,35 @@ export function codexCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
       maxAccess,
     },
   };
+}
+
+export function ompCapability(): AgentCapability {
+  return {
+    agentId: 'omp',
+    sessionKind: 'omp-session',
+    promptInjection: 'append-system-prompt',
+    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    supportsNativeHistory: true,
+    callback: {
+      marker: '__bridge_cb',
+      legacyMarkers: [],
+    },
+    permissions: {
+      maxAccess: 'full',
+      supportedAccess: ['full'],
+    },
+  };
+}
+
+export function capabilityForProfile(
+  profile: Pick<ProfileConfig, 'agentKind' | 'permissions'>,
+): AgentCapability {
+  switch (profile.agentKind) {
+    case 'claude':
+      return claudeCapability(profile);
+    case 'codex':
+      return codexCapability(profile);
+    case 'omp':
+      return ompCapability();
+  }
 }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { BRIDGE_SYSTEM_PROMPT } from '../../../src/agent/bridge-system-prompt';
-import { claudeCapability, codexCapability } from '../../../src/agent/capability';
+import {
+  capabilityForProfile,
+  claudeCapability,
+  codexCapability,
+  ompCapability,
+} from '../../../src/agent/capability';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 
 describe('agent capability contract', () => {
@@ -49,6 +54,26 @@ describe('agent capability contract', () => {
         maxAccess: 'workspace',
       },
     });
+  });
+
+  it('defines OMP as a native session runtime that only supports full access', () => {
+    const capability = ompCapability();
+    expect(capability).toMatchObject({
+      agentId: 'omp',
+      sessionKind: 'omp-session',
+      promptInjection: 'append-system-prompt',
+      supportsNativeHistory: true,
+      permissions: {
+        maxAccess: 'full',
+        supportedAccess: ['full'],
+      },
+    });
+    expect(
+      capabilityForProfile({
+        agentKind: 'omp',
+        permissions: { defaultAccess: 'full', maxAccess: 'full' },
+      }),
+    ).toEqual(capability);
   });
 
   it('uses Codex profile max access as the static capability ceiling', () => {

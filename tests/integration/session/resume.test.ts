@@ -1,7 +1,11 @@
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { claudeCapability, codexCapability } from '../../../src/agent/capability.js';
+import {
+  capabilityForProfile,
+  claudeCapability,
+  codexCapability,
+} from '../../../src/agent/capability.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
 import {
@@ -9,7 +13,11 @@ import {
   startRunFlow,
   type StartRunFlowInput,
 } from '../../../src/bot/run-flow.js';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import {
+  createDefaultProfileConfig,
+  type AgentKind,
+  type ProfileConfig,
+} from '../../../src/config/profile-schema.js';
 import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionCatalog } from '../../../src/session/catalog.js';
 import { SessionStore } from '../../../src/session/store.js';
@@ -95,6 +103,31 @@ describe('agent-aware run-flow resume', () => {
     });
   });
 
+  it('resumes OMP sessions through the agent-aware catalog', async () => {
+    const h = await createHarness('omp');
+    const first = await start(h);
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error('expected initial OMP run');
+    await collect(first.execution.subscribe());
+    h.catalog.upsertActive({
+      scopeId: 'chat-1',
+      agentId: 'omp',
+      cwdRealpath: first.cwdRealpath,
+      policyFingerprint: first.policy.policyFingerprint,
+      sessionId: 'omp-session-catalog',
+      now: 1000,
+    });
+
+    const resumed = await start(h);
+    expect(resumed.ok).toBe(true);
+    if (!resumed.ok) throw new Error('expected resumed OMP run');
+    expect(resumed.resumeFrom).toBe('omp-session-catalog');
+    expect(h.agent.runOptions[1]).toMatchObject({
+      sessionId: 'omp-session-catalog',
+      threadId: undefined,
+    });
+  });
+
   it('does not resume when the policy fingerprint changes', async () => {
     const h = await createHarness('claude');
     const first = await start(h);
@@ -174,7 +207,7 @@ describe('agent-aware run-flow resume', () => {
   });
 });
 
-async function createHarness(agentKind: 'claude' | 'codex'): Promise<{
+async function createHarness(agentKind: AgentKind): Promise<{
   tmp: TmpProfile;
   agent: FakeAgentAdapter;
   executor: RunExecutor;
@@ -199,6 +232,7 @@ async function createHarness(agentKind: 'claude' | 'codex'): Promise<{
       },
     },
     ...(agentKind === 'codex' ? { codex: { binaryPath: '/usr/local/bin/codex' } } : {}),
+    ...(agentKind === 'omp' ? { omp: { binaryPath: '/usr/local/bin/omp' } } : {}),
   });
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   workspaces.setCwd('chat-1', tmp.workspace);
@@ -244,10 +278,7 @@ async function start(h: Awaited<ReturnType<typeof createHarness>>) {
     prompt: 'hello',
     attachments: [],
     access: { ok: true, reason: 'allowed-user' },
-    capability:
-      h.profileConfig.agentKind === 'codex'
-        ? codexCapability(h.profileConfig)
-        : claudeCapability(h.profileConfig),
+    capability: capabilityForProfile(h.profileConfig),
     profileConfig: h.profileConfig,
     sessions: h.sessions,
     sessionCatalog: h.catalog,

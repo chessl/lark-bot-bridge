@@ -69,6 +69,20 @@ describe('start runtime agent factory', () => {
     expect(profile.codex?.binaryPath).toBe('codex');
   });
 
+  it('creates and bootstraps an OMP runtime agent', () => {
+    const profile = createRuntimeProfileConfig({
+      agentKind: 'omp',
+      accounts: appAccount(),
+    });
+    const agent = createRuntimeAgent(profile, {
+      profileDir: '/tmp/lark-channel-bridge/profiles/omp-e2e',
+    });
+
+    expect(profile.omp?.binaryPath).toBe('omp');
+    expect(agent.id).toBe('omp');
+    expect(agent.displayName).toBe('Oh My Pi');
+  });
+
   it('updates the process registry before releasing the old app lock during reconnect', async () => {
     // Reconnect ordering now lives in the supervisor's ManagedProfile.restart().
     const source = await readFile(join(process.cwd(), 'src/runtime/supervisor.ts'), 'utf8');
@@ -103,6 +117,7 @@ describe('start runtime agent factory', () => {
   it('rejects reconnect when a profile changes agent kind in place', () => {
     expect(() => assertReconnectAgentKindUnchanged('claude', 'codex')).toThrow(/agent kind/i);
     expect(() => assertReconnectAgentKindUnchanged('codex', 'codex')).not.toThrow();
+    expect(() => assertReconnectAgentKindUnchanged('omp', 'omp')).not.toThrow();
   });
 });
 

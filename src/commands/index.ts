@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute } from 'node:path';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
-import { claudeCapability, codexCapability } from '../agent/capability';
+import { capabilityForProfile } from '../agent/capability';
 import { DEFAULT_MODEL, normalizeModelSelection, supportedModels } from '../agent/models';
 import type { AgentAdapter } from '../agent/types';
 import type { ActiveRuns } from '../bot/active-runs';
@@ -153,7 +153,7 @@ type Handler = (args: string, ctx: CommandContext) => Promise<void>;
 
 interface ResumeCandidate {
   scopeId: string;
-  agentId: 'claude' | 'codex';
+  agentId: SessionCatalogIdentity['agentId'];
   cwdRealpath: string;
   policyFingerprint: string;
   sessionId?: string;
@@ -592,6 +592,26 @@ async function handleResume(args: string, ctx: CommandContext): Promise<void> {
     return;
   }
 
+  if (ctx.controls.profileConfig.agentKind === 'omp') {
+    const identity = ctx.sessionCatalogIdentity;
+    const entry =
+      ctx.sessionCatalog && identity ? ctx.sessionCatalog.activeFor(identity) : undefined;
+    const entries =
+      entry?.sessionId && identity
+        ? [
+            {
+              sessionId: issueResumeCandidate(identity, { sessionId: entry.sessionId }),
+              displayId: entry.sessionId,
+              preview: '当前 OMP 会话',
+              relTime: '',
+              current: true,
+            },
+          ]
+        : [];
+    const card = resumeCard(cwd, entries);
+    await ctx.channel.send(ctx.msg.chatId, { card }, commandReplyOptions(ctx));
+    return;
+  }
   const sessions = await listClaudeResumeHistory(ctx, cwd, limit);
   const currentSession = ctx.sessions.getRaw(ctx.scope);
   const identity = ctx.sessionCatalogIdentity;
@@ -617,18 +637,12 @@ async function applyResume(sessionId: string, ctx: CommandContext): Promise<void
       ctx.activeRuns.interrupt(ctx.scope);
       if (ctx.sessionCatalogIdentity.agentId === 'codex') {
         ctx.sessionCatalog.upsertActive({
-          scopeId: ctx.sessionCatalogIdentity.scopeId,
-          agentId: 'codex',
-          cwdRealpath: ctx.sessionCatalogIdentity.cwdRealpath,
-          policyFingerprint: ctx.sessionCatalogIdentity.policyFingerprint,
+          ...ctx.sessionCatalogIdentity,
           threadId: resolved.threadId!,
         });
       } else {
         ctx.sessionCatalog.upsertActive({
-          scopeId: ctx.sessionCatalogIdentity.scopeId,
-          agentId: 'claude',
-          cwdRealpath: ctx.sessionCatalogIdentity.cwdRealpath,
-          policyFingerprint: ctx.sessionCatalogIdentity.policyFingerprint,
+          ...ctx.sessionCatalogIdentity,
           sessionId: resolved.sessionId!,
         });
         ctx.sessions.set(ctx.scope, resolved.sessionId!, ctx.sessionCatalogIdentity.cwdRealpath);
@@ -646,9 +660,7 @@ async function applyResume(sessionId: string, ctx: CommandContext): Promise<void
       return;
     }
     ctx.activeRuns.interrupt(ctx.scope);
-    if (ctx.sessionCatalogIdentity.agentId === 'claude') {
-      ctx.sessions.set(ctx.scope, sessionId, ctx.sessionCatalogIdentity.cwdRealpath);
-    }
+    ctx.sessions.set(ctx.scope, sessionId, ctx.sessionCatalogIdentity.cwdRealpath);
     await reply(ctx, RESUME_APPLIED_REPLY);
     return;
   }
@@ -699,7 +711,7 @@ function consumeResumeCandidate(
     candidate.agentId !== identity.agentId ||
     candidate.cwdRealpath !== identity.cwdRealpath ||
     candidate.policyFingerprint !== identity.policyFingerprint ||
-    (identity.agentId === 'claude' && !candidate.sessionId) ||
+    (identity.agentId !== 'codex' && !candidate.sessionId) ||
     (identity.agentId === 'codex' && !candidate.threadId)
   ) {
     return undefined;
@@ -771,6 +783,9 @@ function runtimeAccessStatus(
       ),
     };
   }
+  if (profileConfig.agentKind === 'omp') {
+    return { label: 'access', value: 'full' };
+  }
   return {
     label: 'sandbox',
     value: `${profileConfig.sandbox.defaultMode}/${profileConfig.sandbox.maxMode}`,
@@ -814,13 +829,16 @@ async function handleStatus(_args: string, ctx: CommandContext): Promise<void> {
   const sess = ctx.sessions.getRaw(ctx.scope);
   const isCodex = ctx.controls.profileConfig.agentKind === 'codex';
   const catalogEntry =
-    isCodex && ctx.sessionCatalog && ctx.sessionCatalogIdentity
+    ctx.sessionCatalog && ctx.sessionCatalogIdentity
       ? ctx.sessionCatalog.activeFor(ctx.sessionCatalogIdentity)
       : undefined;
+  const sessionId = isCodex
+    ? catalogEntry?.threadId
+    : catalogEntry?.sessionId ?? sess?.sessionId;
   const card = statusCard({
     profileName: ctx.controls.profile,
     cwd,
-    sessionId: isCodex ? catalogEntry?.threadId : sess?.sessionId,
+    sessionId,
     emptySessionText: isCodex ? '(未建立)' : undefined,
     sessionStale: !isCodex && Boolean(cwd && sess && sess.cwd !== cwd),
     agentName: ctx.agent.displayName,
@@ -1127,10 +1145,7 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
   }
   doctorLastByOperator.set(rateKey, now);
 
-  const capability =
-    ctx.controls.profileConfig.agentKind === 'codex'
-      ? codexCapability(ctx.controls.profileConfig)
-      : claudeCapability(ctx.controls.profileConfig);
+  const capability = capabilityForProfile(ctx.controls.profileConfig);
   const policy = evaluateRunPolicy({
     scope: {
       source: 'im',

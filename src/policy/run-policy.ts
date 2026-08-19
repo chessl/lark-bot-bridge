@@ -77,7 +77,8 @@ export interface RunPolicyReject {
     code:
       | 'access-denied'
       | 'folder-allowlist-unverified'
-      | 'required-attachment-rejected';
+      | 'required-attachment-rejected'
+      | 'unsupported-agent-access';
     userVisible: string;
   };
 }
@@ -109,6 +110,15 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     input.profileConfig.permissions.maxAccess,
     input.capability.permissions.maxAccess,
   );
+  if (
+    input.capability.permissions.supportedAccess &&
+    !input.capability.permissions.supportedAccess.includes(accessMode)
+  ) {
+    return reject(
+      'unsupported-agent-access',
+      `当前 ${input.capability.agentId} 运行时不支持 ${accessMode} 权限；请将该 profile 的默认权限设为 full。`,
+    );
+  }
   const sandbox = accessToCodexSandbox(accessMode);
   const permissionMode = accessToClaudePermissionMode(
     accessMode,

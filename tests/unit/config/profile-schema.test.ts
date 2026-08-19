@@ -96,6 +96,23 @@ describe('profile schema', () => {
     ).toThrow(/codex/i);
   });
 
+  it('requires and normalizes OMP configuration when agentKind is omp', () => {
+    expect(() =>
+      normalizeProfileConfig({
+        schemaVersion: 2,
+        agentKind: 'omp',
+        accounts: { app },
+      }),
+    ).toThrow(/omp/i);
+
+    const cfg = createDefaultProfileConfig({
+      agentKind: 'omp',
+      accounts: { app },
+      omp: { binaryPath: '/usr/local/bin/omp', profile: ' work ' },
+    });
+    expect(cfg.omp).toEqual({ binaryPath: '/usr/local/bin/omp', profile: 'work' });
+  });
+
   it('rejects sandbox defaults that exceed max capability as a permission error', () => {
     expect(() =>
       normalizeProfileConfig({

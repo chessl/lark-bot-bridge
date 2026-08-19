@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { claudeCapability, codexCapability } from '../../../src/agent/capability';
+import { claudeCapability, codexCapability, ompCapability } from '../../../src/agent/capability';
 import type { AccessMode } from '../../../src/config/permissions';
 import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema';
 import {
@@ -61,6 +61,22 @@ describe('run policy', () => {
       expect(result.permissionMode).toBe(permissionMode);
     },
   );
+
+  it('rejects restricted access for OMP because RPC has no enforceable sandbox', () => {
+    const result = evaluateRunPolicy(
+      baseInput({
+        capability: ompCapability(),
+        profileConfig: profile({
+          permissions: { defaultAccess: 'workspace', maxAccess: 'workspace' },
+        }),
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      rejectReason: { code: 'unsupported-agent-access' },
+    });
+  });
 
   it('does not raise access above capability maxAccess', () => {
     const result = evaluateRunPolicy({
