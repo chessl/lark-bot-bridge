@@ -1,17 +1,16 @@
-import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
-import { delimiter, join } from 'node:path';
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { mkdtemp } from 'node:fs/promises';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { resolveAppPaths } from '../../../src/config/app-paths';
+import { getSecret } from '../../../src/config/keystore';
+import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
+import { secretKeyForApp } from '../../../src/config/schema';
+import { writeLarkCliSourceProjection } from '../../../src/lark-cli/profile-projection';
 import {
   materializeEnvSecretForService,
   resolveProfileRuntime,
 } from '../../../src/runtime/profile-runtime';
-import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
-import { resolveAppPaths } from '../../../src/config/app-paths';
-import { getSecret } from '../../../src/config/keystore';
-import { secretKeyForApp } from '../../../src/config/schema';
-import { writeLarkCliSourceProjection } from '../../../src/lark-cli/profile-projection';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
 
 const wizard = vi.hoisted(() => ({

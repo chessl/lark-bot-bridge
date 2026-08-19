@@ -1,13 +1,13 @@
 import { EventEmitter } from 'node:events';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppConfig } from '../../../src/config/schema';
 import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import { loadRootConfig, saveRootConfig } from '../../../src/config/profile-store';
+import type { AppConfig } from '../../../src/config/schema';
 
 const mocks = vi.hoisted(() => ({
   spawnProcess: vi.fn(),

@@ -1,13 +1,12 @@
-import type { NormalizedMessage } from '@larksuite/channel';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent } from '../../../src/agent/types.js';
-import type { FakeAgentEvents } from '../../helpers/fake-agent.js';
+import type { NormalizedMessage } from '@larksuite/channel';
+import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 import { log } from '../../../src/core/logger.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
+import type { FakeAgentEvents } from '../../helpers/fake-agent.js';
 import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
 
@@ -52,8 +51,8 @@ interface FakeLarkChannel {
           get: ReturnType<typeof vi.fn>;
         };
         messageReaction: {
-          create: ReturnType<typeof vi.fn>;
-          delete: ReturnType<typeof vi.fn>;
+          create: Mock<(input: unknown) => Promise<unknown>>;
+          delete: Mock<(input: unknown) => Promise<unknown>>;
         };
       };
     };

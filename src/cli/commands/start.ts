@@ -1,49 +1,16 @@
 import dns from 'node:dns';
 import { createInterface } from 'node:readline';
 import pkg from '../../../package.json';
-import { ClaudeAdapter } from '../../agent/claude/adapter';
-import { CodexAdapter } from '../../agent/codex/adapter';
-import {
-  type AgentAvailability,
-  AgentPreflightError,
-  formatAgentPreflightDiagnostic,
-} from '../../agent/preflight';
-import type { AgentAdapter } from '../../agent/types';
-import { type BridgeChannel, startChannel } from '../../bot/channel';
-import type { Controls } from '../../commands';
 import type { AppPaths } from '../../config/app-paths';
-import type { AgentKind, ProfileConfig } from '../../config/profile-schema';
-import type { AppConfig } from '../../config/schema';
-import { isComplete } from '../../config/schema';
 import { configureLogger, gcOldLogs, log } from '../../core/logger';
-import { gcMediaCache } from '../../media/cache';
-import { refreshOwnerControls } from '../../policy/owner';
-import { checkRuntimeAgentAvailability, releaseRuntimeLocks } from '../../runtime/agent-runtime';
 import { acquireHostLock } from '../../runtime/host-lock';
-import {
-  type AcquiredRuntimeLock,
-  acquireAppRuntimeLock,
-  RuntimeLockConflictError,
-  type RuntimeLockMeta,
-  withProfileAndAppLocks,
-} from '../../runtime/locks';
+import { RuntimeLockConflictError, type RuntimeLockMeta } from '../../runtime/locks';
 import { resolveProfileRuntime } from '../../runtime/profile-runtime';
-import {
-  cleanupTmpFiles,
-  type ProcessEntry,
-  register,
-  sameAppLiveOthers,
-  unregisterSync,
-  updateEntry,
-} from '../../runtime/registry';
+import { cleanupTmpFiles } from '../../runtime/registry';
 import { Supervisor } from '../../runtime/supervisor';
-import { SessionCatalog } from '../../session/catalog';
-import { SessionStore } from '../../session/store';
 import { startUiServer } from '../../ui/server';
 import { readUiSidecar, removeUiSidecar, writeUiSidecar } from '../../ui/sidecar';
 import type { UiServerHandle } from '../../ui/types';
-import { WorkspaceStore } from '../../workspace/store';
-import { preFlightChecks } from '../preflight';
 import { type StopProcessEntryResult, stopProcessEntry } from './ps';
 
 // Prefer IPv4 — Node 20+ defaults to "verbatim" which respects whatever
@@ -63,8 +30,6 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtException', (err) => {
   log.fail('process', err, { kind: 'uncaughtException' });
 });
-
-const MEDIA_GC_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface StartOptions {
   config?: string;
@@ -106,7 +71,7 @@ async function runClassic(opts: StartOptions): Promise<void> {
     ...opts,
     allowBootstrap: true,
   });
-  const { cfg, configPath, appPaths } = runtime;
+  const { configPath, appPaths } = runtime;
   configureLogger({ logsDir: appPaths.logsDir });
   await gcOldLogs();
 
@@ -141,7 +106,6 @@ async function runSupervisorConsole(opts: StartOptions): Promise<void> {
     ...opts,
     allowBootstrap: true,
   });
-  const cfg = runtime.cfg;
   const configPath = runtime.configPath;
   const appPaths = runtime.appPaths;
   configureLogger({ logsDir: appPaths.hostLogsDir });
@@ -222,53 +186,6 @@ function parkWithShutdown(
   return new Promise<void>(() => {});
 }
 
-/**
- * Print the same-app conflict, then ask the user how to proceed. Returns
- * true to continue starting (after killing the old ones), false to cancel.
- *
- * Non-TTY (launchd / systemd / piped) skips the prompt and warns — a service
- * manager can't answer questions, and erroring out by default would surprise
- * users running a daemon.
- */
-async function resolveConflict(conflicts: ProcessEntry[]): Promise<boolean> {
-  console.log(`⚠️  检测到这个飞书应用已经有 ${conflicts.length} 个 bot 正在运行:`);
-  for (const e of conflicts) {
-    const ago = formatAgo(Date.now() - new Date(e.startedAt).getTime());
-    // botName 只在 WS 连上后才回填,刚启动 / 连接失败的旧 entry 可能没有。
-    const label = e.botName ? `bot ${e.botName} (${e.appId})` : `bot ${e.appId}`;
-    console.log(`   - ${label},进程 ${e.id},${ago}启动`);
-  }
-  console.log('');
-
-  if (!process.stdin.isTTY) {
-    console.warn('⚠️  当前不是交互式启动,已自动取消。如需替换,先用 `kill <bot id>` 关掉旧的。\n');
-    return false;
-  }
-
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const ask = (q: string): Promise<string> => new Promise((resolve) => rl.question(q, resolve));
-  try {
-    const verb = conflicts.length > 1 ? '它们' : '那个';
-    const answer = (await ask(`继续启动会先关掉${verb},是否继续? [y/N]: `)).trim().toLowerCase();
-    if (answer !== 'y' && answer !== 'yes') {
-      return false;
-    }
-    for (const e of conflicts) {
-      try {
-        process.kill(e.pid, 'SIGTERM');
-        console.log(`✓ 已关掉 bot ${e.id}`);
-      } catch (err) {
-        console.warn(`✗ 关掉 bot ${e.id} 失败:${(err as Error).message}`);
-      }
-    }
-    // Brief wait so targets unregister themselves before we register on top.
-    await new Promise((r) => setTimeout(r, 1500));
-    return true;
-  } finally {
-    rl.close();
-  }
-}
-
 type RuntimeLockConflictAction = 'retry' | 'cancel' | 'unhandled';
 
 async function handleRuntimeLockConflict(
@@ -327,11 +244,4 @@ async function confirmStopRuntimeLockProcess(err: RuntimeLockConflictError): Pro
   } finally {
     rl.close();
   }
-}
-
-function formatAgo(ms: number): string {
-  if (ms < 60_000) return `${Math.floor(ms / 1000)} 秒前`;
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)} 分钟前`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)} 小时前`;
-  return `${Math.floor(ms / 86_400_000)} 天前`;
 }

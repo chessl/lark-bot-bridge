@@ -3,11 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
-import {
-  createRootConfig,
-  loadRootConfig,
-  saveRootConfig,
-} from '../../../src/config/profile-store';
+import { loadRootConfig, saveRootConfig } from '../../../src/config/profile-store';
 
 const roots: string[] = [];
 
