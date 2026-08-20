@@ -99,55 +99,47 @@ export class RunExecutor {
     const runId = this.createRunId();
     const startedAt = this.now();
     const queueWaitMs = startedAt - submittedAt;
-    const runOptions = {
-      runId,
-      prompt: input.policy.prompt,
-      cwd: input.policy.cwdRealpath,
-      sessionId: input.sessionId,
-      threadId: input.threadId,
-      model: input.model,
-      images: input.images,
-      sandbox: input.policy.sandbox,
-      permissionMode: input.policy.permissionMode,
-      stopGraceMs: input.stopGraceMs,
-      nativeMcp:
-        this.nativeTools && input.scope
-          ? this.nativeTools.openRun({
-              runId,
-              cwd: input.policy.cwdRealpath,
-              scopeId: input.scopeId,
-              scope: input.scope,
-              policyFingerprint: input.policy.policyFingerprint,
-              allowUserIdentity: input.allowUserIdentity ?? false,
-            })
-          : undefined,
-    };
     let run: AgentRun;
     try {
-      await this.agent.prepareRun?.(runOptions);
+      run = await this.agent.start({
+        runId,
+        prompt: input.policy.prompt,
+        cwd: input.policy.cwdRealpath,
+        sessionId: input.sessionId,
+        threadId: input.threadId,
+        model: input.model,
+        images: input.images,
+        sandbox: input.policy.sandbox,
+        permissionMode: input.policy.permissionMode,
+        stopGraceMs: input.stopGraceMs,
+        nativeMcp:
+          this.nativeTools && input.scope
+            ? this.nativeTools.openRun({
+                runId,
+                cwd: input.policy.cwdRealpath,
+                scopeId: input.scopeId,
+                scope: input.scope,
+                policyFingerprint: input.policy.policyFingerprint,
+                allowUserIdentity: input.allowUserIdentity ?? false,
+              })
+            : undefined,
+      });
     } catch (err) {
       release();
       releaseScope();
       await this.nativeTools?.closeRun(runId);
       if (err instanceof SpawnFailed) throw err;
-      throw new SpawnFailed('agent prepare failed', err, 'agent-prepare-failed');
+      throw new SpawnFailed('agent start failed', err);
     }
     if (this.activeRuns.newRunsPaused()) {
       release();
       releaseScope();
+      await run.stop().catch(() => {});
       await this.nativeTools?.closeRun(runId);
       throw new RunRejected(
         'reconnect-in-progress',
         this.activeRuns.newRunsPauseReason() ?? 'new runs are temporarily paused',
       );
-    }
-    try {
-      run = this.agent.run(runOptions);
-    } catch (err) {
-      release();
-      releaseScope();
-      await this.nativeTools?.closeRun(runId);
-      throw new SpawnFailed('agent spawn failed', err);
     }
     const dimensions = {
       runId,

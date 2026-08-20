@@ -1,11 +1,6 @@
 import { ClaudeAdapter } from '../agent/claude/adapter';
 import { CodexAdapter } from '../agent/codex/adapter';
 import { OmpAdapter } from '../agent/omp/adapter';
-import {
-  type AgentAvailability,
-  type AgentPreflightDiagnostic,
-  AgentPreflightError,
-} from '../agent/preflight';
 import type { AgentAdapter } from '../agent/types';
 import type { AppPaths } from '../config/app-paths';
 import { accessToCodexSandbox } from '../config/permissions';
@@ -48,22 +43,6 @@ export function createRuntimeAgent(
   return new ClaudeAdapter();
 }
 
-export async function checkRuntimeAgentAvailability(
-  agent: AgentAdapter,
-): Promise<AgentAvailability> {
-  if (agent.checkAvailability) return agent.checkAvailability();
-  const ok = await agent.isAvailable();
-  if (ok) return { ok: true };
-  const agentId: AgentPreflightDiagnostic['agentId'] =
-    agent.id === 'codex' ? 'codex' : agent.id === 'omp' ? 'omp' : 'claude';
-  const diagnostic = {
-    code: 'agent-binary-not-found' as const,
-    agentId,
-    agentName: agent.displayName,
-    command: agentId,
-  };
-  return { ok: false, diagnostic, error: new AgentPreflightError(diagnostic) };
-}
 
 /** Guard: reconnect/restart must not switch a profile's agent kind mid-flight. */
 export function assertReconnectAgentKindUnchanged(

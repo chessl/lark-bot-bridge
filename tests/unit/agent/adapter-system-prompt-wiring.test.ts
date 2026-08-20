@@ -52,7 +52,7 @@ describe('ClaudeAdapter system prompt wiring', () => {
     const adapter = new ClaudeAdapter();
     adapter.setBotIdentity({ openId: 'ou_bot_self', name: 'Bridge' });
 
-    adapter.run({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
+    await adapter.start({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
 
     // The prompt goes via stdin, never argv.
     expect(await readAll(child.stdin)).toBe('hi');
@@ -66,7 +66,7 @@ describe('ClaudeAdapter system prompt wiring', () => {
     spawnMock.spawnProcess.mockReturnValue(child);
     const adapter = new ClaudeAdapter();
 
-    adapter.run({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
+    await adapter.start({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
 
     expect(await readAll(child.stdin)).toBe('hi');
     expect(systemPromptFileContent()).toBe(buildBridgeSystemPrompt(undefined));
@@ -83,10 +83,12 @@ describe('ClaudeAdapter system prompt wiring', () => {
 
 describe('CodexAdapter system prompt wiring', () => {
   function codexAdapter(): CodexAdapter {
-    return new CodexAdapter({
+    const adapter = new CodexAdapter({
       binary: '/usr/local/bin/codex',
       profileStateDir: '/tmp/codex-profile',
     });
+    vi.spyOn(adapter, 'checkAvailability').mockResolvedValue({ ok: true });
+    return adapter;
   }
 
   it('prefixes stdin with the identity-aware bridge system prompt after setBotIdentity', async () => {
@@ -95,7 +97,7 @@ describe('CodexAdapter system prompt wiring', () => {
     const adapter = codexAdapter();
     adapter.setBotIdentity({ openId: 'ou_bot_self', name: 'Bridge' });
 
-    adapter.run({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
+    await adapter.start({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
 
     const stdin = await readAll(child.stdin);
     expect(stdin).toBe(prefixBridgeSystemPrompt('hi', { openId: 'ou_bot_self', name: 'Bridge' }));
@@ -106,7 +108,7 @@ describe('CodexAdapter system prompt wiring', () => {
     spawnMock.spawnProcess.mockReturnValue(child);
     const adapter = codexAdapter();
 
-    adapter.run({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
+    await adapter.start({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
 
     const stdin = await readAll(child.stdin);
     expect(stdin).toBe(prefixBridgeSystemPrompt('hi', undefined));

@@ -28,7 +28,7 @@ describe('ClaudeAdapter process contract', () => {
     });
     cleanup.push(fake.dir);
 
-    const run = new ClaudeAdapter({ binary: fake.path }).run({
+    const run = await new ClaudeAdapter({ binary: fake.path }).start({
       runId: 'run-fresh',
       prompt: 'hello',
       cwd: fake.dir,
@@ -69,7 +69,7 @@ describe('ClaudeAdapter process contract', () => {
     });
     cleanup.push(fake.dir);
 
-    const run = new ClaudeAdapter({ binary: fake.path }).run({
+    const run = await new ClaudeAdapter({ binary: fake.path }).start({
       runId: 'run-resume',
       prompt: 'continue',
       cwd: fake.dir,
@@ -96,7 +96,7 @@ describe('ClaudeAdapter process contract', () => {
     });
     cleanup.push(fake.dir);
 
-    const run = new ClaudeAdapter({ binary: fake.path }).run({
+    const run = await new ClaudeAdapter({ binary: fake.path }).start({
       runId: 'run-fail',
       prompt: 'fail',
       cwd: fake.dir,
@@ -114,7 +114,7 @@ describe('ClaudeAdapter process contract', () => {
 
   it('surfaces spawn errors as stream error events', async () => {
     const missing = join(tmpdir(), `missing-claude-${Date.now()}`);
-    const run = new ClaudeAdapter({ binary: missing }).run({
+    const run = await new ClaudeAdapter({ binary: missing }).start({
       runId: 'run-missing',
       prompt: 'hi',
       cwd: tmpdir(),
@@ -136,7 +136,7 @@ describe('ClaudeAdapter process contract', () => {
     });
     cleanup.push(fake.dir);
 
-    const run = new ClaudeAdapter({ binary: fake.path }).run({
+    const run = await new ClaudeAdapter({ binary: fake.path }).start({
       runId: 'run-tail',
       prompt: 'tail',
       cwd: fake.dir,
@@ -162,7 +162,7 @@ describe('ClaudeAdapter process contract', () => {
       url: 'http://127.0.0.1:12345/mcp',
       bearerToken: 'run-secret',
     };
-    const run = new ClaudeAdapter({ binary: fake.path }).run({
+    const run = await new ClaudeAdapter({ binary: fake.path }).start({
       runId: 'run-mcp',
       prompt: 'use lark',
       cwd: fake.dir,
@@ -185,10 +185,10 @@ describe('ClaudeAdapter process contract', () => {
     expect(record.env.LARK_NATIVE_MCP_TOKEN).toBe(nativeMcp.bearerToken);
   });
 
-  it('requires cwd to be resolved by policy before spawning', () => {
-    expect(() =>
-      new ClaudeAdapter({ binary: 'unused' }).run({ runId: 'run-no-cwd', prompt: 'hi' }),
-    ).toThrow(/cwd is required/);
+  it('requires cwd to be resolved by policy before spawning', async () => {
+    await expect(
+      new ClaudeAdapter({ binary: 'unused' }).start({ runId: 'run-no-cwd', prompt: 'hi' }),
+    ).rejects.toThrow(/cwd is required/);
   });
 });
 

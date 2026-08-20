@@ -123,7 +123,7 @@ describe('Claude stream-json reader behavior', () => {
     );
     cleanup = binary.cleanup;
 
-    const run = new ClaudeAdapter({ binary: binary.path }).run({
+    const run = await new ClaudeAdapter({ binary: binary.path }).start({
       runId: 'run-reader',
       prompt: 'hi',
       cwd: tmpdir(),

@@ -14,23 +14,23 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
 });
 
-describe('RunExecutor prepareRun preflight', () => {
-  it('runs prepareRun after acquiring a pool slot and before spawning', async () => {
-    const h = await createHarness({ agent: new PreparingAgent() });
+describe('RunExecutor adapter startup', () => {
+  it('starts the adapter after acquiring a pool slot', async () => {
+    const h = await createHarness({ agent: new StartingAgent() });
 
     const execution = await h.executor.submit({
       scopeId: 'scope-1',
       policy: policy(h.tmp.workspace),
     });
 
-    expect(h.agent.order).toEqual(['prepare:run-1', 'run:run-1']);
+    expect(h.agent.starts).toEqual(['run-1']);
     expect(h.pool.snapshot()).toMatchObject({ active: 1, waiting: 0 });
     await collect(execution.events);
   });
 
-  it('releases pool slots and does not register active runs when prepareRun fails', async () => {
+  it('preserves startup diagnostics and releases admission when start fails', async () => {
     const h = await createHarness({
-      agent: new PreparingAgent(
+      agent: new StartingAgent(
         new SpawnFailed('codex binary check failed', new Error('missing'), 'agent-prepare-failed'),
       ),
     });
@@ -41,15 +41,15 @@ describe('RunExecutor prepareRun preflight', () => {
         policy: policy(h.tmp.workspace),
       }),
     ).rejects.toMatchObject({ code: 'agent-prepare-failed' });
-    expect(h.agent.order).toEqual(['prepare:run-1']);
+    expect(h.agent.starts).toEqual(['run-1']);
     expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
     expect(h.activeRuns.get('scope-1')).toBeUndefined();
   });
 });
 
-async function createHarness(options: { agent: PreparingAgent }): Promise<{
+async function createHarness(options: { agent: StartingAgent }): Promise<{
   tmp: TmpProfile;
-  agent: PreparingAgent;
+  agent: StartingAgent;
   pool: ProcessPool;
   activeRuns: ActiveRuns;
   executor: RunExecutor;
@@ -74,21 +74,17 @@ async function createHarness(options: { agent: PreparingAgent }): Promise<{
   };
 }
 
-class PreparingAgent extends FakeAgentAdapter {
-  readonly order: string[] = [];
+class StartingAgent extends FakeAgentAdapter {
+  readonly starts: string[] = [];
 
-  constructor(private readonly prepareError?: Error) {
+  constructor(private readonly startError?: Error) {
     super({ events: [{ type: 'done', terminationReason: 'normal' }] });
   }
 
-  async prepareRun(opts: AgentRunOptions): Promise<void> {
-    this.order.push(`prepare:${opts.runId}`);
-    if (this.prepareError) throw this.prepareError;
-  }
-
-  override run(opts: AgentRunOptions) {
-    this.order.push(`run:${opts.runId}`);
-    return super.run(opts);
+  override async start(opts: AgentRunOptions) {
+    this.starts.push(opts.runId);
+    if (this.startError) throw this.startError;
+    return super.start(opts);
   }
 }
 

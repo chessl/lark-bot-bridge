@@ -290,15 +290,16 @@ class BlockingAgentAdapter implements AgentAdapter {
 
   constructor(private readonly autoComplete: boolean = false) {}
 
-  async isAvailable(): Promise<boolean> {
-    return true;
+  async checkAvailability(): Promise<{ ok: true }> {
+    return { ok: true };
   }
+  setBotIdentity(): void {}
 
   get stopped(): boolean {
     return this.wasStopped;
   }
 
-  run(opts: AgentRunOptions): AgentRun {
+  async start(opts: AgentRunOptions): Promise<AgentRun> {
     const runIndex = this.runOptions.length;
     this.runOptions.push(opts);
     return {

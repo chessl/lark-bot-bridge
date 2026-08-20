@@ -29,7 +29,7 @@ describe('OmpAdapter process contract', () => {
     const adapter = new OmpAdapter({ binary: fake.path });
     adapter.setBotIdentity({ openId: 'ou_bot', name: 'OMP Bot' });
 
-    const run = adapter.run({
+    const run = await adapter.start({
       runId: 'run-fresh',
       prompt: 'hello from lark',
       cwd,
@@ -81,7 +81,7 @@ describe('OmpAdapter process contract', () => {
     const image = join(fake.dir, 'image.png');
     await writeFile(image, Buffer.from([0, 1, 2, 3]));
 
-    const run = new OmpAdapter({ binary: fake.path, profile: 'work' }).run({
+    const run = await new OmpAdapter({ binary: fake.path, profile: 'work' }).start({
       runId: 'run-resume',
       prompt: 'inspect image',
       cwd,
@@ -122,7 +122,7 @@ describe('OmpAdapter process contract', () => {
       bearerToken: 'run-secret',
     };
     try {
-      const run = new OmpAdapter({ binary: fake.path }).run({
+      const run = await new OmpAdapter({ binary: fake.path }).start({
         runId: 'run-mcp',
         prompt: 'use lark',
         cwd: await realpath(fake.dir),
@@ -157,7 +157,7 @@ describe('OmpAdapter process contract', () => {
   it('rejects non-full bridge access instead of weakening the sandbox contract', async () => {
     const adapter = new OmpAdapter({ binary: 'omp' });
     await expect(
-      adapter.prepareRun({
+      adapter.start({
         runId: 'run-read-only',
         prompt: 'read',
         cwd: process.cwd(),

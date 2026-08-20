@@ -59,9 +59,6 @@ export class CodexAdapter implements AgentAdapter {
     this.botIdentity = identity;
   }
 
-  async isAvailable(): Promise<boolean> {
-    return (await this.checkAvailability()).ok;
-  }
 
   async checkAvailability(): Promise<AgentAvailability> {
     return checkAgentAvailability({
@@ -72,7 +69,11 @@ export class CodexAdapter implements AgentAdapter {
     });
   }
 
-  async prepareRun(): Promise<void> {
+
+  async start(opts: AgentRunOptions): Promise<AgentRun> {
+    if (!opts.cwd) {
+      throw new Error('cwd is required for CodexAdapter.start');
+    }
     const availability = await this.checkAvailability();
     if (!availability.ok) {
       throw new SpawnFailed(
@@ -81,12 +82,6 @@ export class CodexAdapter implements AgentAdapter {
         availability.diagnostic.code,
         availability.diagnostic,
       );
-    }
-  }
-
-  run(opts: AgentRunOptions): AgentRun {
-    if (!opts.cwd) {
-      throw new Error('cwd is required for CodexAdapter.run');
     }
 
     const args = buildCodexArgs({

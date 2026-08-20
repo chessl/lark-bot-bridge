@@ -79,14 +79,11 @@ export interface AgentBotIdentity {
 export interface AgentAdapter {
   readonly id: string;
   readonly displayName: string;
-  isAvailable(): Promise<boolean>;
-  checkAvailability?(): Promise<AgentAvailability>;
-  prepareRun?(opts: AgentRunOptions): Promise<void>;
-  run(opts: AgentRunOptions): AgentRun;
+  checkAvailability(): Promise<AgentAvailability>;
   /**
    * Late-bound identity injection: the adapter is constructed before the
    * channel connects, so the channel calls this once botIdentity is known.
-   * Adapters that don't bake identity into their prompts may omit it.
    */
-  setBotIdentity?(identity: AgentBotIdentity): void;
+  setBotIdentity(identity: AgentBotIdentity): void;
+  start(opts: AgentRunOptions): Promise<AgentRun>;
 }

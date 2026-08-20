@@ -60,7 +60,6 @@ export class FakeAgentAdapter implements AgentAdapter {
   readonly runs: FakeAgentRun[] = [];
   readonly runOptions: AgentRunOptions[] = [];
   botIdentity: AgentBotIdentity | undefined;
-  #available: boolean;
   #eventRuns: AgentEvent[][];
   #waitForExitResults: boolean[];
 
@@ -68,27 +67,25 @@ export class FakeAgentAdapter implements AgentAdapter {
     options: {
       id?: string;
       displayName?: string;
-      available?: boolean;
       events?: FakeAgentEvents;
       waitForExit?: boolean | readonly boolean[];
     } = {},
   ) {
     this.id = options.id ?? 'fake-agent';
     this.displayName = options.displayName ?? 'Fake Agent';
-    this.#available = options.available ?? true;
     this.#eventRuns = normalizeEventRuns(options.events ?? []);
     this.#waitForExitResults = normalizeWaitForExitResults(options.waitForExit);
   }
 
-  async isAvailable(): Promise<boolean> {
-    return this.#available;
+  async checkAvailability(): Promise<{ ok: true }> {
+    return { ok: true };
   }
 
   setBotIdentity(identity: AgentBotIdentity): void {
     this.botIdentity = identity;
   }
 
-  run(opts: AgentRunOptions): AgentRun {
+  async start(opts: AgentRunOptions): Promise<AgentRun> {
     this.runOptions.push(opts);
     const events = this.#eventRuns.shift() ?? [];
     const waitForExitResult = this.#waitForExitResults.shift() ?? true;
@@ -106,9 +103,6 @@ export class FakeAgentAdapter implements AgentAdapter {
     this.#eventRuns = normalizeEventRuns(events);
   }
 
-  setAvailable(available: boolean): void {
-    this.#available = available;
-  }
 
   setWaitForExit(result: boolean | readonly boolean[]): void {
     this.#waitForExitResults = normalizeWaitForExitResults(result);

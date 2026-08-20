@@ -517,11 +517,12 @@ class BlockingAgentAdapter implements AgentAdapter {
 
   constructor(private readonly threadIds: string[]) {}
 
-  async isAvailable(): Promise<boolean> {
-    return true;
+  async checkAvailability(): Promise<{ ok: true }> {
+    return { ok: true };
   }
+  setBotIdentity(): void {}
 
-  run(opts: AgentRunOptions): AgentRun {
+  async start(opts: AgentRunOptions): Promise<AgentRun> {
     const index = this.runOptions.length;
     this.runOptions.push(opts);
     let stopped = false;

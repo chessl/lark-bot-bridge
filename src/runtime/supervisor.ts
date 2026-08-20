@@ -12,7 +12,6 @@ import { SessionStore } from '../session/store';
 import { WorkspaceStore } from '../workspace/store';
 import {
   assertReconnectAgentKindUnchanged,
-  checkRuntimeAgentAvailability,
   createRuntimeAgent,
   releaseRuntimeLocks,
 } from './agent-runtime';
@@ -206,7 +205,7 @@ class ManagedProfile {
         nextRuntime.profileConfig.agentKind,
       );
       const nextAgent = createRuntimeAgent(nextRuntime.profileConfig, nextRuntime.appPaths);
-      const availability = await checkRuntimeAgentAvailability(nextAgent);
+      const availability = await nextAgent.checkAvailability();
       if (!availability.ok) throw availability.error;
 
       const appChanged = next.accounts.app.id !== this.cfg.accounts.app.id;
@@ -314,7 +313,7 @@ export class Supervisor {
 
     const agent = createRuntimeAgent(profileConfig, appPaths);
     if (this.opts.runAgentPreflight !== false) {
-      const availability = await checkRuntimeAgentAvailability(agent);
+      const availability = await agent.checkAvailability();
       if (!availability.ok) throw availability.error;
     }
 

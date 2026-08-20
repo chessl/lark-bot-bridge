@@ -3,6 +3,7 @@ import type { NativeToolProvider, NativeToolRunContext } from '../../../src/agen
 import type { AgentAdapter, AgentRun, AgentRunOptions } from '../../../src/agent/types';
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { ProcessPool } from '../../../src/bot/process-pool';
+import { withResolvers } from '../../../src/platform/promise';
 import type { RunPolicyAllow } from '../../../src/policy/run-policy';
 import { RunRejected, SpawnFailed } from '../../../src/runtime/errors';
 import { RunExecutor } from '../../../src/runtime/run-executor';
@@ -228,8 +229,8 @@ describe('RunExecutor', () => {
     }
   });
 
-  it('rejects submissions paused while prepareRun is still pending', async () => {
-    const agent = new DelayedPrepareAgent({
+  it('rejects and stops a run when reconnect starts during adapter startup', async () => {
+    const agent = new DelayedStartAgent({
       events: [{ type: 'done', terminationReason: 'normal' }],
     });
     const h = await createHarness({ agent });
@@ -238,30 +239,47 @@ describe('RunExecutor', () => {
       scopeId: 'scope-1',
       policy: policy(h.tmp.workspace),
     });
-    await agent.prepareStarted;
+    await agent.startCalled;
 
     const resume = h.activeRuns.pauseNewRuns('reconnect');
     try {
-      agent.releasePrepare();
+      agent.releaseStart();
       await expect(submit).rejects.toMatchObject({ code: 'reconnect-in-progress' });
-      expect(agent.runs).toHaveLength(0);
+      expect(agent.runs).toHaveLength(1);
+      expect(agent.runs[0]?.stopped).toBe(true);
+      expect(h.activeRuns.get('scope-1')).toBeUndefined();
       expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
     } finally {
       resume();
     }
   });
 
-  it('releases pool and active run state when adapter spawn fails', async () => {
-    const h = await createHarness({ agent: new ThrowingAgent() });
+  it('releases admission and native-tool state when adapter startup fails', async () => {
+    const closed: string[] = [];
+    const h = await createHarness({
+      agent: new ThrowingAgent(),
+      nativeTools: {
+        openRun: () => ({
+          name: 'lark_bridge',
+          url: 'http://127.0.0.1:12345/mcp',
+          bearerToken: 'run-secret',
+        }),
+        closeRun: async (runId) => {
+          closed.push(runId);
+        },
+      },
+    });
 
     await expect(
       h.executor.submit({
         scopeId: 'scope-1',
+        scope: { source: 'im', actorId: 'ou_1' },
         policy: policy(h.tmp.workspace),
       }),
     ).rejects.toBeInstanceOf(SpawnFailed);
     expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
     expect(h.activeRuns.get('scope-1')).toBeUndefined();
+    expect(closed).toEqual(['run-1']);
   });
 
   it('stops and waits for the underlying run when execution is interrupted', async () => {
@@ -369,35 +387,32 @@ class ThrowingAgent implements AgentAdapter {
   readonly id = 'throwing';
   readonly displayName = 'Throwing';
 
-  async isAvailable(): Promise<boolean> {
-    return true;
+  async checkAvailability(): Promise<{ ok: true }> {
+    return { ok: true };
   }
+  setBotIdentity(): void {}
 
-  run(_opts: AgentRunOptions): AgentRun {
+  async start(_opts: AgentRunOptions): Promise<AgentRun> {
     throw new Error('spawn failed');
   }
 }
 
-class DelayedPrepareAgent extends FakeAgentAdapter {
-  readonly prepareStarted: Promise<void>;
-  private resolvePrepareStarted!: () => void;
-  private resolvePrepare!: () => void;
+class DelayedStartAgent extends FakeAgentAdapter {
+  private readonly called = withResolvers<void>();
+  private readonly release = withResolvers<void>();
+  readonly startCalled = this.called.promise;
 
   constructor(options: ConstructorParameters<typeof FakeAgentAdapter>[0]) {
     super(options);
-    this.prepareStarted = new Promise((resolve) => {
-      this.resolvePrepareStarted = resolve;
-    });
   }
 
-  async prepareRun(): Promise<void> {
-    this.resolvePrepareStarted();
-    await new Promise<void>((resolve) => {
-      this.resolvePrepare = resolve;
-    });
+  override async start(opts: AgentRunOptions): Promise<AgentRun> {
+    this.called.resolve();
+    await this.release.promise;
+    return super.start(opts);
   }
 
-  releasePrepare(): void {
-    this.resolvePrepare();
+  releaseStart(): void {
+    this.release.resolve();
   }
 }

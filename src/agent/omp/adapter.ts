@@ -60,9 +60,6 @@ export class OmpAdapter implements AgentAdapter {
     this.botIdentity = identity;
   }
 
-  async isAvailable(): Promise<boolean> {
-    return (await this.checkAvailability()).ok;
-  }
 
   async checkAvailability(): Promise<AgentAvailability> {
     return checkAgentAvailability({
@@ -73,7 +70,8 @@ export class OmpAdapter implements AgentAdapter {
     });
   }
 
-  async prepareRun(opts: AgentRunOptions): Promise<void> {
+
+  async start(opts: AgentRunOptions): Promise<AgentRun> {
     if (opts.sandbox && opts.sandbox !== 'danger-full-access') {
       throw new SpawnFailed(
         'OMP currently requires full access because its RPC mode does not expose an enforceable workspace sandbox',
@@ -81,10 +79,7 @@ export class OmpAdapter implements AgentAdapter {
         'agent-prepare-failed',
       );
     }
-  }
-
-  run(opts: AgentRunOptions): AgentRun {
-    if (!opts.cwd) throw new Error('cwd is required for OmpAdapter.run');
+    if (!opts.cwd) throw new Error('cwd is required for OmpAdapter.start');
 
     const systemPromptFile = writeSystemPromptFile(buildBridgeSystemPrompt(this.botIdentity));
     const releaseMcp = opts.nativeMcp ? this.acquireMcpConfig(opts.nativeMcp) : () => {};

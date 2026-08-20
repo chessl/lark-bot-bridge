@@ -38,9 +38,6 @@ export class ClaudeAdapter implements AgentAdapter {
     this.botIdentity = identity;
   }
 
-  async isAvailable(): Promise<boolean> {
-    return (await this.checkAvailability()).ok;
-  }
 
   async checkAvailability(): Promise<AgentAvailability> {
     return checkAgentAvailability({
@@ -51,9 +48,9 @@ export class ClaudeAdapter implements AgentAdapter {
     });
   }
 
-  run(opts: AgentRunOptions): AgentRun {
+  async start(opts: AgentRunOptions): Promise<AgentRun> {
     if (!opts.cwd) {
-      throw new Error('cwd is required for ClaudeAdapter.run');
+      throw new Error('cwd is required for ClaudeAdapter.start');
     }
 
     // Keep bridge-only config out of argv; the temp directory is mode 0700.
