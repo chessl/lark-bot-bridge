@@ -123,6 +123,7 @@ export class ScopedRuns {
   private readonly now: () => number;
   private readonly active = new Map<string, ScopedRun>();
   private readonly activeSessionScopes = new Map<string, number>();
+  private readonly pendingStarts = new Set<Promise<StartScopedRunResult>>();
 
   constructor(deps: ScopedRunsDeps) {
     this.now = deps.now ?? Date.now;
@@ -146,7 +147,15 @@ export class ScopedRuns {
     this.stopGraceMs = deps.stopGraceMs;
   }
 
-  async start(input: StartScopedRunInput): Promise<StartScopedRunResult> {
+  start(input: StartScopedRunInput): Promise<StartScopedRunResult> {
+    const pending = this.startRun(input);
+    this.pendingStarts.add(pending);
+    return pending.finally(() => {
+      this.pendingStarts.delete(pending);
+    });
+  }
+
+  private async startRun(input: StartScopedRunInput): Promise<StartScopedRunResult> {
     const profileConfig = this.profileConfig();
     const capability = capabilityForProfile(profileConfig);
     const sessionScopeId =
@@ -191,7 +200,7 @@ export class ScopedRuns {
       profileConfig.agentKind === 'claude'
         ? { label: 'permission', value: policy.permissionMode }
         : profileConfig.agentKind === 'omp'
-          ? { label: 'access', value: policy.permissionMode }
+          ? { label: 'access', value: policy.accessMode }
           : { label: 'sandbox', value: policy.sandbox };
     const sessionScopeRun = sessionScopeId
       ? this.reserveSessionScope(sessionScopeId)
@@ -337,11 +346,14 @@ export class ScopedRuns {
     return this.activeRuns.pauseNewRuns(reason);
   }
 
-  waitForAll(timeoutMs?: number): Promise<void> {
-    return this.activeRuns.waitForAll(timeoutMs);
+  async waitForAll(timeoutMs = 300_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    await settleWithin([...this.pendingStarts], timeoutMs);
+    await this.activeRuns.waitForAll(Math.max(0, deadline - Date.now()));
   }
 
   async stopAll(): Promise<void> {
+    await Promise.allSettled([...this.pendingStarts]);
     await Promise.allSettled([...this.active.values()].map((run) => run.stop()));
   }
 
@@ -412,6 +424,24 @@ export class ScopedRuns {
         }
       },
     };
+  }
+}
+
+async function settleWithin(
+  promises: readonly Promise<unknown>[],
+  timeoutMs: number,
+): Promise<void> {
+  if (promises.length === 0 || timeoutMs <= 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.allSettled(promises),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

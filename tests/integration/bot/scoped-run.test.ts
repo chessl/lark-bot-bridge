@@ -70,6 +70,17 @@ describe('ScopedRuns', () => {
     expect(h.scopedRuns.activeMetadata('chat-1')).toBeUndefined();
   });
 
+  it('reports OMP runtime access in canonical access terms', async () => {
+    const h = await createHarness({ defaultWorkspace: true, agentKind: 'omp' });
+
+    const result = await start(h, 'chat-1');
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected scoped run to start');
+    expect(result.run.metadata.runtimeAccess).toEqual({ label: 'access', value: 'full' });
+    await collect(result.run.events);
+  });
+
   it('uses the profile default workspace when a scope has no explicit binding', async () => {
     const h = await createHarness({ defaultWorkspace: true });
     const workspaceRealpath = await realpath(h.tmp.workspace);
@@ -272,6 +283,58 @@ describe('ScopedRuns', () => {
     }
   });
 
+  it('waits for pending adapter startup before stopping all runs', async () => {
+    const agent = new DelayedStartAgent({
+      events: [{ type: 'done', terminationReason: 'normal' }],
+    });
+    const h = await createHarness({ defaultWorkspace: true, agent });
+    const starting = start(h, 'scope-1');
+    await agent.startCalled;
+
+    const resume = h.scopedRuns.pauseNewRuns('disconnect');
+    try {
+      let stopped = false;
+      const stopping = h.scopedRuns.stopAll().then(() => {
+        stopped = true;
+      });
+      await Promise.resolve();
+      expect(stopped).toBe(false);
+
+      agent.releaseStart();
+      await stopping;
+      await expect(starting).resolves.toMatchObject({
+        ok: false,
+        rejectReason: { code: 'reconnect-in-progress' },
+      });
+      expect(agent.runs[0]?.stopped).toBe(true);
+    } finally {
+      resume();
+    }
+  });
+
+  it('waits for pending adapter startup before waiting for active runs', async () => {
+    const agent = new DelayedStartAgent({
+      events: [{ type: 'done', terminationReason: 'normal' }],
+    });
+    const h = await createHarness({ defaultWorkspace: true, agent });
+    const starting = start(h, 'scope-1');
+    await agent.startCalled;
+
+    let waited = false;
+    const waiting = h.scopedRuns.waitForAll(1_000).then(() => {
+      waited = true;
+    });
+    await Promise.resolve();
+    expect(waited).toBe(false);
+
+    agent.releaseStart();
+    const result = await starting;
+    await waiting;
+    expect(agent.runs[0]?.waitForExitCalls).toBe(1);
+    if (!result.ok) throw new Error('expected scoped run to start');
+    await collect(result.run.events);
+  });
+
   it('releases completion, error, and stream closure promptly at the scoped seam', async () => {
     const terminalRuns: FakeAgentEvents[] = [
       [
@@ -371,6 +434,7 @@ interface ScopedRunHarness {
 }
 
 interface HarnessOptions {
+  agentKind?: 'claude' | 'omp';
   defaultWorkspace?: boolean;
   personal?: boolean;
   events?: FakeAgentEvents;
@@ -392,7 +456,7 @@ async function createHarness(options: HarnessOptions = {}): Promise<ScopedRunHar
   const activeRuns = new ActiveRuns();
   let nextRun = 1;
   const profileConfig = createDefaultProfileConfig({
-    agentKind: 'claude',
+    agentKind: options.agentKind ?? 'claude',
     accounts: {
       app: {
         id: 'cli_test',
@@ -400,6 +464,7 @@ async function createHarness(options: HarnessOptions = {}): Promise<ScopedRunHar
         tenant: 'feishu',
       },
     },
+    ...(options.agentKind === 'omp' ? { omp: { binaryPath: 'omp' } } : {}),
   });
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   const finalConfig = {

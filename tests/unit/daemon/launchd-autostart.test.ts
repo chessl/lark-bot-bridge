@@ -103,6 +103,32 @@ describe('structured platform daemon lifecycle', () => {
     );
   });
 
+  it('treats a loaded launchd job without its plist as running', async () => {
+    forcePlatform('darwin');
+    mocks.existsSync.mockReturnValue(false);
+    let loaded = true;
+    mocks.spawnSync.mockImplementation((_binary, args, options) => {
+      if (args[0] === 'bootout') loaded = false;
+      if (args[0] === 'print' && 'stdio' in (options as object)) {
+        return { status: loaded ? 0 : 1, stdout: '', stderr: '' };
+      }
+      if (args[0] === 'print') {
+        return { status: 0, stdout: 'pid = 4321', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+    const adapter = getServiceAdapter('supervisor');
+
+    expect(adapter?.status()).toEqual(expect.objectContaining({ state: 'running', pid: '4321' }));
+    expect(await adapter?.stop()).toEqual({ ok: true, previousState: 'running' });
+    expect(callsFor('launchctl')).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^bootout /),
+        expect.stringMatching(/^disable /),
+      ]),
+    );
+  });
+
   it('translates systemd install, inactive start, and metadata refresh', async () => {
     forcePlatform('linux');
     mocks.spawnSync.mockImplementation((_binary, args) => {

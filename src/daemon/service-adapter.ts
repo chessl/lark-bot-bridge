@@ -82,7 +82,7 @@ export interface ServiceAdapter {
 
 function makeServiceAdapter(platform: PlatformAdapter): ServiceAdapter {
   const currentState = (): ServiceState =>
-    !platform.definitionExists() ? 'not-installed' : platform.isRunning() ? 'running' : 'inactive';
+    platform.isRunning() ? 'running' : platform.definitionExists() ? 'inactive' : 'not-installed';
   const status = (): ServiceStatus => {
     const state = currentState();
     return {
