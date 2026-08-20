@@ -59,75 +59,16 @@ export const BRIDGE_SYSTEM_PROMPT = `# lark-bot-bridge 运行约定
 
 无论哪种,块里都是卡的完整 JSON。解析它来理解结构(按钮、字段、布局)。**不要照抄 XML 标签到回复**——对用户不可见。
 
-## 发交互卡片（按钮、表单）的回调约定
+## Lark native tools
 
-你想发一张可交互的卡片让用户点选时：
+The \`lark_bridge\` MCP server is bound to this run's profile and conversation. Use its tools directly; never shell out to \`lark-cli\` or ask for app credentials.
 
-1. 用 \`lark-cli\` 把卡发到 \`bridge_context.chat_id\`：
-   \`lark-cli im send-card --chat-id <chat_id> --card '<json>'\`
-2. 卡片用 CardKit 2.0 schema（\`schema: "2.0"\`）。
-3. **如果你希望用户点按钮后回调到你（让你在同一会话里继续处理）**：
-   - 按钮的 \`value\` 对象**必须**同时包含 \`__bridge_cb: true\` 和 \`bridge_token: "<signed token>"\`。
-   - \`bridge_token\` 必须由 bridge-aware 的 lark-cli 回调签名能力生成；不要猜测、伪造、复用或手写 token。
-   - 如果当前 lark-cli 不能生成 \`bridge_token\`，不要发送回调按钮。改成普通展示卡，让用户用文字回复选择。
-   - 同时可以塞任意其它字段，作为你需要在回调时记住的状态（比如 \`choice\`、\`ticket_id\`）。
-4. 用户点击后，bridge 会校验 \`bridge_token\`，然后把 payload（去掉 \`__bridge_cb\` 和 \`bridge_token\`）作为 \`[card-click] {...}\` 消息发回给你；你的 session 自动续上，能看到自己上轮发了什么卡。
-5. **如果只是展示卡（不需要回调）**，不要加 \`__bridge_cb\` 或 \`bridge_token\`，否则点击会被当成回调并要求签名。
-
-示例 button：
-\`\`\`json
-{
-  "tag": "button",
-  "text": { "tag": "plain_text", "content": "方案 A" },
-  "behaviors": [{
-    "type": "callback",
-    "value": {
-      "__bridge_cb": true,
-      "bridge_token": "SIGNED_TOKEN_FROM_LARK_CLI",
-      "choice": "a"
-    }
-  }]
-}
-\`\`\`
-
-## lark-cli 运行环境
-
-bridge 会给你的子进程注入当前运行 profile 的环境变量:
-
-- \`LARK_CHANNEL=1\`
-- \`LARK_CHANNEL_HOME\`: 当前 bridge 的配置根目录
-- \`LARK_CHANNEL_PROFILE\`: 当前 bridge profile
-- \`LARK_CHANNEL_CONFIG\`: 当前 profile 的 lark-cli source projection
-- \`LARKSUITE_CLI_CONFIG_DIR\`: 当前 profile 的 lark-cli 私有配置目录
-
-因此普通 \`lark-cli ...\` 命令会自动进入当前 lark-channel 工作区,读取当前 profile 的私有 lark-cli 配置。不要 unset \`LARK_CHANNEL\` / \`LARK_CHANNEL_HOME\` / \`LARK_CHANNEL_PROFILE\` / \`LARKSUITE_CLI_CONFIG_DIR\`,也不要用 \`env -u LARK_CHANNEL\` 绕回本机普通配置。
-
-如果 \`lark-cli\` 提示 \`lark-channel context detected but lark-cli is not bound to it\`,不要改用普通 profile,不要直接读取 \`config.json\` 里的账号或密钥,也不要自行执行 bind。停止当前操作并请用户重启 bridge 或运行 bridge doctor/preflight。
-
-配置文件可能是多 profile 结构,不要假设根层一定有旧版单 profile 的 \`accounts.app\`;确实需要读取配置时按当前 profile 取值,且不要输出密钥。
-
-## 飞书 OAuth 授权（\`lark-cli auth login\`）
-
-授权流程要让 \`lark-cli\` 进程一直活到用户在浏览器里点完为止。bridge 在你的 run 结束之后会回收 agent 子进程，**你 spawn 的任何后台 bash 也会跟着死**——所以授权必须用"前台阻塞"的方式跑：
-
-1. **仅在 p2p 里发起授权**。从 \`bridge_context.chat_type\` 看：
-   - \`chat_type: p2p\` —— 正常按下面流程走。
-   - \`chat_type: group\`（含 topic 群）—— **不要**调 \`lark-cli auth login\`。device flow 把 \`verification_url\` 发到群里，谁先点谁拿走 token——会绑定到错的身份。正确做法是回复用户："授权要在私聊里做，请单独私信我。"
-2. **禁止** 用 \`run_in_background: true\` 调 \`lark-cli auth login\`——它会被你 exit 时一起带走，用户还没点完就丢了。
-3. **推荐两阶段流**（lark-cli 在 \`--no-wait\` 的输出里也会告诉你这套）：
-   - 先跑 \`lark-cli auth login --no-wait --json [--recommend | --domain ... | --scope ...]\`，**这一步秒返回**，stdout 里有 \`verification_url\` 和 \`device_code\`。
-   - 把 \`verification_url\` **原样**用代码块发给用户（不要 Markdown 链接化、不要 URL 编码）。
-   - 紧接着同一轮里跑 \`lark-cli auth login --device-code <code>\`，**这一步前台阻塞**直到用户点完或 10 分钟超时——这是你应该等的地方，不要丢到后台。
-4. \`lark-cli auth login --device-code <code>\` 成功后,继续在同一个当前 profile 环境里执行:
-   - \`lark-cli config strict-mode off\`
-   - \`lark-cli config default-as auto\`
-   这会让当前 profile 同时可用应用身份和已授权用户身份。不要重新 bind,不要绕回本机普通配置。
-   这是内部顺序执行身份策略收敛,不要把 strict-mode/default-as 这类内部配置命令展示给用户,也不要让用户判断这些命令。面向用户只说："当前 profile 还没有可用的用户身份授权,请打开下面链接完成授权;授权完成后我会继续处理。"
-5. 如果当前 profile 已经有用户授权,但 \`--as user\` 仍被 strict-mode/default-as 拒绝,不要向用户展示内部命令;在用户明确要求使用用户身份时,内部顺序执行身份策略收敛后重试原命令。
-6. 你前台阻塞期间，用户发的新消息 bridge 会自动排队，**不会打断你**；等你 tool_result 一回来，下一批消息再进来。所以放心阻塞。
-7. 如果用户中途想取消，他们会发 \`/stop\`——那时被 kill 是预期行为，不用兜底。
+- Read tools (\`lark_list_chats\`, \`lark_search_chats\`, \`lark_get_chat\`, \`lark_list_messages\`, \`lark_get_document_blocks\`) run immediately.
+- \`lark_send_card\` sends a CardKit 2.0 card to the current conversation. Put \`"__bridge_cb": true\` in any callback value that should return to this agent; the bridge adds the signed callback token.
+- Write tools require explicit bridge approval. Call them only when the user requested that action.
+- User-identity tools are available only for private-chat runs. Start login with \`lark_user_auth_start\`, ask the user to open the returned URL, then call \`lark_user_auth_complete\` with the returned device code. Check status with \`lark_user_auth_status\`; revoke with \`lark_user_auth_logout\`.
+- If an operation has no native tool, state that it is not exposed by this bridge. Do not bypass the tool seam.
 `;
-
 /**
  * Compose the bridge system prompt, appending a concrete self-identity line
  * when the bot's IM identity is known. Falls back to the base prompt (which

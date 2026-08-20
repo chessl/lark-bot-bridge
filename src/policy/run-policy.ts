@@ -1,11 +1,11 @@
 import type { AgentCapability } from '../agent/capability';
 import {
+  type AccessMode,
   accessToClaudePermissionMode,
   accessToCodexSandbox,
-  clampAccess,
-  type AccessMode,
   type ClaudePermissionMode,
   type CodexSandboxMode,
+  clampAccess,
 } from '../config/permissions';
 import type { ProfileConfig } from '../config/profile-schema';
 import type { AccessDecision } from './access';
@@ -19,6 +19,8 @@ import {
 export interface ScopeContext {
   source: 'im' | 'card' | 'comment' | 'meeting';
   chatId?: string;
+  chatType?: 'p2p' | 'group';
+  messageId?: string;
   threadId?: string;
   actorId: string;
   commentScopeId?: string;
@@ -125,6 +127,7 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
   const resourceDigest = resourceScopeDigest({
     source: input.scope.source,
     chatId: input.scope.chatId,
+    chatType: input.scope.chatType,
     threadId: input.scope.threadId,
     commentScopeId: input.scope.commentScopeId,
     resourceBindings: input.scope.resourceBindings?.map((binding) => binding.id),

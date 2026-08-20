@@ -2,9 +2,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { NormalizedMessage } from '@larksuite/channel';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActiveRuns } from '../../../src/bot/active-runs';
-import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index';
+import { type CommandContext, type Controls, tryHandleCommand } from '../../../src/commands/index';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import { getSecret, listSecretIds } from '../../../src/config/keystore';
 import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
@@ -27,26 +27,7 @@ vi.mock('../../../src/utils/feishu-auth', () => ({
   })),
 }));
 
-const identityPolicyMocks = vi.hoisted(() => ({
-  applyLarkCliIdentityPolicy: vi.fn(async () => true),
-}));
-
-vi.mock('../../../src/lark-cli/identity-policy', async () => {
-  const actual = await vi.importActual<typeof import('../../../src/lark-cli/identity-policy')>(
-    '../../../src/lark-cli/identity-policy',
-  );
-  return {
-    ...actual,
-    applyLarkCliIdentityPolicy: identityPolicyMocks.applyLarkCliIdentityPolicy,
-  };
-});
-
 const roots: string[] = [];
-
-beforeEach(() => {
-  identityPolicyMocks.applyLarkCliIdentityPolicy.mockReset();
-  identityPolicyMocks.applyLarkCliIdentityPolicy.mockResolvedValue(true);
-});
 
 afterEach(async () => {
   vi.useRealTimers();
@@ -65,7 +46,6 @@ describe('profile-aware account and config commands', () => {
       max_concurrent_runs: '7',
       run_idle_timeout_minutes: '15',
       require_mention_in_group: 'no',
-      lark_cli_identity: 'user-default',
     });
 
     const root = await waitForRoot(
@@ -82,11 +62,6 @@ describe('profile-aware account and config commands', () => {
       runIdleTimeoutMinutes: 15,
     });
     expect(root.profiles.claude?.access.requireMentionInGroup).toBe(false);
-    expect(root.profiles.claude?.larkCli.identityPreset).toBe('user-default');
-    expect(root.profiles.claude?.larkCli.localUserImport).toMatchObject({
-      status: 'not-needed',
-      reason: 'manual-user-default',
-    });
     expect(getRequireMentionInGroup(runtimeProfileConfig(root, 'claude'))).toBe(false);
     expect((root as unknown as { accounts?: unknown }).accounts).toBeUndefined();
   });
@@ -137,67 +112,6 @@ describe('profile-aware account and config commands', () => {
     );
     expect(root.profiles.claude?.preferences.messageReply).toBe('text');
     expect(getMessageReplyMode(runtimeProfileConfig(root, 'claude'))).toBe('text');
-  });
-
-  it('does not save a lark-cli identity change when applying the runtime policy fails', async () => {
-    vi.useFakeTimers();
-    identityPolicyMocks.applyLarkCliIdentityPolicy.mockResolvedValueOnce(false);
-    const h = await createHarness();
-
-    await h.command('/config submit', {
-      message_reply: 'text',
-      show_tool_calls: 'hide',
-      max_concurrent_runs: '7',
-      run_idle_timeout_minutes: '15',
-      require_mention_in_group: 'no',
-      lark_cli_identity: 'user-default',
-    });
-    await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(1000);
-    await vi.waitFor(() => {
-      expect(h.channel.sent.length).toBeGreaterThan(0);
-    });
-
-    const root = await readRoot(h.rootDir);
-    expect(root.profiles.claude?.larkCli.identityPreset).toBe('bot-only');
-    expect(root.profiles.claude?.preferences.messageReply).not.toBe('text');
-    expect(appliedLarkCliIdentities()).toEqual(['user-default', 'bot-only']);
-    const card = JSON.stringify(h.channel.sent.at(-1)?.content);
-    expect(card).toContain('保存失败');
-    expect(card).toContain('lark-cli 身份策略');
-    expect(card).not.toContain('偏好已保存');
-  });
-
-  it('rolls back lark-cli identity when saving config fails after applying the runtime policy', async () => {
-    vi.useFakeTimers();
-    const applied = deferred<boolean>();
-    identityPolicyMocks.applyLarkCliIdentityPolicy
-      .mockImplementationOnce(async () => applied.promise)
-      .mockResolvedValue(true);
-    const h = await createHarness();
-
-    await h.command('/config submit', {
-      message_reply: 'text',
-      show_tool_calls: 'hide',
-      max_concurrent_runs: '7',
-      run_idle_timeout_minutes: '15',
-      require_mention_in_group: 'no',
-      lark_cli_identity: 'user-default',
-    });
-    await Promise.resolve();
-    await writeFile(resolveAppPaths({ rootDir: h.rootDir }).configFile, '{invalid json', 'utf8');
-    applied.resolve(true);
-    await vi.advanceTimersByTimeAsync(1000);
-    await vi.waitFor(() => {
-      expect(h.channel.sent.length).toBeGreaterThan(0);
-    });
-
-    expect(appliedLarkCliIdentities()).toEqual(['user-default', 'bot-only']);
-    const card = JSON.stringify(h.channel.sent.at(-1)?.content);
-    expect(card).toContain('保存失败');
-    expect(card).toContain('已回滚');
-    expect(card).not.toContain('未做任何修改');
-    expect(card).not.toContain('偏好已保存');
   });
 
   it('saves /account submit into the active profile and profile-local keystore', async () => {
@@ -343,28 +257,6 @@ async function waitForRoot(
     { timeout: 5000 },
   );
   return lastRoot;
-}
-
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (reason?: unknown) => void;
-} {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-function appliedLarkCliIdentities(): unknown[] {
-  return (
-    identityPolicyMocks.applyLarkCliIdentityPolicy.mock.calls as unknown as Array<
-      [unknown, unknown]
-    >
-  ).map((call) => call[1]);
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {

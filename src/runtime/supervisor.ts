@@ -1,16 +1,15 @@
 import pkg from '../../package.json';
-import { startChannel as realStartChannel, type BridgeChannel } from '../bot/channel';
+import type { AgentAdapter } from '../agent/types';
+import { type BridgeChannel, startChannel as realStartChannel } from '../bot/channel';
 import type { Controls } from '../commands';
 import type { AppPaths } from '../config/app-paths';
-import { isComplete, type AppConfig } from '../config/schema';
 import type { AgentKind, ProfileConfig } from '../config/profile-schema';
-import type { AgentAdapter } from '../agent/types';
+import { type AppConfig, isComplete } from '../config/schema';
 import { log } from '../core/logger';
 import { refreshOwnerControls } from '../policy/owner';
-import { SessionStore } from '../session/store';
 import { SessionCatalog } from '../session/catalog';
+import { SessionStore } from '../session/store';
 import { WorkspaceStore } from '../workspace/store';
-import { preFlightChecks } from '../cli/preflight';
 import {
   assertReconnectAgentKindUnchanged,
   checkRuntimeAgentAvailability,
@@ -18,12 +17,12 @@ import {
   releaseRuntimeLocks,
 } from './agent-runtime';
 import {
+  type AcquiredRuntimeLock,
   acquireAppRuntimeLock,
   acquireProfileRuntimeLock,
-  type AcquiredRuntimeLock,
 } from './locks';
 import { resolveProfileRuntime } from './profile-runtime';
-import { register, unregister, unregisterSync, updateEntry, type ProcessEntry } from './registry';
+import { type ProcessEntry, register, unregister, unregisterSync, updateEntry } from './registry';
 
 type StartChannelFn = typeof realStartChannel;
 
@@ -34,8 +33,8 @@ export interface SupervisorOptions {
   rootDir?: string;
   /** Injectable for tests (defaults to the real startChannel). */
   startChannelFn?: StartChannelFn;
-  /** Run lark-cli preflight per profile (default true; tests pass false). */
-  runPreflight?: boolean;
+  /** Check the configured agent binary before starting (default true; tests pass false). */
+  runAgentPreflight?: boolean;
 }
 
 export interface ManagedStatus {
@@ -206,10 +205,7 @@ class ManagedProfile {
         this.profileConfig.agentKind,
         nextRuntime.profileConfig.agentKind,
       );
-      const nextAgent = createRuntimeAgent(nextRuntime.profileConfig, {
-        ...nextRuntime.appPaths,
-        configPath: nextRuntime.configPath,
-      });
+      const nextAgent = createRuntimeAgent(nextRuntime.profileConfig, nextRuntime.appPaths);
       const availability = await checkRuntimeAgentAvailability(nextAgent);
       if (!availability.ok) throw availability.error;
 
@@ -316,23 +312,8 @@ export class Supervisor {
       }
     }
 
-    if (this.opts.runPreflight !== false) {
-      await preFlightChecks({
-        bridgeConfig: cfg,
-        profileConfig,
-        appPaths,
-        larkChannel: {
-          profile: appPaths.profile,
-          rootDir: appPaths.rootDir,
-          configPath,
-          larkCliConfigDir: appPaths.larkCliConfigDir,
-          larkCliSourceConfigFile: appPaths.larkCliSourceConfigFile,
-        },
-      });
-    }
-
-    const agent = createRuntimeAgent(profileConfig, { ...appPaths, configPath });
-    if (this.opts.runPreflight !== false) {
+    const agent = createRuntimeAgent(profileConfig, appPaths);
+    if (this.opts.runAgentPreflight !== false) {
       const availability = await checkRuntimeAgentAvailability(agent);
       if (!availability.ok) throw availability.error;
     }

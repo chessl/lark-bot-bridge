@@ -1,9 +1,9 @@
 import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
+import { writeFileAtomic } from '../platform/atomic-write';
 import type { AppPaths } from './app-paths';
 import { paths } from './paths';
-import { writeFileAtomic } from '../platform/atomic-write';
 
 /**
  * Local AES-256-GCM keystore for App Secrets and similar.
@@ -15,9 +15,8 @@ import { writeFileAtomic } from '../platform/atomic-write';
  * Both files are chmod 0600. The encryption key is derived (PBKDF2-SHA256,
  * 100k iters) from `hostname + userInfo().username + salt`. This is
  * **defense-in-depth against accidental disclosure** (backups, git commits,
- * log dumps) — *not* against a same-user process actively decrypting. That
- * threat needs a real OS keychain, which is out of scope for this bridge
- * given lark-cli already terminates secrets in its own keychain on bind.
+ * log dumps) — *not* against a same-user process actively decrypting. App
+ * secrets use this local store; user OAuth tokens use the OS keychain.
  */
 
 const KEY_LEN = 32;

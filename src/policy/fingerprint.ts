@@ -15,6 +15,7 @@ export interface FingerprintInputV2 {
 export interface ResourceScopeDigestInput {
   source: 'im' | 'card' | 'comment' | 'meeting';
   chatId?: string;
+  chatType?: 'p2p' | 'group';
   threadId?: string;
   commentScopeId?: string;
   resourceBindings?: string[];
@@ -57,6 +58,7 @@ export function resourceScopeDigest(input: ResourceScopeDigestInput): string {
   return digestCanonical({
     source: input.source,
     chatId: input.chatId ?? null,
+    chatType: input.chatType ?? null,
     threadId: input.threadId ?? null,
     commentScopeId: input.commentScopeId ?? null,
     resourceBindings: [...(input.resourceBindings ?? [])].sort(),

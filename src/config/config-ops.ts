@@ -1,6 +1,5 @@
 import { dirname } from 'node:path';
 import { log } from '../core/logger';
-import { applyLarkCliIdentityPolicy } from '../lark-cli/identity-policy';
 import { resolveAppPaths } from './app-paths';
 import { setSecret } from './keystore';
 import type { ProfileAccess, ProfileConfig, ProfileMode } from './profile-schema';
@@ -34,35 +33,6 @@ export function profileAppPaths(state: Pick<MutableProfileState, 'configPath' | 
     rootDir: dirname(state.configPath),
     profile: state.profile,
   });
-}
-
-/**
- * Apply the lark-cli identity policy (`strict-mode` + `default-as`) for a
- * profile. Pass the *effective* preset (team mode forces `bot-only` — see
- * {@link effectiveLarkCliIdentity}). Returns false on failure (logged).
- */
-export async function applyProfileLarkCliIdentity(
-  state: Pick<MutableProfileState, 'configPath' | 'profile'>,
-  larkCliIdentity: ProfileConfig['larkCli']['identityPreset'],
-): Promise<boolean> {
-  const appPaths = profileAppPaths(state);
-  const ok = await applyLarkCliIdentityPolicy(
-    {
-      profile: appPaths.profile,
-      rootDir: appPaths.rootDir,
-      configPath: state.configPath,
-      larkCliConfigDir: appPaths.larkCliConfigDir,
-      larkCliSourceConfigFile: appPaths.larkCliSourceConfigFile,
-    },
-    larkCliIdentity,
-  ).catch(() => false);
-  if (!ok) {
-    log.warn('config-ops', 'lark-cli-identity-policy-apply-failed', {
-      profile: appPaths.profile,
-      identity: larkCliIdentity,
-    });
-  }
-  return ok;
 }
 
 /**
@@ -126,29 +96,15 @@ export async function saveAccountConfig(
   state.cfg = runtimeProfileConfig(root, state.profile);
 }
 
-/**
- * Persist preferences + deployment mode + lark-cli identity + require-mention
- * under the config file lock, refreshing in-memory state. Stores the user's
- * identity selection verbatim (not the team-mode-forced effective preset) so
- * it comes back into effect when switching to personal mode.
- */
+/** Persist preferences, deployment mode, and mention policy. */
 export async function savePreferencesConfig(
   state: MutableProfileState,
   preferences: AppPreferences,
   requireMentionInGroup: boolean,
-  larkCliIdentity: ProfileConfig['larkCli']['identityPreset'],
   mode: ProfileMode,
   /** In-meeting agent settings; omitted by callers that don't edit them. */
   meeting?: ProfileConfig['meeting'],
 ): Promise<void> {
-  const larkCli = {
-    identityPreset: larkCliIdentity,
-    localUserImport: {
-      status: 'not-needed' as const,
-      attemptedAt: new Date().toISOString(),
-      reason: larkCliIdentity === 'user-default' ? 'manual-user-default' : 'manual-bot-only',
-    },
-  };
   await withConfigFileLock(state.configPath, async () => {
     const root = await loadRootConfig(state.configPath);
     if (!root) throw new Error('config not initialized');
@@ -172,7 +128,6 @@ export async function savePreferencesConfig(
         requireMentionInGroup,
       },
       ...(meeting ? { meeting } : {}),
-      larkCli,
     };
     await saveRootConfig(root, state.configPath);
     state.profileConfig = root.profiles[state.profile]!;

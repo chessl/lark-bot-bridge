@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { OmpAdapter, buildOmpArgs } from '../../src/agent/omp/adapter.js';
+import { buildOmpArgs, OmpAdapter } from '../../src/agent/omp/adapter.js';
 import type { AgentEvent } from '../../src/agent/types.js';
 
 interface FakeOmp {
@@ -26,15 +26,7 @@ describe('OmpAdapter process contract', () => {
     const fake = await createFakeOmp();
     cleanup.push(fake.dir);
     const cwd = await realpath(fake.dir);
-    const adapter = new OmpAdapter({
-      binary: fake.path,
-      larkChannel: {
-        profile: 'omp-dev',
-        rootDir: join(fake.dir, 'channel-home'),
-        configPath: join(fake.dir, 'config.json'),
-        larkCliConfigDir: join(fake.dir, 'lark-cli'),
-      },
-    });
+    const adapter = new OmpAdapter({ binary: fake.path });
     adapter.setBotIdentity({ openId: 'ou_bot', name: 'OMP Bot' });
 
     const run = adapter.run({
@@ -70,12 +62,7 @@ describe('OmpAdapter process contract', () => {
       commands: Array<Record<string, unknown>>;
     };
     expect(record.argv).toEqual(buildOmpArgs({ systemPromptFile: record.argv[6]! }));
-    expect(record.env).toMatchObject({
-      LARK_CHANNEL: '1',
-      LARK_CHANNEL_PROFILE: 'omp-dev',
-      LARK_CHANNEL_CONFIG: join(fake.dir, 'config.json'),
-      LARKSUITE_CLI_CONFIG_DIR: join(fake.dir, 'lark-cli'),
-    });
+    expect(record.env).toEqual({});
     expect(record.systemPrompt).toContain('lark-bot-bridge 运行约定');
     expect(record.systemPrompt).toContain('ou_bot');
     expect(record.commands.map((command) => command.type)).toEqual([
@@ -124,6 +111,49 @@ describe('OmpAdapter process contract', () => {
     });
   });
 
+  it('injects and then removes a run-scoped native MCP config', async () => {
+    const fake = await createFakeOmp();
+    cleanup.push(fake.dir);
+    const previous = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = join(fake.dir, 'agent');
+    const nativeMcp = {
+      name: 'lark_bridge',
+      url: 'http://127.0.0.1:12345/mcp',
+      bearerToken: 'run-secret',
+    };
+    try {
+      const run = new OmpAdapter({ binary: fake.path }).run({
+        runId: 'run-mcp',
+        prompt: 'use lark',
+        cwd: await realpath(fake.dir),
+        sandbox: 'danger-full-access',
+        nativeMcp,
+      });
+      await collect(run.events);
+      expect(await run.waitForExit(2000)).toBe(true);
+      const record = JSON.parse(await readFile(fake.recordPath, 'utf8')) as {
+        env: Record<string, string>;
+        mcpConfig: unknown;
+      };
+      expect(record.env.LARK_NATIVE_MCP_TOKEN).toBe(nativeMcp.bearerToken);
+      expect(record.mcpConfig).toEqual({
+        mcpServers: {
+          lark_bridge: {
+            type: 'http',
+            url: nativeMcp.url,
+            headers: { Authorization: 'Bearer ${LARK_NATIVE_MCP_TOKEN}' },
+          },
+        },
+      });
+      await expect(readFile(join(fake.dir, 'agent', 'mcp.json'), 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previous;
+    }
+  });
+
   it('rejects non-full bridge access instead of weakening the sandbox contract', async () => {
     const adapter = new OmpAdapter({ binary: 'omp' });
     await expect(
@@ -144,14 +174,16 @@ async function createFakeOmp(): Promise<FakeOmp> {
   await writeFile(
     path,
     `#!/usr/bin/env node
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 const recordPath = ${JSON.stringify(recordPath)};
 const appendIndex = process.argv.indexOf('--append-system-prompt');
+const mcpPath = process.env.PI_CODING_AGENT_DIR ? process.env.PI_CODING_AGENT_DIR + '/mcp.json' : '';
 const record = {
   argv: process.argv.slice(2),
   env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('LARK_') || key === 'LARKSUITE_CLI_CONFIG_DIR')),
   systemPrompt: appendIndex >= 0 ? readFileSync(process.argv[appendIndex + 1], 'utf8') : '',
+  mcpConfig: mcpPath && existsSync(mcpPath) ? JSON.parse(readFileSync(mcpPath, 'utf8')) : null,
   commands: [],
 };
 const save = () => writeFileSync(recordPath, JSON.stringify(record));

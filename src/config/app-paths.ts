@@ -17,11 +17,8 @@ export interface AppPaths {
   workspacesFile: string;
   secretsFile: string;
   keystoreSaltFile: string;
+  userAuthFile: string;
   secretsGetterScript: string;
-  larkCliConfigDir: string;
-  larkCliSourceDir: string;
-  larkCliSourceConfigFile: string;
-  larkCliTargetConfigFile: string;
   mediaDir: string;
   logsDir: string;
   /** Sidecar file describing the running bridge's local web-config server
@@ -38,6 +35,7 @@ export interface AppPaths {
   userLockDir: string;
   profileLockFile: string;
   appLockFile(appId: string): string;
+  userAuthLockTarget(appId: string): string;
 }
 
 const DEFAULT_PROFILE = 'claude';
@@ -61,11 +59,8 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
     workspacesFile: join(profileDir, 'workspaces.json'),
     secretsFile: join(profileDir, 'secrets.enc'),
     keystoreSaltFile: join(profileDir, '.keystore.salt'),
+    userAuthFile: join(profileDir, 'user-auth.json'),
     secretsGetterScript: join(rootDir, 'secrets-getter'),
-    larkCliConfigDir: join(profileDir, 'lark-cli'),
-    larkCliSourceDir: join(profileDir, 'lark-cli-source'),
-    larkCliSourceConfigFile: join(profileDir, 'lark-cli-source', 'config.json'),
-    larkCliTargetConfigFile: join(profileDir, 'lark-cli', 'lark-channel', 'config.json'),
     mediaDir: join(profileDir, 'media'),
     logsDir: join(profileDir, 'logs'),
     uiFile: join(profileDir, 'ui.json'),
@@ -77,6 +72,7 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
     userLockDir,
     profileLockFile: join(userLockDir, 'profile', `${profile}.lock`),
     appLockFile: (appId: string) => join(userLockDir, 'app', `${lockSafeName(appId)}.lock`),
+    userAuthLockTarget: (appId: string) => join(userLockDir, 'user-auth', lockSafeName(appId)),
   };
 }
 

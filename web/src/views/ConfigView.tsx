@@ -1,5 +1,18 @@
-import { useEffect, useState, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { type ReactNode, useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/sonner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet, apiPost } from "@/lib/api";
 import type {
   ConfigView as ConfigData,
@@ -11,19 +24,6 @@ import type {
   UserAuthStatus,
   UserChat,
 } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { toast } from "@/components/ui/sonner";
 
 const SELECT_CLASS =
   "h-9 w-full cursor-pointer rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
@@ -84,7 +84,6 @@ export function ConfigView({ profile }: { profile: string }) {
         maxConcurrentRuns: cfg.maxConcurrentRuns,
         runIdleTimeoutMinutes: cfg.runIdleTimeoutMinutes,
         requireMentionInGroup: cfg.requireMentionInGroup,
-        larkCliIdentity: cfg.larkCliIdentity,
       });
       setCfg(next);
       toast.success(next.live ? "已保存，立即生效" : "已保存，下次启动该 profile 生效");
@@ -212,30 +211,6 @@ export function ConfigView({ profile }: { profile: string }) {
             checked={cfg.requireMentionInGroup}
             onChange={(v) => set("requireMentionInGroup", v)}
           />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>lark-cli 身份策略</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <SelectRow
-            value={cfg.larkCliIdentity}
-            onChange={(v) => set("larkCliIdentity", v as ConfigData["larkCliIdentity"])}
-            options={[
-              ["bot-only", "只允许应用身份"],
-              ["user-default", "允许用户身份"],
-            ]}
-          />
-          <p className="text-xs text-muted-foreground">
-            只允许应用身份：不访问个人资源。允许用户身份：可访问已授权用户的日历/邮箱/云盘等。
-          </p>
-          {team && (
-            <p className="text-xs text-primary">
-              ⚠️ 团队版已开启：本项被覆盖为「只允许应用身份」。切回个人版后恢复。
-            </p>
-          )}
         </CardContent>
       </Card>
 
@@ -1053,6 +1028,20 @@ function MyChatsPane({
     }
   }
 
+  async function logoutAuth() {
+    setBusy(true);
+    try {
+      await apiPost("/api/auth/logout", { profile });
+      setStatus({ loggedIn: false, scopes: [] });
+      setChats(null);
+      setNextToken(undefined);
+      toast.success("已撤销用户授权");
+    } catch (e) {
+      toast.error(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  }
   async function pullBot(id: string) {
     setBusy(true);
     try {
@@ -1154,7 +1143,12 @@ function MyChatsPane({
   return (
     <div className="space-y-2 py-2">
       {status?.userName && (
-        <p className="text-xs text-muted-foreground">已授权：{status.userName}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">已授权：{status.userName}</p>
+          <Button variant="ghost" size="sm" onClick={logoutAuth} disabled={busy}>
+            撤销授权
+          </Button>
+        </div>
       )}
       <div className="flex gap-2">
         <Input

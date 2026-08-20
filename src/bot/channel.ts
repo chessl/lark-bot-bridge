@@ -37,6 +37,7 @@ import {
 } from '../config/schema';
 import { resolveAppSecret } from '../config/secret-resolver';
 import { log, withTrace } from '../core/logger';
+import { NativeLarkServer } from '../lark-native/server';
 import { toPolicyAttachment, toPromptAttachment } from '../media/attachment';
 import { type LocalAttachment, MediaCache } from '../media/cache';
 import type { VcRequestClient } from '../meeting/api';
@@ -68,10 +69,9 @@ const STREAM_TERMINAL_GRACE_MS = 3000;
 const REACTION_CLEANUP_GRACE_MS = 1000;
 
 const BRIDGE_AGENT_INSTRUCTIONS = [
-  '你在 bridge 进程中运行，普通 lark-cli 会继承 LARK_CHANNEL=1 并进入 bridge-bound 模式。',
-  '不要 unset LARK_CHANNEL / LARK_CHANNEL_HOME / LARK_CHANNEL_PROFILE / LARKSUITE_CLI_CONFIG_DIR，也不要用 env -u LARK_CHANNEL 绕回本机普通配置。',
-  'Codex bridge 默认使用 danger-full-access 对齐 Claude bridge 的 bypassPermissions 行为，因此 lark-cli 应能像用户本机终端一样访问 keychain。',
-  '如果提示 lark-channel context detected but not bound，停止当前操作并请用户重启 bridge 或运行 bridge doctor/preflight；不要改用普通 profile，不要自行 bind，也不要直接读取 config.json 里的账号或密钥。',
+  '本次运行已注入 lark_bridge MCP 工具；飞书读写、用户授权和发卡片都直接使用这些工具。',
+  '不要执行 lark-cli，也不要绕过 MCP 工具访问飞书 API 或凭据。',
+  '写操作会由 bridge 在飞书里请求确认；用户明确请求后再调用即可。',
 ];
 
 // Lark SDK logs API errors at error level even when the caller catches them.
@@ -166,7 +166,7 @@ export interface StartChannelDeps {
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
   controls: Controls;
-  appPaths?: Pick<AppPaths, 'secretsFile' | 'keystoreSaltFile' | 'mediaDir'>;
+  appPaths?: Pick<AppPaths, 'rootDir' | 'secretsFile' | 'keystoreSaltFile' | 'mediaDir'>;
 }
 
 export async function startChannel(deps: StartChannelDeps): Promise<BridgeChannel> {
@@ -178,7 +178,6 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // Concurrency cap — reads `preferences.maxConcurrentRuns` on each acquire,
   // so /config bumps take effect for the next run.
   const pool = new ProcessPool(() => getMaxConcurrentRuns(controls.cfg));
-  const executor = new RunExecutor({ agent, pool, activeRuns });
 
   // Resolve the App Secret to plaintext. The config field can be a literal
   // string, a "${VAR}" template, or a {source, id} SecretRef referencing
@@ -200,11 +199,6 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // switch can inject a one-time "model changed" note into the next (resumed)
   // prompt. In-memory only: on restart the first run re-seeds silently.
   const lastRunModelByScope = new Map<string, string>();
-  const cotClient = new CotClient({
-    tenant: cfg.accounts.app.tenant,
-    appId: cfg.accounts.app.id,
-    appSecret,
-  });
   const threadModeOverrideWarnedChats = new Set<string>();
   const logThreadModeOverride: LogThreadModeOverride = ({ chatId, resolvedMode, threadId }) => {
     const fields = { chatId, cachedMode: resolvedMode, threadId };
@@ -256,6 +250,15 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   };
 
   const channel = createLarkChannel(opts);
+  const cotClient = new CotClient(channel.rawClient);
+  const nativeServer = await NativeLarkServer.start({
+    profile: controls.profile,
+    rootDir: deps.appPaths?.rootDir,
+    channel,
+    callbackAuth,
+    profileConfig: () => controls.profileConfig,
+  });
+  const executor = new RunExecutor({ agent, pool, activeRuns, nativeTools: nativeServer });
   const media = new MediaCache(channel, deps.appPaths?.mediaDir);
 
   // Pending → run handoff: while a run is active on a chat, block its pending
@@ -358,6 +361,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           chatModeCache,
           callbackAuth,
           callbackPolicyFingerprintForScope: (scope) => activePolicyFingerprints.get(scope),
+          nativeApproval: nativeServer,
         });
       }).catch((err) => log.fail('cardAction', err));
     },
@@ -450,7 +454,12 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     controls.meeting = meetingManager;
   }
 
-  await channel.connect();
+  try {
+    await channel.connect();
+  } catch (error) {
+    await nativeServer.close();
+    throw error;
+  }
   const ownerRefresh = createOwnerRefreshController({
     controls,
     source: channel,
@@ -505,6 +514,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
       const [disconnectResult, stopAllResult, ...flushResults] = await Promise.allSettled([
         channel.disconnect(),
         activeRuns.stopAll(),
+        nativeServer.close(),
         sessions.flush(),
         sessionCatalog?.flush(),
         callbackNonceStore?.flush(),
@@ -927,6 +937,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const scopeContext: ScopeContext = {
     source: 'im',
     chatId,
+    chatType: firstMsg.chatType,
+    messageId: lastMsg.messageId,
     actorId: firstMsg.senderId,
     ...(threadId ? { threadId } : {}),
   };
@@ -944,6 +956,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     executor,
     now: Date.now(),
     stopGraceMs: getAgentStopGraceMs(controls.cfg),
+    allowUserIdentity: controls.profileConfig.mode === 'personal' && firstMsg.chatType === 'p2p',
     observability: {
       profile: controls.profile,
       agent: capability.agentId,
@@ -1518,13 +1531,10 @@ async function processAgentStream(
   // Idle watchdog: claude going silent for `idleTimeoutMs` is treated as
   // "presumed hung", we stop() and surface a timeout marker on the card.
   //
-  // BUT — claude can legitimately be silent for a long time when it's
-  // waiting on a long-running tool call (e.g. `lark-cli` printing an
-  // OAuth URL and blocking until the user clicks authorize). In that
-  // case there's no event stream activity from claude itself, only the
-  // tool subprocess running. We track which tool_use ids haven't matched
-  // a tool_result yet, and pause the watchdog whenever the set is
-  // non-empty.
+  // BUT — the agent can legitimately be silent while a long-running tool call
+  // waits for external input. There is then no agent stream activity until the
+  // tool returns. Track unmatched tool_use ids and pause the watchdog while any
+  // are in flight.
   //
   // The watchdog re-arms when:
   //  - a tool_result drains the in-flight set to zero, OR

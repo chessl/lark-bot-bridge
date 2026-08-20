@@ -42,7 +42,7 @@ describe('ClaudeAdapter process contract', () => {
     const record = await readRecord(fake.recordPath);
 
     expect(await realpath(record.cwd)).toBe(await realpath(fake.dir));
-    expect(record.env.LARK_CHANNEL).toBe('1');
+    expect(record.env.LARK_CHANNEL).toBeUndefined();
     // The prompt and system prompt stay out of argv.
     expect(record.stdin).toBe('hello');
     expect(record.argv.slice(0, 7)).toEqual([
@@ -55,55 +55,12 @@ describe('ClaudeAdapter process contract', () => {
       '--append-system-prompt-file',
     ]);
     expect(record.argv).not.toContain('hello');
-    expect(record.systemPrompt).toContain('lark-bot-bridge 运行约定');
+    expect(record.systemPrompt).toContain('lark_bridge');
     expect(record.systemPrompt).toContain('__bridge_cb');
-    expect(record.systemPrompt).toContain('LARK_CHANNEL_PROFILE');
-    expect(record.systemPrompt).toContain('LARKSUITE_CLI_CONFIG_DIR');
+    expect(record.systemPrompt).not.toContain('LARK_CHANNEL_PROFILE');
+    expect(record.systemPrompt).not.toContain('LARKSUITE_CLI_CONFIG_DIR');
     expect(record.argv).not.toContain('--resume');
     expect(record.argv).not.toContain('--model');
-  });
-
-  it('injects the active bridge profile env into spawned runs', async () => {
-    const fake = await createFakeClaude({
-      lines: [{ type: 'result', session_id: 'sess-profile' }],
-    });
-    cleanup.push(fake.dir);
-    const rootDir = join(fake.dir, 'channel-home');
-    const configPath = join(rootDir, 'config.custom.json');
-    const larkCliConfigDir = join(rootDir, 'profiles', 'codex-dev', 'lark-cli');
-    const larkCliSourceConfigFile = join(
-      rootDir,
-      'profiles',
-      'codex-dev',
-      'lark-cli-source',
-      'config.json',
-    );
-
-    const run = new ClaudeAdapter({
-      binary: fake.path,
-      larkChannel: {
-        profile: 'codex-dev',
-        rootDir,
-        configPath,
-        larkCliConfigDir,
-        larkCliSourceConfigFile,
-      },
-    }).run({
-      runId: 'run-profile-env',
-      prompt: 'profile',
-      cwd: fake.dir,
-    });
-
-    await collect(run.events);
-    const record = await readRecord(fake.recordPath);
-
-    expect(record.env).toMatchObject({
-      LARK_CHANNEL: '1',
-      LARK_CHANNEL_PROFILE: 'codex-dev',
-      LARK_CHANNEL_HOME: rootDir,
-      LARK_CHANNEL_CONFIG: larkCliSourceConfigFile,
-      LARKSUITE_CLI_CONFIG_DIR: larkCliConfigDir,
-    });
   });
 
   it('passes resume and model after the base CLI contract', async () => {
@@ -195,6 +152,39 @@ describe('ClaudeAdapter process contract', () => {
     await iterator.return?.();
   });
 
+  it('injects a run-scoped native MCP config without putting the token in argv', async () => {
+    const fake = await createFakeClaude({
+      lines: [{ type: 'result', session_id: 'sess-mcp' }],
+    });
+    cleanup.push(fake.dir);
+    const nativeMcp = {
+      name: 'lark_bridge',
+      url: 'http://127.0.0.1:12345/mcp',
+      bearerToken: 'run-secret',
+    };
+    const run = new ClaudeAdapter({ binary: fake.path }).run({
+      runId: 'run-mcp',
+      prompt: 'use lark',
+      cwd: fake.dir,
+      nativeMcp,
+    });
+
+    await collect(run.events);
+    const record = await readRecord(fake.recordPath);
+    expect(record.argv).toContain('--mcp-config');
+    expect(record.argv.join(' ')).not.toContain(nativeMcp.bearerToken);
+    expect(record.mcpConfig).toEqual({
+      mcpServers: {
+        lark_bridge: {
+          type: 'http',
+          url: nativeMcp.url,
+          headers: { Authorization: 'Bearer ${LARK_NATIVE_MCP_TOKEN}' },
+        },
+      },
+    });
+    expect(record.env.LARK_NATIVE_MCP_TOKEN).toBe(nativeMcp.bearerToken);
+  });
+
   it('requires cwd to be resolved by policy before spawning', () => {
     expect(() =>
       new ClaudeAdapter({ binary: 'unused' }).run({ runId: 'run-no-cwd', prompt: 'hi' }),
@@ -225,6 +215,8 @@ async function createFakeClaude(options: {
       'const argv = process.argv.slice(2);',
       'const spIdx = argv.indexOf("--append-system-prompt-file");',
       'const systemPrompt = spIdx !== -1 ? readFileSync(argv[spIdx + 1], "utf8") : null;',
+      'const mcpIdx = argv.indexOf("--mcp-config");',
+      'const mcpConfig = mcpIdx !== -1 ? JSON.parse(readFileSync(argv[mcpIdx + 1], "utf8")) : null;',
       'let stdin = "";',
       'process.stdin.on("data", (c) => { stdin += c; });',
       'process.stdin.on("end", () => {',
@@ -233,12 +225,14 @@ async function createFakeClaude(options: {
       '    stdin,',
       '    systemPrompt,',
       '    cwd: process.cwd(),',
+      '    mcpConfig,',
       '    env: {',
       '      LARK_CHANNEL: process.env.LARK_CHANNEL,',
       '      LARK_CHANNEL_PROFILE: process.env.LARK_CHANNEL_PROFILE,',
       '      LARK_CHANNEL_HOME: process.env.LARK_CHANNEL_HOME,',
       '      LARK_CHANNEL_CONFIG: process.env.LARK_CHANNEL_CONFIG,',
       '      LARKSUITE_CLI_CONFIG_DIR: process.env.LARKSUITE_CLI_CONFIG_DIR,',
+      '      LARK_NATIVE_MCP_TOKEN: process.env.LARK_NATIVE_MCP_TOKEN,',
       '    },',
       '  }));',
       `  const lines = ${JSON.stringify(options.lines)};`,
@@ -259,6 +253,7 @@ async function readRecord(path: string): Promise<{
   argv: string[];
   stdin: string;
   systemPrompt: string | null;
+  mcpConfig: unknown;
   cwd: string;
   env: {
     LARK_CHANNEL?: string;
@@ -266,12 +261,14 @@ async function readRecord(path: string): Promise<{
     LARK_CHANNEL_HOME?: string;
     LARK_CHANNEL_CONFIG?: string;
     LARKSUITE_CLI_CONFIG_DIR?: string;
+    LARK_NATIVE_MCP_TOKEN?: string;
   };
 }> {
   return JSON.parse(await readFile(path, 'utf8')) as {
     argv: string[];
     stdin: string;
     systemPrompt: string | null;
+    mcpConfig: unknown;
     cwd: string;
     env: {
       LARK_CHANNEL?: string;
@@ -279,6 +276,7 @@ async function readRecord(path: string): Promise<{
       LARK_CHANNEL_HOME?: string;
       LARK_CHANNEL_CONFIG?: string;
       LARKSUITE_CLI_CONFIG_DIR?: string;
+      LARK_NATIVE_MCP_TOKEN?: string;
     };
   };
 }

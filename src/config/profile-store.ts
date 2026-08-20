@@ -55,9 +55,9 @@ type StoredProfileConfig = Pick<
   | 'workspaces'
   | 'permissions'
   | 'codex'
+  | 'omp'
   | 'attachments'
   | 'meeting'
-  | 'larkCli'
 >;
 
 type StoredRootConfig = Omit<RootConfig, 'preferences' | 'profiles'> & {
@@ -94,7 +94,6 @@ function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
     ...(profile.omp ? { omp: profile.omp } : {}),
     attachments: profile.attachments,
     meeting: profile.meeting,
-    larkCli: profile.larkCli,
   };
 }
 

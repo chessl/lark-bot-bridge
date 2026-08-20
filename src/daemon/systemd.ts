@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { paths } from '../config/paths';
 import {
   daemonLogDir,
   daemonStderrPath,
@@ -9,16 +10,13 @@ import {
   systemdUnitName,
   systemdUnitPath,
 } from './paths';
-import { paths } from '../config/paths';
 
 export interface UnitInputs {
   /** Absolute path to the node binary that should run the bridge. */
   nodePath: string;
   /** Absolute path to the bridge CLI entry (the file currently executing). */
   bridgeEntryPath: string;
-  /** PATH for the daemon process — captured from current shell so child
-   * tools (lark-cli, claude) can be resolved by name. systemd user units
-   * inherit a minimal env otherwise. */
+  /** PATH captured from the current shell so child agent tools resolve. */
   envPath: string;
   /** Service id (profile name, or the reserved supervisor id) — drives the
    * unit name and log paths. */

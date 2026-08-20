@@ -8,6 +8,7 @@ import { commandSessionCatalogIdentity } from '../bot/session-catalog-identity';
 import { lookupMessageThreadId } from '../bot/thread-id';
 import { type CommandContext, type Controls, runCommandHandler } from '../commands';
 import { log } from '../core/logger';
+import { nativeApprovalAction } from '../lark-native/server';
 import { canUseDm, canUseGroup } from '../policy/access';
 import type { RunExecutor } from '../runtime/run-executor';
 import type { SessionCatalog } from '../session/catalog';
@@ -39,6 +40,14 @@ export interface CardDispatchDeps {
   callbackAuth?: CallbackAuth;
   callbackPolicyFingerprint?: string;
   callbackPolicyFingerprintForScope?: (scope: string) => string | undefined;
+  nativeApproval?: {
+    resolveApproval(input: {
+      id: string;
+      decision: 'approve' | 'deny';
+      scopeId: string;
+      actorId: string;
+    }): boolean;
+  };
 }
 
 export async function handleCardAction(deps: CardDispatchDeps): Promise<void> {
@@ -122,10 +131,22 @@ export async function handleCardAction(deps: CardDispatchDeps): Promise<void> {
     return;
   }
 
-  // Agent-driven callback: the button was rendered by an agent via lark-cli,
-  // with `__bridge_cb` set on the value. Forward the click back into the
-  // scope's pending queue so the agent resumes its session and sees the click
-  // as a follow-up message, with full context of what it sent.
+  const nativeApproval = nativeApprovalAction(payload);
+  if (nativeApproval) {
+    if (!deps.nativeApproval) return;
+    if (!verifyBridgeToken(deps, payload, scope, nativeApproval.action)) return;
+    deps.nativeApproval.resolveApproval({
+      id: nativeApproval.id,
+      decision: nativeApproval.decision,
+      scopeId: scope,
+      actorId: operatorId,
+    });
+    return;
+  }
+
+  // Agent-driven callback: the card came from lark_send_card with
+  // `__bridge_cb` set. Forward the click into the scope's pending queue so the
+  // agent resumes its session with full context.
   if (BRIDGE_CALLBACK_MARKER in payload) {
     if (!verifyBridgeToken(deps, payload, scope, 'agent_callback')) return;
     forwardToAgent(deps, payload, formValue, scope, threadId, mode);

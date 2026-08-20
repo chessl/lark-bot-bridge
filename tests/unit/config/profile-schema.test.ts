@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { accessToClaudePermissionMode, clampAccess } from '../../../src/config/permissions';
 import {
   createDefaultProfileConfig,
-  effectiveLarkCliIdentity,
   normalizeProfileConfig,
 } from '../../../src/config/profile-schema';
 
@@ -37,18 +36,6 @@ describe('profile schema', () => {
       accounts: { app },
     });
     expect(bogus.mode).toBe('personal');
-  });
-
-  it('effectiveLarkCliIdentity forces bot-only in team mode and passes through otherwise', () => {
-    expect(
-      effectiveLarkCliIdentity({ mode: 'team', larkCli: { identityPreset: 'user-default' } }),
-    ).toBe('bot-only');
-    expect(
-      effectiveLarkCliIdentity({ mode: 'personal', larkCli: { identityPreset: 'user-default' } }),
-    ).toBe('user-default');
-    expect(
-      effectiveLarkCliIdentity({ mode: 'personal', larkCli: { identityPreset: 'bot-only' } }),
-    ).toBe('bot-only');
   });
 
   it('requires codex configuration when agentKind is codex', () => {

@@ -3,18 +3,15 @@ import { DEFAULT_MODEL, normalizeModelSelection, supportedModels } from '../agen
 import { fetchKnownChats } from '../bot/lark-info';
 import { resolveAppPaths } from '../config/app-paths';
 import {
-  applyProfileLarkCliIdentity,
   type MutableProfileState,
   saveAccessConfig,
   savePreferencesConfig,
 } from '../config/config-ops';
-import {
-  type AgentKind,
-  effectiveLarkCliIdentity,
-  type LarkCliIdentityPreset,
-  type MeetingConfig,
-  type ProfileAccess,
-  type ProfileMode,
+import type {
+  AgentKind,
+  MeetingConfig,
+  ProfileAccess,
+  ProfileMode,
 } from '../config/profile-schema';
 import { loadRootConfig, runtimeProfileConfig } from '../config/profile-store';
 import {
@@ -37,9 +34,10 @@ import {
   getUserAuthStatus,
   hasScope,
   listUserChats,
+  logoutUser,
   searchUserChats,
   startDeviceLogin,
-} from '../lark-cli/user-im';
+} from '../lark-native/user-im';
 import { isMeetingNo } from '../meeting/api';
 import {
   describeMeetingError,
@@ -67,7 +65,6 @@ export interface ConfigView {
   maxConcurrentRuns: number;
   runIdleTimeoutMinutes: number;
   requireMentionInGroup: boolean;
-  larkCliIdentity: LarkCliIdentityPreset;
   meeting: MeetingConfig;
   access: {
     allowedUsers: string[];
@@ -96,7 +93,6 @@ export function buildConfigView(state: MutableProfileState, live = false): Confi
     maxConcurrentRuns: getMaxConcurrentRuns(state.cfg),
     runIdleTimeoutMinutes: ms ? Math.round(ms / 60_000) : 0,
     requireMentionInGroup: getRequireMentionInGroup(state.cfg),
-    larkCliIdentity: state.profileConfig.larkCli.identityPreset,
     meeting: state.profileConfig.meeting,
     access: {
       allowedUsers: state.profileConfig.access.allowedUsers,
@@ -200,12 +196,8 @@ function parseMeetingBody(body: unknown, current: MeetingConfig): MeetingConfig 
 interface ParsedConfig {
   mode: ProfileMode;
   meeting: MeetingConfig;
-  larkCliIdentity: LarkCliIdentityPreset;
   requireMentionInGroup: boolean;
   nextPreferences: AppPreferences;
-  nextEffectiveIdentity: LarkCliIdentityPreset;
-  previousEffectiveIdentity: LarkCliIdentityPreset;
-  identityChanged: boolean;
 }
 
 /**
@@ -219,10 +211,6 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
 
   const mode: ProfileMode =
     fv.mode === 'team' || fv.mode === 'personal' ? fv.mode : state.profileConfig.mode;
-  const larkCliIdentity: LarkCliIdentityPreset =
-    fv.larkCliIdentity === 'user-default' || fv.larkCliIdentity === 'bot-only'
-      ? fv.larkCliIdentity
-      : state.profileConfig.larkCli.identityPreset;
 
   const rawModel = typeof fv.model === 'string' ? fv.model : '';
   const modelValid =
@@ -269,18 +257,10 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
 
   const meeting = parseMeetingBody(fv.meeting, state.profileConfig.meeting);
 
-  const nextEffectiveIdentity: LarkCliIdentityPreset =
-    mode === 'team' ? 'bot-only' : larkCliIdentity;
-  const previousEffectiveIdentity = effectiveLarkCliIdentity(state.profileConfig);
-
   return {
     mode,
     meeting,
-    larkCliIdentity,
     requireMentionInGroup,
-    nextEffectiveIdentity,
-    previousEffectiveIdentity,
-    identityChanged: nextEffectiveIdentity !== previousEffectiveIdentity,
     nextPreferences: {
       ...(state.cfg.preferences ?? {}),
       model,
@@ -294,47 +274,21 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
 }
 
 /**
- * Apply a settings change to the profile whose process hosts the UI — live,
- * in-memory, no restart. Runs the lark-cli identity policy (with rollback) like
- * the chat form. Use {@link applyConfigToDisk} for other profiles.
+ * Apply a settings change to the profile whose process hosts the UI live,
+ * without a restart. Use {@link applyConfigToDisk} for other profiles.
  */
 export async function applyConfig(rt: UiRuntime, body: unknown): Promise<ConfigView> {
   const p = parseConfigBody(rt, body);
-  let identityApplied = false;
   try {
-    if (p.identityChanged) {
-      const ok = await applyProfileLarkCliIdentity(rt, p.nextEffectiveIdentity);
-      if (!ok) throw new ApiError(500, 'lark-cli 身份策略未生效');
-      identityApplied = true;
-    }
-    await savePreferencesConfig(
-      rt,
-      p.nextPreferences,
-      p.requireMentionInGroup,
-      p.larkCliIdentity,
-      p.mode,
-      p.meeting,
-    );
+    await savePreferencesConfig(rt, p.nextPreferences, p.requireMentionInGroup, p.mode, p.meeting);
   } catch (err) {
-    if (identityApplied) {
-      await applyProfileLarkCliIdentity(rt, p.previousEffectiveIdentity).catch(() =>
-        log.warn('ui', 'identity-rollback-failed', { profile: rt.profile }),
-      );
-    }
-    if (err instanceof ApiError) throw err;
     throw new ApiError(500, `保存失败：${err instanceof Error ? err.message : String(err)}`);
   }
   log.info('ui', 'config-saved', { profile: rt.profile, mode: p.mode, live: true });
   return buildConfigView(rt, true);
 }
 
-/**
- * Persist a settings change for a non-hosting profile (running elsewhere or
- * not at all). Writes to disk only — the lark-cli identity policy is NOT run
- * here (it would spawn lark-cli against a maybe-unbound profile); it's applied
- * from `mode`/preset when that profile next starts (see preflight). Takes
- * effect on that profile's next start/restart.
- */
+/** Persist a settings change for a profile that is not hosted by this process. */
 export async function applyConfigToDisk(
   state: MutableProfileState,
   body: unknown,
@@ -345,7 +299,6 @@ export async function applyConfigToDisk(
       state,
       p.nextPreferences,
       p.requireMentionInGroup,
-      p.larkCliIdentity,
       p.mode,
       p.meeting,
     );
@@ -519,7 +472,7 @@ export async function meetingLeave(
   return { ok: await manager.leave(meetingId) };
 }
 
-// ── user-identity group picker (lark-cli, owner's authorization) ─────────────
+// ── user-identity group picker (native OAuth + official SDK) ─────────────────
 
 /** Auth status for the owner's user identity (for the "我的群" flow). */
 export async function userAuthStatus(profile: string, rootDir?: string) {
@@ -554,6 +507,12 @@ export async function userLoginComplete(
   if (!deviceCode) throw new ApiError(400, 'deviceCode is required');
   const r = await completeDeviceLogin({ profile, rootDir }, deviceCode);
   if (!r.ok) throw new ApiError(400, r.message ?? '授权尚未完成');
+  return { ok: true };
+}
+
+/** Revoke and remove the profile's user identity. */
+export async function userLogout(profile: string, rootDir?: string): Promise<{ ok: true }> {
+  await logoutUser({ profile, rootDir });
   return { ok: true };
 }
 

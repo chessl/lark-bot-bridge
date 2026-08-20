@@ -5,7 +5,6 @@ import type { ProcessEntry } from '../../../src/runtime/registry';
 const mocks = vi.hoisted(() => ({
   adapter: undefined as unknown as ServiceAdapter,
   getServiceAdapter: vi.fn(),
-  preFlightChecks: vi.fn(),
   materializeEnvSecretForService: vi.fn(),
   resolveProfileRuntime: vi.fn(),
   readRegistry: vi.fn(),
@@ -57,10 +56,6 @@ vi.mock('../../../src/daemon/paths', () => ({
   SUPERVISOR_SERVICE_ID: 'supervisor',
 }));
 
-vi.mock('../../../src/cli/preflight', () => ({
-  preFlightChecks: mocks.preFlightChecks,
-}));
-
 const { runServiceStart, runServiceStatus, runServiceStop, runServiceUnregister } = await import(
   '../../../src/cli/commands/service'
 );
@@ -93,9 +88,6 @@ describe('profile-aware service commands', () => {
       appPaths: {
         profile: 'codex-dev',
         rootDir: '/tmp/lark-channel-home',
-        larkCliConfigDir: '/tmp/lark-channel-home/profiles/codex-dev/lark-cli',
-        larkCliSourceConfigFile:
-          '/tmp/lark-channel-home/profiles/codex-dev/lark-cli-source/config.json',
         profileLockFile: '/tmp/lark-channel-home/registry/locks/profile/codex-dev.lock',
         appLockFile: (appId: string) => `/tmp/lark-channel-home/registry/locks/app/${appId}.lock`,
       },
@@ -135,7 +127,7 @@ describe('profile-aware service commands', () => {
       }),
     ]);
 
-    await runServiceStart({ profile: 'codex-dev', skipCheckLarkCli: true });
+    await runServiceStart({ profile: 'codex-dev' });
 
     // Classic per-profile service pins `run --profile <profile>`.
     expect(mocks.getServiceAdapter).toHaveBeenCalledWith('codex-dev', [
@@ -155,158 +147,11 @@ describe('profile-aware service commands', () => {
         allowBootstrap: true,
       }),
     );
-    expect(mocks.resolveProfileRuntime).toHaveBeenNthCalledWith(2, {
-      profile: 'codex-dev',
-      allowBootstrap: false,
-    });
     expect(mocks.materializeEnvSecretForService).toHaveBeenCalledWith({ profile: 'codex-dev' });
-    expect(mocks.preFlightChecks).toHaveBeenCalledWith({
-      skipCheckLarkCli: true,
-      bridgeConfig: expect.objectContaining({
-        accounts: {
-          app: {
-            id: 'cli_codex',
-            secret: '${APP_SECRET}',
-            tenant: 'feishu',
-          },
-        },
-        agentKind: 'codex',
-      }),
-      appPaths: expect.objectContaining({
-        profile: 'codex-dev',
-        rootDir: '/tmp/lark-channel-home',
-        larkCliConfigDir: '/tmp/lark-channel-home/profiles/codex-dev/lark-cli',
-        larkCliSourceConfigFile:
-          '/tmp/lark-channel-home/profiles/codex-dev/lark-cli-source/config.json',
-      }),
-      larkChannel: {
-        profile: 'codex-dev',
-        rootDir: '/tmp/lark-channel-home',
-        configPath: '/tmp/lark-channel-home/config.json',
-        larkCliConfigDir: '/tmp/lark-channel-home/profiles/codex-dev/lark-cli',
-        larkCliSourceConfigFile:
-          '/tmp/lark-channel-home/profiles/codex-dev/lark-cli-source/config.json',
-      },
-    });
     expect(mocks.adapter.install).toHaveBeenCalled();
     expect(mocks.adapter.start).toHaveBeenCalled();
     expect(lines).toContain(
       '✓ 已启动  bot: Codex Bot (cli_codex)  agent: Codex CLI (codex)  进程: p1',
-    );
-  });
-
-  it('uses materialized config for service preflight after env secret materialization', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const materializedCfg = {
-      accounts: {
-        app: {
-          id: 'cli_codex',
-          secret: {
-            source: 'exec',
-            provider: 'bridge',
-            id: 'app-cli_codex',
-          },
-          tenant: 'feishu',
-        },
-      },
-      agentKind: 'codex',
-      secrets: {
-        providers: {
-          bridge: {
-            source: 'exec',
-            command: '/tmp/lark-channel-home/secrets-getter',
-            args: [],
-          },
-        },
-      },
-    };
-    mocks.materializeEnvSecretForService.mockResolvedValue(true);
-    mocks.resolveProfileRuntime
-      .mockResolvedValueOnce({
-        profile: 'codex-dev',
-        configPath: '/tmp/lark-channel-home/config.json',
-        appPaths: {
-          profile: 'codex-dev',
-          rootDir: '/tmp/lark-channel-home',
-          larkCliConfigDir: '/tmp/lark-channel-home/profiles/codex-dev/lark-cli',
-          larkCliSourceConfigFile:
-            '/tmp/lark-channel-home/profiles/codex-dev/lark-cli-source/config.json',
-          profileLockFile: '/tmp/lark-channel-home/registry/locks/profile/codex-dev.lock',
-          appLockFile: (appId: string) => `/tmp/lark-channel-home/registry/locks/app/${appId}.lock`,
-        },
-        cfg: {
-          accounts: {
-            app: {
-              id: 'cli_codex',
-              secret: '${APP_SECRET}',
-              tenant: 'feishu',
-            },
-          },
-          agentKind: 'codex',
-        },
-      })
-      .mockResolvedValueOnce({
-        profile: 'codex-dev',
-        configPath: '/tmp/lark-channel-home/config.json',
-        appPaths: {
-          profile: 'codex-dev',
-          rootDir: '/tmp/lark-channel-home',
-          larkCliConfigDir: '/tmp/lark-channel-home/profiles/codex-dev/lark-cli',
-          larkCliSourceConfigFile:
-            '/tmp/lark-channel-home/profiles/codex-dev/lark-cli-source/config.json',
-          profileLockFile: '/tmp/lark-channel-home/registry/locks/profile/codex-dev.lock',
-          appLockFile: (appId: string) => `/tmp/lark-channel-home/registry/locks/app/${appId}.lock`,
-        },
-        cfg: materializedCfg,
-      })
-      .mockResolvedValueOnce({
-        profile: 'codex-dev',
-        configPath: '/tmp/lark-channel-home/config.json',
-        appPaths: {
-          profile: 'codex-dev',
-          rootDir: '/tmp/lark-channel-home',
-          larkCliConfigDir: '/tmp/lark-channel-home/profiles/codex-dev/lark-cli',
-          larkCliSourceConfigFile:
-            '/tmp/lark-channel-home/profiles/codex-dev/lark-cli-source/config.json',
-          profileLockFile: '/tmp/lark-channel-home/registry/locks/profile/codex-dev.lock',
-          appLockFile: (appId: string) => `/tmp/lark-channel-home/registry/locks/app/${appId}.lock`,
-        },
-        cfg: materializedCfg,
-      });
-    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
-      processEntry({
-        id: 'p1',
-        pid: 12345,
-        appId: 'cli_codex',
-        profileName: 'codex-dev',
-        agentKind: 'codex',
-        botName: 'Codex Bot',
-      }),
-    ]);
-
-    await runServiceStart({ profile: 'codex-dev', skipCheckLarkCli: false });
-
-    expect(mocks.resolveProfileRuntime).toHaveBeenNthCalledWith(2, {
-      profile: 'codex-dev',
-      allowBootstrap: false,
-    });
-    expect(mocks.preFlightChecks).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bridgeConfig: materializedCfg,
-      }),
-    );
-    expect(mocks.preFlightChecks).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        bridgeConfig: expect.objectContaining({
-          accounts: {
-            app: {
-              id: 'cli_codex',
-              secret: '${APP_SECRET}',
-              tenant: 'feishu',
-            },
-          },
-        }),
-      }),
     );
   });
 
@@ -340,9 +185,7 @@ describe('profile-aware service commands', () => {
       }),
     ]);
 
-    await expect(runServiceStart({ profile: 'codex-dev', skipCheckLarkCli: true })).rejects.toThrow(
-      'exit:1',
-    );
+    await expect(runServiceStart({ profile: 'codex-dev' })).rejects.toThrow('exit:1');
 
     expect(mocks.adapter.install).not.toHaveBeenCalled();
     expect(mocks.adapter.start).not.toHaveBeenCalled();
@@ -382,7 +225,6 @@ describe('profile-aware service commands', () => {
 
     await runServiceStart({
       profile: 'codex-dev',
-      skipCheckLarkCli: true,
       confirmStopRuntimeLockProcess: async () => true,
     });
 
@@ -413,9 +255,7 @@ describe('profile-aware service commands', () => {
       },
     });
 
-    await expect(runServiceStart({ profile: 'codex-dev', skipCheckLarkCli: true })).rejects.toThrow(
-      'exit:1',
-    );
+    await expect(runServiceStart({ profile: 'codex-dev' })).rejects.toThrow('exit:1');
 
     expect(mocks.adapter.install).not.toHaveBeenCalled();
     expect(mocks.adapter.start).not.toHaveBeenCalled();
@@ -461,7 +301,6 @@ describe('profile-aware service commands', () => {
       appId: 'cli_claude',
       appSecret: 'manual-secret',
       tenant: 'feishu',
-      skipCheckLarkCli: true,
     });
 
     expect(mocks.resolveProfileRuntime).toHaveBeenNthCalledWith(

@@ -78,35 +78,30 @@ describe('comment parser', () => {
     );
   });
 
-  it('recommends the current docs fetch form without hard-binding one local CLI build', () => {
+  it('directs Docx reads through the run-scoped native tool', () => {
     const prompt = buildCommentPrompt(
       { fileToken: 'doc-token', fileType: 'docx' },
       { question: '@bot read this', isWhole: false, priorReplies: [] },
     );
 
-    expect(prompt).toContain(
-      'lark-cli docs +fetch --api-version v2 --doc doc-token --doc-format markdown',
-    );
-    expect(prompt).toContain('如果本机 lark-cli 不支持上述参数');
-    expect(prompt).toContain('不要在同一错误上反复重试');
-    expect(prompt).toContain('使用当前可用的等价读取命令');
+    expect(prompt).toContain('lark_get_document_blocks 读取 document_id doc-token');
+    expect(prompt).toContain('page_token');
     expect(prompt).toContain('不要调用云文档评论或回复接口');
     expect(prompt).toContain('不要给评论添加或删除 reaction');
     expect(prompt).toContain('最终答案直接用纯文本交给 bridge');
     expect(prompt).toContain('不要输出内部思考、内部分析、读取步骤、工具调用过程或工具日志');
     expect(prompt).toContain('若用户要求解释依据，只说明用户可见的依据和结论');
-    expect(prompt).not.toContain('`lark-cli docs +fetch --doc doc-token`');
+    expect(prompt).not.toContain('lark-cli');
   });
 
-  it('does not recommend docs fetch for non-document comment targets', () => {
+  it('states the native-read limit for non-document comment targets', () => {
     const prompt = buildCommentPrompt(
       { fileToken: 'sheet-token', fileType: 'sheet' },
       { question: '@bot read this sheet', isWhole: true, priorReplies: [] },
     );
 
-    expect(prompt).toContain('这是 sheet 类型');
-    expect(prompt).toContain('不要使用 docs +fetch');
-    expect(prompt).not.toContain('lark-cli docs +fetch --api-version v2');
-    expect(prompt).not.toContain('--doc-format markdown');
+    expect(prompt).toContain('尚未提供 sheet 正文读取工具');
+    expect(prompt).toContain('只根据当前评论上下文回答');
+    expect(prompt).not.toContain('lark-cli');
   });
 });

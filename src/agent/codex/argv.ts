@@ -1,4 +1,5 @@
 import type { SandboxMode } from '../../config/profile-schema';
+import type { NativeMcpEndpoint } from '../native-tools';
 
 export interface BuildCodexArgsInput {
   cwd: string;
@@ -9,6 +10,7 @@ export interface BuildCodexArgsInput {
   ignoreRules?: boolean;
   /** Forwarded to `codex exec --model`. Omitted uses the Codex default. */
   model?: string;
+  nativeMcp?: NativeMcpEndpoint;
 }
 
 export function buildCodexArgs(input: BuildCodexArgsInput): string[] {
@@ -28,6 +30,14 @@ export function buildCodexArgs(input: BuildCodexArgsInput): string[] {
     'approval_policy="never"',
     '-c',
     'shell_environment_policy.inherit="all"',
+    ...(input.nativeMcp
+      ? [
+          '-c',
+          `mcp_servers.${input.nativeMcp.name}.url=${JSON.stringify(input.nativeMcp.url)}`,
+          '-c',
+          `mcp_servers.${input.nativeMcp.name}.bearer_token_env_var="LARK_NATIVE_MCP_TOKEN"`,
+        ]
+      : []),
     ...(input.ignoreUserConfig === true ? ['--ignore-user-config'] : []),
     ...(input.ignoreRules === false ? [] : ['--ignore-rules']),
     '--skip-git-repo-check',

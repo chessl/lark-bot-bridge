@@ -13,37 +13,13 @@ import type { AgentKind, ProfileConfig } from '../config/profile-schema';
 import type { AcquiredRuntimeLock } from './locks';
 
 /**
- * Build the agent adapter for a profile, wiring its per-profile lark-channel env
- * (so spawned agent processes see this profile's LARKSUITE_CLI_CONFIG_DIR etc.).
- * Shared by the foreground run path and the supervisor so both produce an
- * identically-configured adapter. Each profile MUST get its own adapter — the
- * adapter stores bot identity on itself (see `setBotIdentity`).
+ * Build the agent adapter for a profile.
+ * Shared by foreground and supervised runtimes.
  */
 export function createRuntimeAgent(
   profileConfig: ProfileConfig,
-  appPaths: Pick<AppPaths, 'profileDir'> &
-    Partial<
-      Pick<
-        AppPaths,
-        'rootDir' | 'profile' | 'configFile' | 'larkCliConfigDir' | 'larkCliSourceConfigFile'
-      >
-    > & {
-      configPath?: string;
-    },
+  appPaths: Pick<AppPaths, 'profileDir'>,
 ): AgentAdapter {
-  const larkChannelConfigPath = appPaths.configPath ?? appPaths.configFile;
-  const larkChannel =
-    appPaths.rootDir && appPaths.profile
-      ? {
-          profile: appPaths.profile,
-          rootDir: appPaths.rootDir,
-          ...(larkChannelConfigPath ? { configPath: larkChannelConfigPath } : {}),
-          ...(appPaths.larkCliConfigDir ? { larkCliConfigDir: appPaths.larkCliConfigDir } : {}),
-          ...(appPaths.larkCliSourceConfigFile
-            ? { larkCliSourceConfigFile: appPaths.larkCliSourceConfigFile }
-            : {}),
-        }
-      : undefined;
   if (profileConfig.agentKind === 'codex') {
     const codex = profileConfig.codex;
     if (!codex?.binaryPath) {
@@ -57,7 +33,6 @@ export function createRuntimeAgent(
       ignoreUserConfig: codex.ignoreUserConfig === true,
       ignoreRules: codex.ignoreRules !== false,
       sandbox: accessToCodexSandbox(profileConfig.permissions.defaultAccess),
-      larkChannel,
     });
   }
   if (profileConfig.agentKind === 'omp') {
@@ -68,10 +43,9 @@ export function createRuntimeAgent(
     return new OmpAdapter({
       binary: omp.binaryPath,
       ...(omp.profile ? { profile: omp.profile } : {}),
-      larkChannel,
     });
   }
-  return new ClaudeAdapter({ larkChannel });
+  return new ClaudeAdapter();
 }
 
 export async function checkRuntimeAgentAvailability(

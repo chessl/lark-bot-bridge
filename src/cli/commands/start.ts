@@ -39,7 +39,6 @@ export interface StartOptions {
   appId?: string;
   appSecret?: string;
   tenant?: string;
-  skipCheckLarkCli?: boolean;
   /** Start the machine-wide supervisor + web console instead of a single
    * profile in the foreground. Default false → classic headless run. */
   webUi?: boolean;

@@ -1,16 +1,17 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import type { NativeToolProvider, NativeToolRunContext } from '../../../src/agent/native-tools';
 import type { AgentAdapter, AgentRun, AgentRunOptions } from '../../../src/agent/types';
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { ProcessPool } from '../../../src/bot/process-pool';
-import { RunExecutor } from '../../../src/runtime/run-executor';
-import { RunRejected, SpawnFailed } from '../../../src/runtime/errors';
 import type { RunPolicyAllow } from '../../../src/policy/run-policy';
-import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
+import { RunRejected, SpawnFailed } from '../../../src/runtime/errors';
+import { RunExecutor } from '../../../src/runtime/run-executor';
 import {
   FakeAgentAdapter,
   type FakeAgentEvents,
   type FakeAgentRun,
 } from '../../helpers/fake-agent';
+import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -44,6 +45,59 @@ describe('RunExecutor', () => {
 
     await collect(execution.events);
     expect(h.activeRuns.get('scope-1')).toBeUndefined();
+  });
+
+  it('opens one run-scoped native endpoint and closes it after the run', async () => {
+    const opened: NativeToolRunContext[] = [];
+    const closed: string[] = [];
+    const nativeTools: NativeToolProvider = {
+      openRun(context) {
+        opened.push(context);
+        return {
+          name: 'lark_bridge',
+          url: 'http://127.0.0.1:12345/mcp',
+          bearerToken: 'run-secret',
+        };
+      },
+      async closeRun(runId) {
+        closed.push(runId);
+      },
+    };
+    const h = await createHarness({
+      events: [{ type: 'done', terminationReason: 'normal' }],
+      nativeTools,
+    });
+    const scope = {
+      source: 'im' as const,
+      chatId: 'oc_1',
+      chatType: 'p2p' as const,
+      messageId: 'om_1',
+      actorId: 'ou_1',
+    };
+
+    const execution = await h.executor.submit({
+      scopeId: 'scope-1',
+      scope,
+      allowUserIdentity: true,
+      policy: policy(h.tmp.workspace),
+    });
+
+    expect(opened).toEqual([
+      {
+        runId: 'run-1',
+        scopeId: 'scope-1',
+        scope,
+        policyFingerprint: 'fp',
+        allowUserIdentity: true,
+      },
+    ]);
+    expect(h.agent.runOptions[0]?.nativeMcp).toEqual({
+      name: 'lark_bridge',
+      url: 'http://127.0.0.1:12345/mcp',
+      bearerToken: 'run-secret',
+    });
+    await collect(execution.events);
+    expect(closed).toEqual(['run-1']);
   });
 
   it('fast-fails nowait when the pool is full and queues normal submissions FIFO', async () => {
@@ -251,6 +305,7 @@ async function createHarness(options: {
   waitForExit?: boolean | readonly boolean[];
   poolCap?: number;
   agent?: AgentAdapter;
+  nativeTools?: NativeToolProvider;
 }): Promise<{
   tmp: TmpProfile;
   agent: FakeAgentAdapter;
@@ -281,6 +336,7 @@ async function createHarness(options: {
       createRunId: () => `run-${nextRun++}`,
       now: () => 1000,
       postDoneExitGraceMs: 10,
+      nativeTools: options.nativeTools,
     }),
   };
 }

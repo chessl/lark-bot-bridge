@@ -1,4 +1,4 @@
-import { resolveAppPaths, type AppPaths } from '../../config/app-paths';
+import { type AppPaths, resolveAppPaths } from '../../config/app-paths';
 import { getSecret, listSecretIds, removeSecret, setSecret } from '../../config/keystore';
 import { paths } from '../../config/paths';
 import { loadRootConfig, readActiveProfile } from '../../config/profile-store';
@@ -12,11 +12,8 @@ import { promptPassword } from '../prompt';
  * 1. Humans: `lark-bot-bridge secrets set/list/remove` to manage the
  *    encrypted keystore manually.
  *
- * 2. lark-cli (and any other tool implementing the exec-provider protocol):
- *    `lark-bot-bridge secrets get` reads a JSON-RPC request
- *    from stdin and writes the decrypted secret to stdout. This is what
- *    `accounts.app.secret = { source: "exec", ... }` resolves through when
- *    lark-cli binds against ~/.lark-bot-bridge/config.json.
+ * 2. Exec-provider consumers: `lark-bot-bridge secrets get` reads a JSON
+ *    request from stdin and writes the decrypted secret to stdout.
  */
 
 interface ExecRequest {

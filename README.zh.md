@@ -145,8 +145,8 @@ lark-bot-bridge profile export <name> --include-secrets --yes
 | `/ws use <name>` | 切换到命名工作空间 |
 | `/ws remove <name>` | 删除命名工作空间 |
 | `/resume` | 恢复同 agent、工作目录、权限模式兼容的历史会话 |
-| `/status` | 查看 profile、agent、工作目录、会话、lark-cli 身份和运行状态 |
-| `/config` | 调整展示偏好、访问控制和 lark-cli 身份策略 |
+| `/status` | 查看 profile、agent、工作目录、会话和运行状态 |
+| `/config` | 调整展示偏好和访问控制 |
 | `/invite user @某人` | 允许用户私聊使用 bot |
 | `/invite admin @某人` | 添加访问控制管理员 |
 | `/invite group` | 允许当前群使用 bot |
@@ -172,11 +172,11 @@ lark-bot-bridge profile export <name> --include-secrets --yes
 
 开启 COT 后，bridge 会把过程消息和最终答案拆成两条消息。过程消息用于追踪 agent 做了什么；最终答案仍由 agent 原始文本生成，bridge 不做启发式过滤。若 agent 把最终答案也作为普通流式文本输出，COT 过程消息中可能会出现对应片段。
 
-## lark-cli 身份策略
+## 原生 Lark 工具与用户身份
 
-每个 profile 都使用当前 profile 的 lark-cli 目录：`~/.lark-bot-bridge/profiles/<profile>/lark-cli`。agent 子进程会收到指向这个目录的 `LARKSUITE_CLI_CONFIG_DIR`，所以一个 profile 里的个人授权不会共享给另一个 profile。
+每次 agent run 都会获得一个只绑定 loopback、使用一次性 bearer token 的 `lark_bridge` Streamable HTTP MCP endpoint。Bot 群聊读取、消息读取、Docx block 读取和 CardKit 发送都直接复用 bridge 进程内的 Lark SDK client；写工具在原飞书会话内确认后才执行。
 
-默认策略是 `bot-only`：lark-cli 使用应用 / bot 身份，不访问个人资源。当用户为了日历、邮箱、云盘等个人资源完成授权后，当前 profile 可以切到 `user-default`，保留应用身份，同时允许已授权的用户身份。owner/admin 可以在 `/config` 查看或切换这个策略；`/status` 会用 `lark-cli: app` 或 `lark-cli: user-ready` 展示当前摘要。
+个人版 profile 的私聊可以通过原生工具发起 Lark device OAuth。token 元数据按 profile 保存，access/refresh token 只进入 OS keychain，并在 profile/app/user 锁内刷新。团队版、群聊、话题、云文档评论和会议 run 都不会获得用户身份。
 
 ## 工作目录
 
@@ -230,7 +230,7 @@ OMP profile 当前必须使用 `defaultAccess: "full"`，因为 OMP RPC 尚未�
 | `~/.lark-bot-bridge/profiles/<profile>/sessions.json.catalog.json` | agent-aware 会话索引 |
 | `~/.lark-bot-bridge/profiles/<profile>/workspaces.json` | 当前和命名工作空间绑定 |
 | `~/.lark-bot-bridge/profiles/<profile>/secrets.enc` | profile 本地加密 secret |
-| `~/.lark-bot-bridge/profiles/<profile>/lark-cli/` | 当前 profile 的 lark-cli 目录 |
+| `~/.lark-bot-bridge/profiles/<profile>/user-auth.json` | 用户 OAuth 元数据；token 保存在 OS keychain |
 | `~/.lark-bot-bridge/profiles/<profile>/media/` | 附件缓存 |
 | `~/.lark-bot-bridge/profiles/<profile>/logs/` | 结构化运行日志 |
 | `~/.lark-bot-bridge/registry/processes.json` | 本机进程注册表 |

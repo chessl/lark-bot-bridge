@@ -1,21 +1,12 @@
+import { Client } from '@larksuiteoapi/node-sdk';
 import { resolveAppPaths } from '../config/app-paths';
-import { buildLarkChannelEnv } from '../agent/lark-channel-env';
-import { mergeProcessEnv, spawnProcess } from '../platform/spawn';
+import { resolveAppSecret } from '../config/secret-resolver';
 import { log } from '../core/logger';
+import { resolveProfileRuntime } from '../runtime/profile-runtime';
 
 /**
- * Pre-flight for the in-meeting agent: does the **app (bot) identity** actually
- * hold the scopes it needs, and is the beta enabled?
- *
- * Why shell out to lark-cli for a diagnostic when the runtime path uses the
- * oapi client directly: lark-cli enriches Feishu's bare `99991672` into
- * `missing_scopes` plus a ready-made `console_url` (the scope-apply page with
- * clientID and scopes pre-filled). That URL is exactly what the console needs
- * to offer a one-click "grant it" button, and it must be passed through
- * verbatim — never reconstructed — so we harvest it rather than building one.
- *
- * The probe itself is a read-only call (`vc +meeting-list-active`) chosen
- * because it exercises the same scope family as joining without side effects.
+ * Pre-flight for the in-meeting agent. The probe uses the same native SDK
+ * client as the runtime so installing or binding lark-cli is never required.
  */
 
 /** Early-bird group to request the allowlisted beta (error 20017). */
@@ -47,7 +38,7 @@ export type MeetingPreflightStatus =
   | 'scope-missing'
   /** Allowlisted beta not enabled for this app (20017). */
   | 'not-in-beta'
-  /** Probe could not run (lark-cli absent, not bound, network). */
+  /** Probe could not run (missing live bot identity, config, or network). */
   | 'unknown';
 
 export interface MeetingPreflight {
@@ -72,62 +63,85 @@ export interface MeetingPreflight {
   betaChatUrl?: string;
 }
 
-interface ExecResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-}
-
-export type PreflightExec = (args: string[], env: NodeJS.ProcessEnv) => Promise<ExecResult>;
-
-const defaultExec: PreflightExec = (args, env) =>
-  new Promise<ExecResult>((resolve) => {
-    let stdout = '';
-    let stderr = '';
-    const child = spawnProcess('lark-cli', args, {
-      env: mergeProcessEnv(process.env, env),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    child.stdout?.on('data', (b: Buffer) => (stdout += b.toString('utf8')));
-    child.stderr?.on('data', (b: Buffer) => (stderr += b.toString('utf8')));
-    const timer = setTimeout(() => child.kill('SIGTERM'), 20_000);
-    child.once('error', (err) => {
-      clearTimeout(timer);
-      resolve({ code: null, stdout, stderr: stderr || String(err) });
-    });
-    child.once('exit', (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr });
-    });
-  });
-
 function isRecord(v: unknown): v is Record<string, unknown> {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
-}
-
-function parseJson(text: string): unknown {
-  const trimmed = text.trim();
-  if (!trimmed) return undefined;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.search(/[[{]/);
-    if (start < 0) return undefined;
-    try {
-      return JSON.parse(trimmed.slice(start));
-    } catch {
-      return undefined;
-    }
-  }
 }
 
 function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : [];
 }
 
+const ACTIVE_MEETING_URL = '/open-apis/vc/v1/bots/user_active_meeting';
+const MEETING_QUERY_SCOPE = 'vc:meeting.bot.join:write';
+
+interface MeetingProbeClient {
+  request(payload: {
+    method: string;
+    url: string;
+    params?: Record<string, unknown>;
+  }): Promise<unknown>;
+}
+
+export type PreflightClientFactory = (input: {
+  appId: string;
+  appSecret: string;
+  tenant: 'feishu' | 'lark';
+}) => MeetingProbeClient;
+
+const defaultClientFactory: PreflightClientFactory = ({ appId, appSecret, tenant }) =>
+  new Client({
+    appId,
+    appSecret,
+    domain: tenant === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn',
+    source: 'lark-bot-bridge',
+  });
+
+function scopeApplyUrl(tenant: 'feishu' | 'lark', appId: string, scope: string): string {
+  const base = tenant === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn';
+  const query = new URLSearchParams({ clientID: appId, scopes: scope });
+  return `${base}/page/scope-apply?${query}`;
+}
+
+function permissionScopes(error: Record<string, unknown>): string[] {
+  if (!Array.isArray(error.permission_violations)) return [];
+  return error.permission_violations.flatMap((violation) => {
+    if (!isRecord(violation) || typeof violation.subject !== 'string') return [];
+    return violation.subject ? [violation.subject] : [];
+  });
+}
+
+function responseBody(error: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(error) || !isRecord(error.response) || !isRecord(error.response.data)) {
+    return undefined;
+  }
+  return error.response.data;
+}
+
+function classifyNativeResponse(
+  value: unknown,
+  appId: string,
+  tenant: 'feishu' | 'lark',
+): MeetingPreflight {
+  if (!isRecord(value)) return classifyPreflight(value);
+  const code = typeof value.code === 'number' ? value.code : 0;
+  if (code === 0) return classifyPreflight({ ok: true });
+  const detail = isRecord(value.error) ? value.error : {};
+  const scopes = permissionScopes(detail);
+  if (code === 99991672 && scopes.length === 0) scopes.push(MEETING_QUERY_SCOPE);
+  return classifyPreflight({
+    ok: false,
+    error: {
+      code,
+      message: typeof value.msg === 'string' ? value.msg : `权限检查失败 (${code})`,
+      missing_scopes: scopes,
+      ...(scopes[0] ? { console_url: scopeApplyUrl(tenant, appId, scopes[0]) } : {}),
+    },
+  });
+}
+
 /**
- * Classify a lark-cli VC probe response into an actionable diagnosis.
- * Exported for tests — the parsing is the part worth pinning down.
+ * Classify a normalized VC probe response. Exported because the permission
+ * envelope and beta-gate distinction are the behavior worth pinning down.
  */
 export function classifyPreflight(payload: unknown): MeetingPreflight {
   const base = {
@@ -136,7 +150,7 @@ export function classifyPreflight(payload: unknown): MeetingPreflight {
     requiredScopes: MEETING_REQUIRED_SCOPES,
   };
   if (!isRecord(payload)) {
-    return { ...base, status: 'unknown', message: '无法解析 lark-cli 输出' };
+    return { ...base, status: 'unknown', message: '无法解析权限检查响应' };
   }
   if (payload.ok === true) {
     return { ...base, status: 'ok', message: '应用身份权限已就绪' };
@@ -182,35 +196,59 @@ export interface MeetingPreflightInput {
   probeUserId?: string;
 }
 
-/** Run the read-only probe and classify the result. */
+/** Run the native read-only probe and classify the result. */
 export async function checkMeetingPreflight(
   input: MeetingPreflightInput,
-  exec: PreflightExec = defaultExec,
+  createClient: PreflightClientFactory = defaultClientFactory,
 ): Promise<MeetingPreflight> {
-  const appPaths = resolveAppPaths({ rootDir: input.rootDir, profile: input.profile });
-  const env = buildLarkChannelEnv({
-    profile: appPaths.profile,
-    rootDir: appPaths.rootDir,
-    configPath: appPaths.configFile,
-    larkCliConfigDir: appPaths.larkCliConfigDir,
-    larkCliSourceConfigFile: appPaths.larkCliSourceConfigFile,
-  });
-  const args = ['vc', '+meeting-list-active', '--as', 'bot', '--json'];
-  if (input.probeUserId) args.push('--user-id', input.probeUserId);
-
-  const r = await exec(args, env);
-  const payload = parseJson(r.stdout) ?? parseJson(r.stderr);
-  if (payload === undefined) {
-    return {
-      status: 'unknown',
-      message:
-        r.stderr.trim().split('\n')[0] ?? '权限检查未返回结果（lark-cli 未安装或未绑定应用？）',
-      missingScopes: [],
-      requiredEvents: MEETING_REQUIRED_EVENTS,
-      requiredScopes: MEETING_REQUIRED_SCOPES,
-    };
+  const base = {
+    missingScopes: [] as string[],
+    requiredEvents: MEETING_REQUIRED_EVENTS,
+    requiredScopes: MEETING_REQUIRED_SCOPES,
+  };
+  if (!input.probeUserId) {
+    return { ...base, status: 'unknown', message: 'bot 尚未连接，无法取得权限探测身份' };
   }
-  const result = classifyPreflight(payload);
-  log.info('meeting', 'preflight', { status: result.status, missing: result.missingScopes.length });
-  return result;
+
+  try {
+    const runtime = await resolveProfileRuntime({
+      profile: input.profile,
+      ...(input.rootDir
+        ? { config: resolveAppPaths({ rootDir: input.rootDir, profile: input.profile }).configFile }
+        : {}),
+      allowBootstrap: false,
+    });
+    const appId = runtime.cfg.accounts.app.id;
+    const tenant = runtime.cfg.accounts.app.tenant;
+    const client = createClient({
+      appId,
+      appSecret: await resolveAppSecret(runtime.cfg, runtime.appPaths),
+      tenant,
+    });
+
+    let payload: unknown;
+    try {
+      payload = await client.request({
+        method: 'GET',
+        url: ACTIVE_MEETING_URL,
+        params: { user_id: input.probeUserId },
+      });
+    } catch (error) {
+      payload = responseBody(error);
+      if (!payload) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { ...base, status: 'unknown', message };
+      }
+    }
+
+    const result = classifyNativeResponse(payload, appId, tenant);
+    log.info('meeting', 'preflight', {
+      status: result.status,
+      missing: result.missingScopes.length,
+    });
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ...base, status: 'unknown', message };
+  }
 }

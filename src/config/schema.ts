@@ -1,15 +1,12 @@
 export type TenantBrand = 'feishu' | 'lark';
 
 /**
- * SecretRef points at a secret stored outside this file — keeps secrets out
- * of `config.json` so backups / accidental git commits / log dumps don't
- * leak the bot's App Secret. Matches lark-cli's `SecretRef` shape so
- * `--source lark-channel` reads it through the same generic
- * `ResolveSecretInput` pipeline.
+ * SecretRef points at a secret stored outside config.json so backups,
+ * accidental git commits, and log dumps do not leak the bot App Secret.
  *
- *   - `env`:  value is in process env at `id` (optionally allowlisted via provider)
- *   - `file`: value is at the path `id` (or `provider.path` if provider config)
- *   - `exec`: spawn `provider.command`, send JSON over stdin, read JSON from stdout
+ * - `env`: value is in process env at `id`
+ * - `file`: value is at `id` or relative to `provider.path`
+ * - `exec`: spawn `provider.command` and exchange JSON over stdio
  */
 export interface SecretRef {
   source: 'env' | 'file' | 'exec';
@@ -27,12 +24,7 @@ export interface AppCredentials {
   tenant: TenantBrand;
 }
 
-/**
- * `secrets.providers` declares how SecretRefs resolve to plaintext (env
- * allowlist, file path, exec command). Only the fields actually consumed by
- * bridge's resolver are typed here; lark-cli reads the same JSON via its
- * richer Go types.
- */
+/** Describes the env, file, or process that resolves a SecretRef. */
 export interface ProviderConfig {
   source: 'env' | 'file' | 'exec';
   /** env: allowlist of env var names that ref.id is allowed to be in. */
@@ -127,11 +119,8 @@ export interface AppPreferences {
   /** Access control — user/chat allowlists + admin gating. See AppAccess. */
   access?: AppAccess;
   /**
-   * Grace period (ms) between SIGTERM and SIGKILL when killing the claude
-   * subprocess. Bumped from a hardcoded 500ms because claude often has its
-   * own subprocesses (e.g. lark-cli mid-OAuth) that need a moment to clean
-   * up — too short a window and the SIGKILL cascade kills the descendants
-   * before they can finish what the user is waiting on. Default 5000ms.
+   * Grace period (ms) between SIGTERM and SIGKILL when stopping an agent
+   * subprocess and its descendants. Default 5000ms.
    * Range 100-30000; out-of-range values fall back to default.
    */
   agentStopGraceMs?: number;
@@ -169,8 +158,7 @@ export function isSecretRef(s: SecretInput): s is SecretRef {
   return typeof s === 'object' && s !== null;
 }
 
-/** Account/keystore key for the bot's App Secret. lark-cli also uses a
- * similar `appsecret:` convention so audit/grep is consistent. */
+/** Account/keystore key for the bot's App Secret. */
 export function secretKeyForApp(appId: string): string {
   return `app-${appId}`;
 }

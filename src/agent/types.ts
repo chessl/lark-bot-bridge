@@ -1,5 +1,6 @@
-import type { AgentAvailability } from './preflight';
 import type { ClaudePermissionMode, CodexSandboxMode } from '../config/permissions';
+import type { NativeMcpEndpoint } from './native-tools';
+import type { AgentAvailability } from './preflight';
 
 export type { ClaudePermissionMode } from '../config/permissions';
 
@@ -38,12 +39,11 @@ export interface AgentRunOptions {
   images?: readonly string[];
   sandbox?: CodexSandboxMode;
   permissionMode?: ClaudePermissionMode;
+  nativeMcp?: NativeMcpEndpoint;
   /**
    * Grace period (ms) between SIGTERM and SIGKILL when stop() is called on
-   * the returned run. Lets the agent (and any subprocess it spawned, e.g.
-   * lark-cli mid-OAuth) clean up before the kernel reaps the tree.
-   * Adapters that don't kill via signals are free to ignore this. Defaults
-   * are adapter-specific.
+   * the returned run, allowing the agent to flush runtime state before the
+   * process tree is reaped. Adapters that do not use signals may ignore it.
    */
   stopGraceMs?: number;
 }

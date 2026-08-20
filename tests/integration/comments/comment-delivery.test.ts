@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommentEvent } from '@larksuite/channel';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '../../../src/agent/types.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { handleCommentMention } from '../../../src/bot/comments.js';
@@ -65,7 +65,7 @@ describe('cloud-doc comment delivery', () => {
     expect(reply?.endsWith('…')).toBe(true);
     expect(h.agent.runOptions[0]?.prompt).toContain('file_token：doc-token');
     expect(h.agent.runOptions[0]?.prompt).toContain(
-      'lark-cli docs +fetch --api-version v2 --doc doc-token --doc-format markdown',
+      'lark_get_document_blocks 读取 document_id doc-token',
     );
     expect(h.agent.runOptions[0]?.prompt).toContain('用户选中的原文');
     expect(h.reactionActions()).toEqual(['add', 'delete']);

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { AgentEvent } from '../../../src/agent/types.js';
 import {
-  withCotEvents,
   CotClient,
   CotPublisher,
   cotBriefToolTitle,
   finalAnswerOnlyState,
+  withCotEvents,
 } from '../../../src/bot/cot.js';
-import type { AgentEvent } from '../../../src/agent/types.js';
 import type { RunState } from '../../../src/card/run-state.js';
 
 describe('COT event mapping', () => {
@@ -175,20 +175,34 @@ describe('COT event mapping', () => {
     expect(publisher.disabled).toBe(true);
   });
 
-  it('addresses CoT create to the chat with the origin message id', async () => {
-    const client = new CotClient({ tenant: 'feishu', appId: 'app', appSecret: 'secret' });
-    const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
-    // Intercept the HTTP layer so we assert only how create() shapes the request.
-    (client as unknown as { request: CotClient['request'] }).request = async (path, init) => {
-      calls.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
-      return { cot_id: 'cot_x', message_id: 'om_x' };
-    };
+  it('uses the shared SDK client for CoT calls', async () => {
+    const calls: Array<{
+      method?: string;
+      url?: string;
+      data?: Record<string, unknown>;
+      params?: Record<string, unknown>;
+    }> = [];
+    const client = new CotClient({
+      request: async <T>(request: {
+        method?: string;
+        url?: string;
+        data?: Record<string, unknown>;
+        params?: Record<string, unknown>;
+      }) => {
+        calls.push(request);
+        return { code: 0, data: { cot_id: 'cot_x', message_id: 'om_x' } } as T;
+      },
+    });
 
     await client.create('oc_chat', 'om_origin');
-    expect(calls[0]?.path).toContain('receive_id_type=chat_id');
-    // thread_id is never a valid receive type for message_cot.
-    expect(calls[0]?.path).not.toContain('thread_id');
-    expect(calls[0]?.body).toMatchObject({ receive_id: 'oc_chat', origin_message_id: 'om_origin' });
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: 'POST',
+        url: '/open-apis/im/v1/message_cot',
+        params: { receive_id_type: 'chat_id' },
+        data: { receive_id: 'oc_chat', origin_message_id: 'om_origin' },
+      }),
+    ]);
   });
 
   it('marks the publisher degraded when COT updates fail', async () => {

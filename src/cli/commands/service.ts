@@ -14,7 +14,6 @@ import {
   resolveProfileRuntime,
 } from '../../runtime/profile-runtime';
 import { type ProcessEntry, readRegistry } from '../../runtime/registry';
-import { preFlightChecks } from '../preflight';
 import { type StopProcessEntryResult, stopProcessEntry } from './ps';
 
 export interface ServiceStartOptions {
@@ -24,8 +23,6 @@ export interface ServiceStartOptions {
   appId?: string;
   appSecret?: string;
   tenant?: string;
-  /** Skip lark-cli auto-install + bind during `start`. */
-  skipCheckLarkCli?: boolean;
   /** Install the supervisor+console service (`run --web-ui`) instead of a
    * single-profile service. */
   webUi?: boolean;
@@ -323,7 +320,7 @@ export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<v
     await runServiceStartWebUi(opts);
     return;
   }
-  const { profile, cfg, profileConfig, appPaths, configPath } = await ensureBridgeConfigured(opts);
+  const { profile, cfg, appPaths } = await ensureBridgeConfigured(opts);
   const adapter = requireAdapter('start', profile, classicRunArgs(profile));
   await assertLockNotHeldByAnotherRuntime('profile', appPaths.profileLockFile, adapter, opts);
   await assertLockNotHeldByAnotherRuntime(
@@ -332,27 +329,7 @@ export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<v
     adapter,
     opts,
   );
-  const materializedEnvSecret = await materializeEnvSecretForService({ profile });
-  const bridgeConfig = materializedEnvSecret
-    ? (await resolveProfileRuntime({ profile, allowBootstrap: false })).cfg
-    : cfg;
-  // Run the same lark-cli check as `bridge run` BEFORE writing the
-  // service file — the user is in a TTY here and can answer the install
-  // prompt. The daemon's own preflight (when launchd / systemd spawns
-  // it) will be non-TTY and would silently skip the install.
-  await preFlightChecks({
-    skipCheckLarkCli: opts.skipCheckLarkCli,
-    bridgeConfig,
-    profileConfig,
-    appPaths,
-    larkChannel: {
-      profile: appPaths.profile,
-      rootDir: appPaths.rootDir,
-      configPath,
-      larkCliConfigDir: appPaths.larkCliConfigDir,
-      larkCliSourceConfigFile: appPaths.larkCliSourceConfigFile,
-    },
-  });
+  await materializeEnvSecretForService({ profile });
 
   await adapter.install();
 
@@ -390,26 +367,9 @@ export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<v
  * simply shows it offline in the console.
  */
 async function runServiceStartWebUi(opts: ServiceStartOptions): Promise<void> {
-  const { profile, profileConfig, appPaths, configPath } = await ensureBridgeConfigured(opts);
+  const { profile } = await ensureBridgeConfigured(opts);
   const adapter = requireAdapter('start', SUPERVISOR_SERVICE_ID, WEB_UI_RUN_ARGS);
   await materializeEnvSecretForService({ profile });
-  const bridgeConfig = (await resolveProfileRuntime({ profile, allowBootstrap: false })).cfg;
-
-  // Same lark-cli check as classic `start`, in this TTY, before writing the
-  // service file — the daemon's own preflight would be non-TTY and skip installs.
-  await preFlightChecks({
-    skipCheckLarkCli: opts.skipCheckLarkCli,
-    bridgeConfig,
-    profileConfig,
-    appPaths,
-    larkChannel: {
-      profile: appPaths.profile,
-      rootDir: appPaths.rootDir,
-      configPath,
-      larkCliConfigDir: appPaths.larkCliConfigDir,
-      larkCliSourceConfigFile: appPaths.larkCliSourceConfigFile,
-    },
-  });
 
   await adapter.install();
 

@@ -6,7 +6,6 @@ import { resolveAppPaths } from '../../../src/config/app-paths';
 import { getSecret } from '../../../src/config/keystore';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { secretKeyForApp } from '../../../src/config/schema';
-import { writeLarkCliSourceProjection } from '../../../src/lark-cli/profile-projection';
 import {
   materializeEnvSecretForService,
   resolveProfileRuntime,
@@ -517,17 +516,6 @@ describe('profile runtime resolver', () => {
     };
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'codex-dev' });
     const secret = await getSecret(secretKeyForApp('cli_codex'), appPaths);
-    const runtime = await resolveProfileRuntime({
-      config: join(root, 'config.json'),
-      profile: 'codex-dev',
-      allowBootstrap: false,
-    });
-    const projectionPath = await writeLarkCliSourceProjection(runtime.cfg, appPaths);
-    const projectionText = await readFile(projectionPath, 'utf8');
-    const projection = JSON.parse(projectionText) as {
-      accounts: { app: { secret: unknown } };
-      secrets?: { providers?: Record<string, { command?: string; env?: Record<string, string> }> };
-    };
 
     expect(changed).toBe(true);
     expect(saved.profiles['codex-dev']?.accounts.app.secret).toEqual({
@@ -537,17 +525,6 @@ describe('profile runtime resolver', () => {
     });
     expect(saved.secrets?.providers?.bridge?.command).toBe(expectedSecretsGetter(root));
     expect(secret).toBe('service-mode-secret');
-    expect(projectionText).not.toContain('${BRIDGE_TEST_APP_SECRET}');
-    expect(projection.accounts.app.secret).toEqual({
-      source: 'exec',
-      provider: 'bridge',
-      id: 'app-cli_codex',
-    });
-    expect(projection.secrets?.providers?.bridge?.command).toBe(expectedSecretsGetter(root));
-    expect(projection.secrets?.providers?.bridge?.env).toMatchObject({
-      LARK_CHANNEL_HOME: root,
-      LARK_CHANNEL_PROFILE: 'codex-dev',
-    });
   });
 });
 

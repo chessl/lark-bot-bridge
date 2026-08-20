@@ -8,7 +8,7 @@ import type { Controls } from '../commands';
 import { resolveAppPaths } from '../config/app-paths';
 import { getAgentStopGraceMs } from '../config/schema';
 import { log } from '../core/logger';
-import { evaluateRunPolicy } from '../policy/run-policy';
+import { evaluateRunPolicy, type ScopeContext } from '../policy/run-policy';
 import { resolveWorkingDirectory } from '../policy/workspace';
 import { RunRejected } from '../runtime/errors';
 import type { RunExecutor } from '../runtime/run-executor';
@@ -198,13 +198,14 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
         timeoutMs: commentTimeoutMs,
       });
     }
+    const runContext: ScopeContext = {
+      source: 'comment',
+      actorId: evt.operator.openId,
+      commentScopeId: agentSessionScopeId,
+      resourceBindings: [{ kind: 'doc', id: targetDocScopeId, verified: true }],
+    };
     const policy = evaluateRunPolicy({
-      scope: {
-        source: 'comment',
-        actorId: evt.operator.openId,
-        commentScopeId: agentSessionScopeId,
-        resourceBindings: [{ kind: 'doc', id: targetDocScopeId, verified: true }],
-      },
+      scope: runContext,
       attachments: [],
       prompt,
       requestedCwd,
@@ -258,6 +259,7 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
           policy,
           sessionId,
           threadId,
+          scope: runContext,
           stopGraceMs: getAgentStopGraceMs(controls.cfg),
           observability: {
             profile: controls.profile,
@@ -680,16 +682,9 @@ function managedDefaultWorkspaceForComments(controls: Controls): string {
 
 function commentReadInstruction(target: ResolvedTarget): string {
   if (target.fileType === 'doc' || target.fileType === 'docx') {
-    return (
-      '读取文档内容：优先使用当前 docs v2 读取命令：\n' +
-      `  \`lark-cli docs +fetch --api-version v2 --doc ${target.fileToken} --doc-format markdown\`\n` +
-      '如果本机 lark-cli 不支持上述参数，不要在同一错误上反复重试；使用当前可用的等价读取命令读取同一 file_token。'
-    );
+    return `需要全文时，用 lark_get_document_blocks 读取 document_id ${target.fileToken}；按 page_token 继续翻页。`;
   }
-  if (target.fileType === 'sheet') {
-    return '读取表格内容：这是 sheet 类型，不要使用 docs +fetch。请按当前可用的表格读取工具或本机 lark-cli 支持的表格读取命令读取同一 file_token；如果命令参数不兼容，不要在同一错误上反复重试。';
-  }
-  return '读取文件内容：这是 file 类型，不要使用 docs +fetch。请按当前可用的云空间文件工具或本机 lark-cli 支持的文件读取/下载命令处理同一 file_token；如果命令参数不兼容，不要在同一错误上反复重试。';
+  return `bridge 尚未提供 ${target.fileType} 正文读取工具；只根据当前评论上下文回答，不能读取时明确说明。`;
 }
 
 function isBridgeSelfReply(channel: LarkChannel, evt: CommentEvent): boolean {

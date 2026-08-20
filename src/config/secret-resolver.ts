@@ -11,8 +11,7 @@ import { isSecretRef, secretKeyForApp } from './schema';
 type SecretResolverPaths = KeystorePaths & Partial<Pick<AppPaths, 'secretsGetterScript'>>;
 
 /**
- * Bridge runtime secret resolver. Mirrors the lark-cli `ResolveSecretInput`
- * contract so users can keep their App Secret out of `config.json` via:
+ * Resolve the configured App Secret without requiring plaintext in config.json:
  *
  *   - plain string                              → as-is
  *   - "${VAR_NAME}" template                    → process.env[VAR_NAME]
@@ -107,11 +106,8 @@ async function resolveFileRef(ref: SecretRef, pc: ProviderConfig | undefined): P
 }
 
 /**
- * Spawn the configured provider command, send the JSON-RPC request on
- * stdin, parse the JSON-RPC response from stdout, return the secret for
- * `ref.id`. Implements the same exec-provider protocol lark-cli uses, so
- * users can write one resolver script and reuse it.
- *
+ * Spawn an exec-provider, send its JSON request on stdin, and parse the
+ * response from stdout.
  * If the configured command IS this same bridge binary (a.k.a. bridge is
  * self-hosting via `lark-bot-bridge secrets get`), short-circuit and
  * read the AES keystore directly. Keeps `bridge start` working even when

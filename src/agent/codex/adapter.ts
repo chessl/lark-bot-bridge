@@ -6,7 +6,6 @@ import { log } from '../../core/logger';
 import { mergeProcessEnv, type SpawnedProcessByStdio, spawnProcess } from '../../platform/spawn';
 import { SpawnFailed } from '../../runtime/errors';
 import { prefixBridgeSystemPrompt } from '../bridge-system-prompt';
-import { buildLarkChannelEnv, type LarkChannelEnvContext } from '../lark-channel-env';
 import { type AgentAvailability, checkAgentAvailability } from '../preflight';
 import type {
   AgentAdapter,
@@ -27,7 +26,6 @@ export interface CodexAdapterOptions {
   ignoreRules?: boolean;
   sandbox?: SandboxMode;
   stopGraceMs?: number;
-  larkChannel?: LarkChannelEnvContext;
 }
 
 type CodexChild = SpawnedProcessByStdio<Writable, Readable, Readable>;
@@ -44,7 +42,6 @@ export class CodexAdapter implements AgentAdapter {
   private readonly ignoreRules: boolean;
   private readonly sandbox: SandboxMode;
   private readonly defaultStopGraceMs: number;
-  private readonly larkChannel: LarkChannelEnvContext | undefined;
   private botIdentity: AgentBotIdentity | undefined;
 
   constructor(opts: CodexAdapterOptions) {
@@ -56,7 +53,6 @@ export class CodexAdapter implements AgentAdapter {
     this.ignoreRules = opts.ignoreRules !== false;
     this.sandbox = opts.sandbox ?? 'danger-full-access';
     this.defaultStopGraceMs = opts.stopGraceMs ?? 5000;
-    this.larkChannel = opts.larkChannel;
   }
 
   setBotIdentity(identity: AgentBotIdentity): void {
@@ -101,8 +97,10 @@ export class CodexAdapter implements AgentAdapter {
       ignoreUserConfig: this.ignoreUserConfig,
       ignoreRules: this.ignoreRules,
       model: opts.model,
+      nativeMcp: opts.nativeMcp,
     });
-    const envOverrides: NodeJS.ProcessEnv = buildLarkChannelEnv(this.larkChannel);
+    const envOverrides: NodeJS.ProcessEnv = {};
+    if (opts.nativeMcp) envOverrides.LARK_NATIVE_MCP_TOKEN = opts.nativeMcp.bearerToken;
     if (this.codexHome) {
       envOverrides.CODEX_HOME = this.codexHome;
     } else if (!this.inheritCodexHome) {

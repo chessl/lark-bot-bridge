@@ -6,7 +6,6 @@ import type { Readable, Writable } from 'node:stream';
 import { log } from '../../core/logger';
 import { mergeProcessEnv, type SpawnedProcessByStdio, spawnProcess } from '../../platform/spawn';
 import { buildBridgeSystemPrompt } from '../bridge-system-prompt';
-import { buildLarkChannelEnv, type LarkChannelEnvContext } from '../lark-channel-env';
 import { type AgentAvailability, checkAgentAvailability } from '../preflight';
 import {
   type AgentAdapter,
@@ -20,7 +19,6 @@ import { translateEvent } from './stream-json';
 
 export interface ClaudeAdapterOptions {
   binary?: string;
-  larkChannel?: LarkChannelEnvContext;
 }
 
 type ClaudeChild = SpawnedProcessByStdio<Writable, Readable, Readable>;
@@ -30,12 +28,10 @@ export class ClaudeAdapter implements AgentAdapter {
   readonly displayName = 'Claude Code';
 
   private readonly binary: string;
-  private readonly larkChannel: LarkChannelEnvContext | undefined;
   private botIdentity: AgentBotIdentity | undefined;
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.binary = opts.binary ?? 'claude';
-    this.larkChannel = opts.larkChannel;
   }
 
   setBotIdentity(identity: AgentBotIdentity): void {
@@ -60,10 +56,8 @@ export class ClaudeAdapter implements AgentAdapter {
       throw new Error('cwd is required for ClaudeAdapter.run');
     }
 
-    // Keep the prompt on stdin and the system prompt in a temporary file so
-    // neither appears in argv or depends on command-line quoting and length limits.
-    const systemPromptFile = writeSystemPromptFile(buildBridgeSystemPrompt(this.botIdentity));
-
+    // Keep bridge-only config out of argv; the temp directory is mode 0700.
+    const runFiles = writeClaudeRunFiles(buildBridgeSystemPrompt(this.botIdentity), opts.nativeMcp);
     const args = [
       '-p',
       '--output-format',
@@ -72,15 +66,22 @@ export class ClaudeAdapter implements AgentAdapter {
       '--permission-mode',
       opts.permissionMode ?? CLAUDE_DEFAULT_PERMISSION_MODE,
       '--append-system-prompt-file',
-      systemPromptFile.path,
+      runFiles.systemPromptPath,
     ];
+    if (runFiles.mcpConfigPath) args.push('--mcp-config', runFiles.mcpConfigPath);
     if (opts.sessionId) args.push('--resume', opts.sessionId);
     if (opts.model) args.push('--model', opts.model);
 
     const child = spawnProcess(this.binary, args, {
       cwd: opts.cwd,
-      env: mergeProcessEnv(process.env, buildLarkChannelEnv(this.larkChannel)),
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(opts.nativeMcp
+        ? {
+            env: mergeProcessEnv(process.env, {
+              LARK_NATIVE_MCP_TOKEN: opts.nativeMcp.bearerToken,
+            }),
+          }
+        : {}),
     }) as ClaudeChild;
 
     log.info('agent', 'spawn', {
@@ -112,11 +113,11 @@ export class ClaudeAdapter implements AgentAdapter {
 
     child.on('error', (err) => {
       runtimeError = err;
-      systemPromptFile.cleanup();
+      runFiles.cleanup();
     });
     child.on('exit', (code, signal) => {
       log.info('agent', 'exit', { pid: child.pid ?? null, code, signal });
-      systemPromptFile.cleanup();
+      runFiles.cleanup();
     });
     child.stdin.on('error', (err) => {
       log.warn('agent', 'stdin-error', { message: err.message });
@@ -255,17 +256,32 @@ async function* createEventStream(
   }
 }
 
-/**
- * Persist the appended system prompt to a throwaway temp file so it can be
- * passed via `--append-system-prompt-file` instead of argv. Returns the path
- * plus an idempotent, best-effort cleanup that removes the temp directory.
- */
-function writeSystemPromptFile(content: string): { path: string; cleanup: () => void } {
+function writeClaudeRunFiles(
+  systemPrompt: string,
+  nativeMcp: AgentRunOptions['nativeMcp'],
+): { systemPromptPath: string; mcpConfigPath?: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'lark-claude-'));
-  const path = join(dir, 'append-system-prompt.md');
-  writeFileSync(path, content, 'utf8');
+  const systemPromptPath = join(dir, 'append-system-prompt.md');
+  writeFileSync(systemPromptPath, systemPrompt, { encoding: 'utf8', mode: 0o600 });
+  const mcpConfigPath = nativeMcp ? join(dir, 'mcp.json') : undefined;
+  if (nativeMcp && mcpConfigPath) {
+    writeFileSync(
+      mcpConfigPath,
+      JSON.stringify({
+        mcpServers: {
+          [nativeMcp.name]: {
+            type: 'http',
+            url: nativeMcp.url,
+            headers: { Authorization: `Bearer \${LARK_NATIVE_MCP_TOKEN}` },
+          },
+        },
+      }),
+      { encoding: 'utf8', mode: 0o600 },
+    );
+  }
   return {
-    path,
+    systemPromptPath,
+    ...(mcpConfigPath ? { mcpConfigPath } : {}),
     cleanup: () => {
       try {
         rmSync(dir, { recursive: true, force: true });

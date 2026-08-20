@@ -145,8 +145,8 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/ws use <name>` | Switch to a named workspace |
 | `/ws remove <name>` | Delete a named workspace |
 | `/resume` | Resume compatible history for the same agent, working directory, and permission mode |
-| `/status` | Show profile, agent, working directory, session, lark-cli identity, and run state |
-| `/config` | Adjust presentation preferences, access settings, and lark-cli identity policy |
+| `/status` | Show profile, agent, working directory, session, and run state |
+| `/config` | Adjust presentation preferences and access settings |
 | `/invite user @name` | Allow a user to use the bot in DMs |
 | `/invite admin @name` | Add an access-control admin |
 | `/invite group` | Allow the current group to use the bot |
@@ -172,11 +172,11 @@ DMs do not require an @ mention. Groups and topic groups require `@bot` by defau
 
 When COT is enabled, the bridge splits the process view and final answer into two messages. The COT message is for tracing what the agent did; the final answer is still generated from the agent's raw text, without heuristic bridge-side filtering. If an agent emits final-answer text as ordinary stream text, that text can also appear in the COT process message.
 
-## lark-cli identity policy
+## Native Lark tools and user identity
 
-Each profile uses a profile-local lark-cli directory at `~/.lark-bot-bridge/profiles/<profile>/lark-cli`. The agent process receives `LARKSUITE_CLI_CONFIG_DIR` for that directory, so personal authorization in one profile is not shared with another profile.
+Every agent run receives a run-scoped `lark_bridge` Streamable HTTP MCP endpoint bound to loopback and protected by a one-time bearer token. Bot reads, message reads, Docx blocks, and CardKit sends use the bridge's in-process Lark SDK client; approved write tools confirm in the originating Lark conversation.
 
-The default policy is `bot-only`: lark-cli uses the app/bot identity and does not access personal resources. When a user authorizes personal resources such as calendar, mail, or drive, the current profile can switch to `user-default`, which keeps app identity available and also allows the authorized user identity. Owner/admin users can inspect or change this policy in `/config`; `/status` shows the current summary as `lark-cli: app` or `lark-cli: user-ready`.
+Personal-profile private chats may start Lark device OAuth through the native tools. Token metadata is profile-local, while access and refresh tokens stay in the OS keychain and refresh under a profile/app/user lock. Team profiles, groups, topics, document comments, and meeting runs never receive user identity.
 
 ## Working directories
 
@@ -230,7 +230,7 @@ OMP profiles currently require `defaultAccess: "full"` because OMP RPC does not 
 | `~/.lark-bot-bridge/profiles/<profile>/sessions.json.catalog.json` | Agent-aware session catalog |
 | `~/.lark-bot-bridge/profiles/<profile>/workspaces.json` | Current and named workspace bindings |
 | `~/.lark-bot-bridge/profiles/<profile>/secrets.enc` | Profile-local encrypted secrets |
-| `~/.lark-bot-bridge/profiles/<profile>/lark-cli/` | Profile-local lark-cli directory |
+| `~/.lark-bot-bridge/profiles/<profile>/user-auth.json` | User OAuth metadata; tokens remain in the OS keychain |
 | `~/.lark-bot-bridge/profiles/<profile>/media/` | Attachment cache |
 | `~/.lark-bot-bridge/profiles/<profile>/logs/` | Structured run logs |
 | `~/.lark-bot-bridge/registry/processes.json` | Local process registry |

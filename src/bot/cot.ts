@@ -1,13 +1,9 @@
+import type { Client } from '@larksuiteoapi/node-sdk';
 import type { AgentEvent } from '../agent/types';
-import type { CotMessagesMode, TenantBrand } from '../config/schema';
-import { log } from '../core/logger';
-import { toolHeaderText } from '../card/tool-render';
 import type { RunState } from '../card/run-state';
-
-const ENDPOINTS: Record<TenantBrand, string> = {
-  feishu: 'https://open.feishu.cn',
-  lark: 'https://open.larksuite.com',
-};
+import { toolHeaderText } from '../card/tool-render';
+import type { CotMessagesMode } from '../config/schema';
+import { log } from '../core/logger';
 
 const COT_UPDATE_THROTTLE_MS = 600;
 const COT_TOOL_OUTPUT_MAX = 1200;
@@ -18,68 +14,29 @@ const COT_TEXT_MAX = 1200;
 const COT_REQUEST_TIMEOUT_MS = 15_000;
 
 export class CotClient {
-  private readonly baseUrl: string;
-  private readonly appId: string;
-  private readonly appSecret: string;
-  private token: string | undefined;
-  private tokenExpiresAt = 0;
+  constructor(private readonly client: Pick<Client, 'request'>) {}
 
-  constructor(opts: { tenant: TenantBrand; appId: string; appSecret: string }) {
-    this.baseUrl = ENDPOINTS[opts.tenant];
-    this.appId = opts.appId;
-    this.appSecret = opts.appSecret;
-  }
-
-  async tenantToken(): Promise<string> {
-    const now = Date.now();
-    if (this.token && this.tokenExpiresAt - now > 60_000) return this.token;
-    const resp = await fetch(`${this.baseUrl}/open-apis/auth/v3/tenant_access_token/internal`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app_id: this.appId, app_secret: this.appSecret }),
-      signal: AbortSignal.timeout(COT_REQUEST_TIMEOUT_MS),
-    });
-    if (!resp.ok) throw new Error(`tenant token HTTP ${resp.status}`);
-    const data = (await resp.json()) as {
-      code?: number;
-      msg?: string;
-      tenant_access_token?: string;
-      expire?: number;
-    };
-    if (data.code !== 0 || !data.tenant_access_token) {
-      throw new Error(
-        `tenant token failed: code=${data.code ?? '?'} msg=${data.msg ?? '<no msg>'}`,
-      );
-    }
-    this.token = data.tenant_access_token;
-    const expireSeconds = typeof data.expire === 'number' ? data.expire : 7200;
-    this.tokenExpiresAt = now + Math.max(60, expireSeconds - 60) * 1000;
-    return this.token;
-  }
-
-  async request(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
-    const token = await this.tenantToken();
-    const resp = await fetch(`${this.baseUrl}${path}`, {
-      signal: AbortSignal.timeout(COT_REQUEST_TIMEOUT_MS),
-      ...init,
-      headers: {
-        'Content-Type': 'application/json;charset=utf-8',
-        Authorization: `Bearer ${token}`,
-        ...(init.headers ?? {}),
-      },
-    });
-    if (!resp.ok) throw new Error(`COT HTTP ${resp.status}`);
-    const text = await resp.text();
-    if (!text) return {};
-    const data = JSON.parse(text) as {
+  async request(
+    method: string,
+    path: string,
+    data?: Record<string, unknown>,
+    params?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const response = await this.client.request<{
       code?: number;
       msg?: string;
       data?: Record<string, unknown>;
-    } & Record<string, unknown>;
-    if (data.code !== undefined && data.code !== 0) {
-      throw new Error(`COT API failed: code=${data.code} msg=${data.msg ?? '<no msg>'}`);
+    }>({
+      method,
+      url: path,
+      data,
+      params,
+      timeout: COT_REQUEST_TIMEOUT_MS,
+    });
+    if (response.code !== undefined && response.code !== 0) {
+      throw new Error(`COT API failed: code=${response.code} msg=${response.msg ?? '<no msg>'}`);
     }
-    return data.data ?? data;
+    return response.data ?? response;
   }
 
   async create(chatId: string, originMessageId?: string): Promise<Record<string, unknown>> {
@@ -95,36 +52,32 @@ export class CotClient {
     // (首楼) message has no thread of its own, so a bubble originated from it
     // lands at the group top level. Callers pick origin_message_id
     // accordingly.
-    return this.request('/open-apis/im/v1/message_cot?receive_id_type=chat_id', {
-      method: 'POST',
-      body: JSON.stringify({
+    return this.request(
+      'POST',
+      '/open-apis/im/v1/message_cot',
+      {
         receive_id: chatId,
         ...(originMessageId ? { origin_message_id: originMessageId } : {}),
-      }),
-    });
+      },
+      { receive_id_type: 'chat_id' },
+    );
   }
 
   async update(ref: CotRef, events: readonly CotEvent[]): Promise<void> {
     if (events.length === 0) return;
-    await this.request('/open-apis/im/v1/message_cot', {
-      method: 'PUT',
-      body: JSON.stringify({
-        cot_id: ref.cotId,
-        message_id: ref.messageId,
-        events,
-      }),
+    await this.request('PUT', '/open-apis/im/v1/message_cot', {
+      cot_id: ref.cotId,
+      message_id: ref.messageId,
+      events,
     });
   }
 
   async complete(ref: CotRef, reason: string): Promise<void> {
-    const cotId = encodeURIComponent(ref.cotId);
-    const messageId = encodeURIComponent(ref.messageId);
     await this.request(
-      `/open-apis/im/v1/message_cot/complete/${cotId}?message_id=${messageId}&reason=${reason}`,
-      {
-        method: 'POST',
-        body: '',
-      },
+      'POST',
+      `/open-apis/im/v1/message_cot/complete/${encodeURIComponent(ref.cotId)}`,
+      {},
+      { message_id: ref.messageId, reason },
     );
   }
 }

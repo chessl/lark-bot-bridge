@@ -1,32 +1,33 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { log } from '../core/logger';
-import { readActiveProfile } from '../config/profile-store';
+import type { Controls } from '../commands';
 import type { MutableProfileState } from '../config/config-ops';
-import consoleHtml from './generated/index.html';
+import { readActiveProfile } from '../config/profile-store';
+import { log } from '../core/logger';
 import {
   addBotToChatView,
-  meetingJoin,
-  meetingPreflight,
-  meetingLeave,
-  meetingsView,
   applyConfig,
   applyConfigToDisk,
   buildConfigView,
   listChats,
   loadProfileState,
+  meetingJoin,
+  meetingLeave,
+  meetingPreflight,
+  meetingsView,
   mutateAccess,
   userAuthStatus,
   userChatsView,
   userLoginComplete,
   userLoginStart,
+  userLogout,
 } from './api';
 import { activateProfile, listBots, listProfiles } from './fleet';
+import consoleHtml from './generated/index.html';
+import { checkToken, HttpError, isLocalRequest, readJsonBody, sendHtml, sendJson } from './http';
 import { onboardCreate, onboardState, onboardValidate } from './onboard';
 import { finishQrRegistration, qrStatus, startQrRegistration } from './qr-register';
-import { checkToken, HttpError, isLocalRequest, readJsonBody, sendHtml, sendJson } from './http';
-import type { Controls } from '../commands';
 import type { UiServerDeps, UiServerHandle } from './types';
 
 const DEFAULT_HOST = '127.0.0.1';
@@ -223,7 +224,7 @@ async function route(
     return;
   }
 
-  // --- "我的群": owner's groups via user identity (lark-cli device-flow auth) ---
+  // --- "我的群": owner's groups via native user OAuth ---
   if (path === '/api/auth/status' && g) {
     const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'no profile');
@@ -245,6 +246,13 @@ async function route(
     const profile = body.profile ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'profile is required');
     sendJson(res, 200, await userLoginComplete(profile, deps.rootDir, body));
+    return;
+  }
+  if (path === '/api/auth/logout' && p) {
+    const body = (await readJsonBody(req)) as { profile?: string };
+    const profile = body.profile ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'profile is required');
+    sendJson(res, 200, await userLogout(profile, deps.rootDir));
     return;
   }
   if (path === '/api/user-chats' && g) {

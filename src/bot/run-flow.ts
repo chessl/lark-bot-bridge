@@ -33,6 +33,7 @@ export interface StartRunFlowInput {
   executor: RunExecutor;
   now: number;
   stopGraceMs?: number;
+  allowUserIdentity?: boolean;
   observability?: {
     profile: string;
     agent: string;
@@ -131,6 +132,8 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
     execution = await input.executor.submit({
       scopeId: input.scopeId,
       policy,
+      scope: input.scope,
+      allowUserIdentity: input.allowUserIdentity,
       sessionId,
       threadId,
       model: resolveModelArg(input.profileConfig.agentKind, input.profileConfig.preferences.model),

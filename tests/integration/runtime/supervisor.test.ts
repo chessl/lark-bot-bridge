@@ -64,7 +64,7 @@ beforeEach(async () => {
   sup = new Supervisor({
     configPath,
     rootDir: root,
-    runPreflight: false,
+    runAgentPreflight: false,
     startChannelFn: stubStartChannel,
   });
 });

@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import type { NativeToolProvider } from '../agent/native-tools';
 import type { AgentAdapter, AgentEvent, AgentRun } from '../agent/types';
-import { ActiveRuns, type RunHandle } from '../bot/active-runs';
-import { ProcessPool } from '../bot/process-pool';
-import type { RunPolicyAllow } from '../policy/run-policy';
+import type { ActiveRuns, RunHandle } from '../bot/active-runs';
+import type { ProcessPool } from '../bot/process-pool';
 import { log } from '../core/logger';
+import type { RunPolicyAllow, ScopeContext } from '../policy/run-policy';
 import { RunRejected, SpawnFailed } from './errors';
 
 export interface RunExecutorDeps {
@@ -13,11 +14,14 @@ export interface RunExecutorDeps {
   createRunId?: () => string;
   now?: () => number;
   postDoneExitGraceMs?: number;
+  nativeTools?: NativeToolProvider;
 }
 
 export interface SubmitRunInput {
   scopeId: string;
   policy: RunPolicyAllow;
+  scope?: ScopeContext;
+  allowUserIdentity?: boolean;
   sessionId?: string;
   threadId?: string;
   model?: string;
@@ -50,6 +54,7 @@ export class RunExecutor {
   private readonly createRunId: () => string;
   private readonly now: () => number;
   private readonly postDoneExitGraceMs: number;
+  private readonly nativeTools: NativeToolProvider | undefined;
 
   constructor(deps: RunExecutorDeps) {
     this.agent = deps.agent;
@@ -58,6 +63,7 @@ export class RunExecutor {
     this.createRunId = deps.createRunId ?? randomUUID;
     this.now = deps.now ?? Date.now;
     this.postDoneExitGraceMs = deps.postDoneExitGraceMs ?? DEFAULT_POST_DONE_EXIT_GRACE_MS;
+    this.nativeTools = deps.nativeTools;
   }
 
   async submit(input: SubmitRunInput): Promise<RunExecution> {
@@ -104,6 +110,16 @@ export class RunExecutor {
       sandbox: input.policy.sandbox,
       permissionMode: input.policy.permissionMode,
       stopGraceMs: input.stopGraceMs,
+      nativeMcp:
+        this.nativeTools && input.scope
+          ? this.nativeTools.openRun({
+              runId,
+              scopeId: input.scopeId,
+              scope: input.scope,
+              policyFingerprint: input.policy.policyFingerprint,
+              allowUserIdentity: input.allowUserIdentity ?? false,
+            })
+          : undefined,
     };
     let run: AgentRun;
     try {
@@ -111,12 +127,14 @@ export class RunExecutor {
     } catch (err) {
       release();
       releaseScope();
+      await this.nativeTools?.closeRun(runId);
       if (err instanceof SpawnFailed) throw err;
       throw new SpawnFailed('agent prepare failed', err, 'agent-prepare-failed');
     }
     if (this.activeRuns.newRunsPaused()) {
       release();
       releaseScope();
+      await this.nativeTools?.closeRun(runId);
       throw new RunRejected(
         'reconnect-in-progress',
         this.activeRuns.newRunsPauseReason() ?? 'new runs are temporarily paused',
@@ -127,6 +145,7 @@ export class RunExecutor {
     } catch (err) {
       release();
       releaseScope();
+      await this.nativeTools?.closeRun(runId);
       throw new SpawnFailed('agent spawn failed', err);
     }
     const dimensions = {
@@ -152,6 +171,7 @@ export class RunExecutor {
       releaseScope();
       release();
       await run.stop().catch(() => {});
+      await this.nativeTools?.closeRun(runId);
       throw new RunRejected(
         'run-already-active',
         err instanceof Error ? err.message : 'another run is already active for this scope',
@@ -163,6 +183,7 @@ export class RunExecutor {
       cleaned = true;
       this.activeRuns.unregister(input.scopeId, run);
       release();
+      await this.nativeTools?.closeRun(runId);
       if (waitForExit) {
         const exited = await run.waitForExit(this.postDoneExitGraceMs);
         if (!exited) {

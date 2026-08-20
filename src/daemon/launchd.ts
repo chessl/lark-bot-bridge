@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { dirname } from 'node:path';
+import { paths } from '../config/paths';
 import {
   daemonLogDir,
   daemonStderrPath,
@@ -10,16 +11,13 @@ import {
   launchAgentLabel,
   launchAgentPlistPath,
 } from './paths';
-import { paths } from '../config/paths';
 
 export interface PlistInputs {
   /** Absolute path to the node binary that should run the bridge. */
   nodePath: string;
   /** Absolute path to the bridge CLI entry (the file currently executing). */
   bridgeEntryPath: string;
-  /** PATH for the daemon process — captured from current shell so child
-   * tools (lark-cli, claude) can be resolved by name. launchd defaults
-   * to a very minimal PATH otherwise. */
+  /** PATH captured from the current shell so child agent tools resolve. */
   envPath: string;
   /** Service id (profile name, or the reserved supervisor id) — drives the
    * label and log paths. */

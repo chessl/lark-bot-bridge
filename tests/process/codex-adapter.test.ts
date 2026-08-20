@@ -71,64 +71,44 @@ describe('CodexAdapter process contract', () => {
     expect(record.argv).not.toContain('--ignore-user-config');
     expect(record.argv).toContain('--skip-git-repo-check');
     expect(record.argv).not.toContain('hello from lark');
-    expect(record.stdin).toContain('lark-bot-bridge 运行约定');
+    expect(record.stdin).toContain('lark_bridge');
     expect(record.stdin).toContain('__bridge_cb');
-    expect(record.stdin).toContain('lark-cli auth login');
-    expect(record.stdin).toContain('LARK_CHANNEL_PROFILE');
-    expect(record.stdin).toContain('LARKSUITE_CLI_CONFIG_DIR');
+    expect(record.stdin).not.toContain('lark-cli auth login');
+    expect(record.stdin).not.toContain('LARK_CHANNEL_PROFILE');
+    expect(record.stdin).not.toContain('LARKSUITE_CLI_CONFIG_DIR');
     expect(record.stdin).toContain('hello from lark');
     expect(record.stdin).not.toBe('hello from lark');
     expect(record.env).toMatchObject({
-      LARK_CHANNEL: '1',
       CODEX_HOME: '/outer/codex-home',
     });
+    expect(record.env.LARK_CHANNEL).toBeUndefined();
     expect(record.env.APP_SECRET).toBe('inherited-secret');
   });
 
-  it('injects the active bridge profile env while preserving Codex env overrides', async () => {
-    process.env.CODEX_HOME = '/outer/codex-home';
-    const fake = await createFakeCodex({
-      lines: [{ type: 'turn.completed' }],
-    });
+  it('injects the run-scoped native MCP endpoint and bearer environment', async () => {
+    const fake = await createFakeCodex({ lines: [{ type: 'turn.completed' }] });
     cleanup.push(fake.dir);
-    const rootDir = join(fake.dir, 'channel-home');
-    const configPath = join(rootDir, 'config.custom.json');
-    const larkCliConfigDir = join(rootDir, 'profiles', 'codex-dev', 'lark-cli');
-    const larkCliSourceConfigFile = join(
-      rootDir,
-      'profiles',
-      'codex-dev',
-      'lark-cli-source',
-      'config.json',
-    );
-
+    const cwd = await realpath(fake.dir);
+    const nativeMcp = {
+      name: 'lark_bridge',
+      url: 'http://127.0.0.1:12345/mcp',
+      bearerToken: 'run-secret',
+    };
     const run = new CodexAdapter({
       binary: fake.path,
       profileStateDir: fake.dir,
-      larkChannel: {
-        profile: 'codex-dev',
-        rootDir,
-        configPath,
-        larkCliConfigDir,
-        larkCliSourceConfigFile,
-      },
     }).run({
-      runId: 'run-profile-env',
-      prompt: 'profile',
-      cwd: await realpath(fake.dir),
+      runId: 'run-mcp',
+      prompt: 'use lark',
+      cwd,
+      nativeMcp,
     });
 
     await collect(run.events);
     const record = await readRecord(fake.recordPath);
-
-    expect(record.env).toMatchObject({
-      LARK_CHANNEL: '1',
-      LARK_CHANNEL_PROFILE: 'codex-dev',
-      LARK_CHANNEL_HOME: rootDir,
-      LARK_CHANNEL_CONFIG: larkCliSourceConfigFile,
-      LARKSUITE_CLI_CONFIG_DIR: larkCliConfigDir,
-      CODEX_HOME: '/outer/codex-home',
-    });
+    expect(record.argv).toEqual(buildCodexArgs({ cwd, sandbox: 'danger-full-access', nativeMcp }));
+    expect(record.argv.join(' ')).not.toContain(nativeMcp.bearerToken);
+    expect(record.env.LARK_NATIVE_MCP_TOKEN).toBe(nativeMcp.bearerToken);
   });
 
   it('leaves CODEX_HOME unset by default so Codex can use the user login under ~/.codex', async () => {
@@ -440,6 +420,7 @@ async function createFakeCodex(options: {
       '      LARK_CHANNEL_HOME: process.env.LARK_CHANNEL_HOME,',
       '      LARK_CHANNEL_CONFIG: process.env.LARK_CHANNEL_CONFIG,',
       '      LARKSUITE_CLI_CONFIG_DIR: process.env.LARKSUITE_CLI_CONFIG_DIR,',
+      '      LARK_NATIVE_MCP_TOKEN: process.env.LARK_NATIVE_MCP_TOKEN,',
       '      CODEX_HOME: process.env.CODEX_HOME,',
       '      APP_SECRET: process.env.APP_SECRET,',
       '      PATH: process.env.PATH,',
@@ -469,6 +450,7 @@ async function readRecord(path: string): Promise<{
     LARK_CHANNEL_HOME?: string;
     LARK_CHANNEL_CONFIG?: string;
     LARKSUITE_CLI_CONFIG_DIR?: string;
+    LARK_NATIVE_MCP_TOKEN?: string;
     CODEX_HOME?: string;
     APP_SECRET?: string;
     PATH?: string;
@@ -484,6 +466,7 @@ async function readRecord(path: string): Promise<{
       LARK_CHANNEL_HOME?: string;
       LARK_CHANNEL_CONFIG?: string;
       LARKSUITE_CLI_CONFIG_DIR?: string;
+      LARK_NATIVE_MCP_TOKEN?: string;
       CODEX_HOME?: string;
       APP_SECRET?: string;
       PATH?: string;

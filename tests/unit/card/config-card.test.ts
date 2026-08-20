@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { configFormCard, type ConfigFormOpts } from '../../../src/card/config-card';
+import { type ConfigFormOpts, configFormCard } from '../../../src/card/config-card';
 
 const base: ConfigFormOpts = {
   agentKind: 'claude',
@@ -11,7 +11,6 @@ const base: ConfigFormOpts = {
   maxConcurrentRuns: 1,
   runIdleTimeoutMinutes: 0,
   requireMentionInGroup: false,
-  larkCliIdentity: 'bot-only',
   allowedUsers: [],
   allowedChats: [],
   admins: [],

@@ -98,38 +98,12 @@ export interface MeetingConfig {
   summaryTarget: MeetingSummaryTarget;
 }
 
-export type LarkCliIdentityPreset = 'bot-only' | 'user-default';
-
 /**
- * Deployment mode — a single switch that binds two behaviors together
- * (see the "团队版 Bot 权限调整" spec):
- *   - `personal` (default, the status quo): only owner + allowlisted
- *     users/chats can use the bot; the CLI may carry owner's personal (user)
- *     authorization per {@link LarkCliConfig.identityPreset}.
- *   - `team`: anyone can @-use the bot (no allowlist gating), and the CLI is
- *     forced to `bot-only` so it never carries owner's personal authorization.
- *
- * The two behaviors are intentionally bound to one switch, not two configs.
- * Admin/sensitive commands stay owner/admin-gated in both modes.
+ * Deployment mode. Personal profiles allow user OAuth only inside private
+ * chats; team profiles expose bot identity only. Admin commands remain gated
+ * in both modes.
  */
 export type ProfileMode = 'personal' | 'team';
-
-export type LarkCliUserImportStatus =
-  | 'not-needed'
-  | 'imported'
-  | 'skipped-existing-private-user'
-  | 'skipped-no-local-user'
-  | 'failed';
-
-export interface LarkCliConfig {
-  identityPreset: LarkCliIdentityPreset;
-  localUserImport?: {
-    status: LarkCliUserImportStatus;
-    attemptedAt?: string;
-    importedAt?: string;
-    reason?: string;
-  };
-}
 
 export interface ProfileConfig {
   schemaVersion: 2;
@@ -151,21 +125,6 @@ export interface ProfileConfig {
   attachments: AttachmentConfig;
   /** In-meeting agent settings. See {@link MeetingConfig}. */
   meeting: MeetingConfig;
-  larkCli: LarkCliConfig;
-}
-
-/**
- * The lark-cli identity preset that actually takes effect, after applying the
- * deployment-mode override. Team mode forces `bot-only` regardless of the
- * user's stored {@link LarkCliConfig.identityPreset} (which is preserved so it
- * comes back into effect when switching back to personal mode). This is the
- * single source of truth for "team mode forces bot-only" — every place that
- * applies the lark-cli identity policy should read through here.
- */
-export function effectiveLarkCliIdentity(
-  profile: Pick<ProfileConfig, 'mode' | 'larkCli'>,
-): LarkCliIdentityPreset {
-  return profile.mode === 'team' ? 'bot-only' : profile.larkCli.identityPreset;
 }
 
 export interface RootConfig {
@@ -218,7 +177,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     omp?: OmpConfig;
     attachments?: Partial<AttachmentConfig>;
     meeting?: unknown;
-    larkCli?: unknown;
   };
 
   if (raw.schemaVersion !== 2) {
@@ -240,7 +198,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   const permissions = normalizePermissions(raw.permissions);
   const workspaces = normalizeWorkspaces(raw.workspaces);
   const meeting = normalizeMeeting(raw.meeting);
-  const larkCli = normalizeLarkCli(raw.larkCli);
 
   return {
     schemaVersion: 2,
@@ -263,7 +220,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
       cacheMaxBytes: numberOr(raw.attachments?.cacheMaxBytes, 512 * 1024 * 1024),
     },
     meeting,
-    larkCli,
   };
 }
 
@@ -422,50 +378,6 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(n)));
-}
-
-function normalizeLarkCli(input: unknown): LarkCliConfig {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return { identityPreset: 'bot-only' };
-  }
-  const raw = input as {
-    identityPreset?: unknown;
-    localUserImport?: unknown;
-  };
-  const identityPreset: LarkCliIdentityPreset =
-    raw.identityPreset === 'user-default' ? 'user-default' : 'bot-only';
-  const localUserImport = normalizeLarkCliUserImport(raw.localUserImport);
-  return {
-    identityPreset,
-    ...(localUserImport ? { localUserImport } : {}),
-  };
-}
-
-function normalizeLarkCliUserImport(input: unknown): LarkCliConfig['localUserImport'] | undefined {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
-  const raw = input as {
-    status?: unknown;
-    attemptedAt?: unknown;
-    importedAt?: unknown;
-    reason?: unknown;
-  };
-  if (!isLarkCliUserImportStatus(raw.status)) return undefined;
-  return {
-    status: raw.status,
-    ...(typeof raw.attemptedAt === 'string' ? { attemptedAt: raw.attemptedAt } : {}),
-    ...(typeof raw.importedAt === 'string' ? { importedAt: raw.importedAt } : {}),
-    ...(typeof raw.reason === 'string' ? { reason: raw.reason } : {}),
-  };
-}
-
-function isLarkCliUserImportStatus(value: unknown): value is LarkCliUserImportStatus {
-  return (
-    value === 'not-needed' ||
-    value === 'imported' ||
-    value === 'skipped-existing-private-user' ||
-    value === 'skipped-no-local-user' ||
-    value === 'failed'
-  );
 }
 
 function stringArray(value: unknown): string[] {

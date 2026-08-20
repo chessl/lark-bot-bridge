@@ -1,7 +1,8 @@
 import { realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
 import type { CommentEvent } from '@larksuite/channel';
+import { afterEach, describe, expect, it } from 'vitest';
+import { codexCapability } from '../../../src/agent/capability.js';
 import type {
   AgentAdapter,
   AgentEvent,
@@ -9,9 +10,8 @@ import type {
   AgentRunOptions,
 } from '../../../src/agent/types.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
-import { handleCommentMention } from '../../../src/bot/comments.js';
 import { commentDocumentScopeId, commentTokenDigest } from '../../../src/bot/comment-resource.js';
-import { codexCapability } from '../../../src/agent/capability.js';
+import { handleCommentMention } from '../../../src/bot/comments.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
 import {
   createDefaultProfileConfig,
@@ -66,9 +66,7 @@ describe('comment run flow', () => {
     const opts = h.agent.runOptions[0]!;
     await expect(realpath(h.tmp.workspace)).resolves.toBe(opts.cwd);
     expect(opts.prompt).toContain('file_token：doc-token');
-    expect(opts.prompt).toContain(
-      'lark-cli docs +fetch --api-version v2 --doc doc-token --doc-format markdown',
-    );
+    expect(opts.prompt).toContain('lark_get_document_blocks 读取 document_id doc-token');
     expect(opts.prompt).not.toContain('commentScopeId');
     expect(opts.prompt).not.toContain('docScopeId');
     expect(h.inThreadReplies).toEqual(['answer one']);
@@ -601,10 +599,8 @@ function codexRunWithProgress(
     {
       type: 'tool_use',
       id: `${threadId}-tool`,
-      name: 'command_execution',
-      input: {
-        command: 'lark-cli docs +fetch --api-version v2 --doc doc-token --doc-format markdown',
-      },
+      name: 'mcp__lark_bridge__lark_get_document_blocks',
+      input: { documentId: 'doc-token' },
     },
     { type: 'tool_result', id: `${threadId}-tool`, output: 'doc body', isError: false },
     { type: 'final_text', content: finalAnswer },

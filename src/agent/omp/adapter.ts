@@ -1,14 +1,24 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { extname, join } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, extname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { log } from '../../core/logger';
-import { mergeProcessEnv, spawnProcess, type SpawnedProcessByStdio } from '../../platform/spawn';
+import { withResolvers } from '../../platform/promise';
+import { mergeProcessEnv, type SpawnedProcessByStdio, spawnProcess } from '../../platform/spawn';
 import { SpawnFailed } from '../../runtime/errors';
 import { buildBridgeSystemPrompt } from '../bridge-system-prompt';
-import { buildLarkChannelEnv, type LarkChannelEnvContext } from '../lark-channel-env';
-import { checkAgentAvailability, type AgentAvailability } from '../preflight';
+import type { NativeMcpEndpoint } from '../native-tools';
+import { type AgentAvailability, checkAgentAvailability } from '../preflight';
 import type {
   AgentAdapter,
   AgentBotIdentity,
@@ -21,10 +31,16 @@ import { OmpRpcFrameDecoder, OmpRpcTranslator } from './rpc';
 export interface OmpAdapterOptions {
   binary: string;
   profile?: string;
-  larkChannel?: LarkChannelEnvContext;
 }
 
 type OmpChild = SpawnedProcessByStdio<Writable, Readable, Readable>;
+interface OmpMcpPatch {
+  path: string;
+  endpoint: NativeMcpEndpoint;
+  previousEntry: unknown;
+  fileExisted: boolean;
+  refs: number;
+}
 
 export class OmpAdapter implements AgentAdapter {
   readonly id = 'omp';
@@ -32,13 +48,12 @@ export class OmpAdapter implements AgentAdapter {
 
   private readonly binary: string;
   private readonly profile: string | undefined;
-  private readonly larkChannel: LarkChannelEnvContext | undefined;
   private botIdentity: AgentBotIdentity | undefined;
+  private mcpPatch: OmpMcpPatch | undefined;
 
   constructor(opts: OmpAdapterOptions) {
     this.binary = opts.binary;
     this.profile = opts.profile;
-    this.larkChannel = opts.larkChannel;
   }
 
   setBotIdentity(identity: AgentBotIdentity): void {
@@ -72,17 +87,27 @@ export class OmpAdapter implements AgentAdapter {
     if (!opts.cwd) throw new Error('cwd is required for OmpAdapter.run');
 
     const systemPromptFile = writeSystemPromptFile(buildBridgeSystemPrompt(this.botIdentity));
+    const releaseMcp = opts.nativeMcp ? this.acquireMcpConfig(opts.nativeMcp) : () => {};
     const args = buildOmpArgs({
       systemPromptFile: systemPromptFile.path,
       profile: this.profile,
       sessionId: opts.sessionId,
       model: opts.model,
     });
-    const child = spawnProcess(this.binary, args, {
-      cwd: opts.cwd,
-      env: mergeProcessEnv(process.env, buildLarkChannelEnv(this.larkChannel)),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }) as OmpChild;
+    const env: NodeJS.ProcessEnv = {};
+    if (opts.nativeMcp) env.LARK_NATIVE_MCP_TOKEN = opts.nativeMcp.bearerToken;
+    let child: OmpChild;
+    try {
+      child = spawnProcess(this.binary, args, {
+        cwd: opts.cwd,
+        env: mergeProcessEnv(process.env, env),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }) as OmpChild;
+    } catch (error) {
+      systemPromptFile.cleanup();
+      releaseMcp();
+      throw error;
+    }
 
     log.info('agent', 'spawn', {
       agent: 'omp',
@@ -100,13 +125,17 @@ export class OmpAdapter implements AgentAdapter {
       const text = chunk.toString('utf8').trim();
       if (text) log.warn('agent', 'stderr', { agent: 'omp', line: text.slice(0, 1000) });
     });
+    const cleanup = once(() => {
+      systemPromptFile.cleanup();
+      releaseMcp();
+    });
     child.on('error', (err) => {
       runtimeError = err;
-      systemPromptFile.cleanup();
+      cleanup();
     });
     child.on('exit', (code, signal) => {
       log.info('agent', 'exit', { agent: 'omp', pid: child.pid ?? null, code, signal });
-      systemPromptFile.cleanup();
+      cleanup();
     });
     child.stdin.on('error', (err) => {
       log.warn('agent', 'stdin-error', { agent: 'omp', message: err.message });
@@ -131,6 +160,102 @@ export class OmpAdapter implements AgentAdapter {
       },
     };
   }
+
+  private acquireMcpConfig(endpoint: NativeMcpEndpoint): () => void {
+    if (this.mcpPatch) {
+      if (
+        this.mcpPatch.endpoint.url !== endpoint.url ||
+        this.mcpPatch.endpoint.name !== endpoint.name
+      ) {
+        throw new Error('OMP MCP endpoint changed while runs are active');
+      }
+      this.mcpPatch.refs++;
+      return once(() => this.releaseMcpConfig());
+    }
+    const path = ompMcpConfigPath(this.profile);
+    const fileExisted = existsSync(path);
+    const config = readMcpConfig(path);
+    const servers = asRecord(config.mcpServers);
+    const previousEntry = servers[endpoint.name];
+    servers[endpoint.name] = ompMcpEntry(endpoint);
+    config.mcpServers = servers;
+    writeJsonAtomic(path, config);
+    this.mcpPatch = { path, endpoint, previousEntry, fileExisted, refs: 1 };
+    return once(() => this.releaseMcpConfig());
+  }
+
+  private releaseMcpConfig(): void {
+    const patch = this.mcpPatch;
+    if (!patch || --patch.refs > 0) return;
+    this.mcpPatch = undefined;
+    const config = readMcpConfig(patch.path);
+    const servers = asRecord(config.mcpServers);
+    if (
+      JSON.stringify(servers[patch.endpoint.name]) !== JSON.stringify(ompMcpEntry(patch.endpoint))
+    ) {
+      return;
+    }
+    if (patch.previousEntry === undefined) delete servers[patch.endpoint.name];
+    else servers[patch.endpoint.name] = patch.previousEntry;
+    config.mcpServers = servers;
+    if (
+      !patch.fileExisted &&
+      Object.keys(servers).length === 0 &&
+      Object.keys(config).length === 1
+    ) {
+      unlinkSync(patch.path);
+      return;
+    }
+    writeJsonAtomic(patch.path, config);
+  }
+}
+
+function ompMcpConfigPath(profile: string | undefined): string {
+  const activeProfile = profile ?? process.env.OMP_PROFILE ?? process.env.PI_PROFILE;
+  if (activeProfile) {
+    if (!/^[A-Za-z0-9._-]+$/.test(activeProfile)) throw new Error('invalid OMP profile name');
+    return join(homedir(), '.omp', 'profiles', activeProfile, 'agent', 'mcp.json');
+  }
+  return join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.omp', 'agent'), 'mcp.json');
+}
+
+function readMcpConfig(path: string): Record<string, unknown> {
+  if (!existsSync(path)) return {};
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`invalid OMP MCP config: ${path}`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : {};
+}
+
+function ompMcpEntry(endpoint: NativeMcpEndpoint): Record<string, unknown> {
+  return {
+    type: 'http',
+    url: endpoint.url,
+    headers: { Authorization: `Bearer \${LARK_NATIVE_MCP_TOKEN}` },
+  };
+}
+
+function writeJsonAtomic(path: string, value: Record<string, unknown>): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  renameSync(temp, path);
+}
+
+function once(fn: () => void): () => void {
+  let called = false;
+  return () => {
+    if (called) return;
+    called = true;
+    fn();
+  };
 }
 
 export function buildOmpArgs(input: {
@@ -296,22 +421,22 @@ function writeSystemPromptFile(content: string): { path: string; cleanup: () => 
 
 function waitForExit(child: OmpChild, timeoutMs: number): Promise<boolean> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
-  return new Promise<boolean>((resolve) => {
-    const onExit = (): void => {
-      clearTimeout(timer);
-      resolve(true);
-    };
-    const timer = setTimeout(() => {
-      child.removeListener('exit', onExit);
-      resolve(false);
-    }, timeoutMs);
-    child.once('exit', onExit);
-  });
+  const { promise, resolve } = withResolvers<boolean>();
+  const onExit = (): void => {
+    clearTimeout(timer);
+    resolve(true);
+  };
+  const timer = setTimeout(() => {
+    child.removeListener('exit', onExit);
+    resolve(false);
+  }, timeoutMs);
+  child.once('exit', onExit);
+  return promise;
 }
 
 function waitForExitCode(child: OmpChild): Promise<number | null> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
-  return new Promise<number | null>((resolve) => {
-    child.once('exit', (code) => resolve(code));
-  });
+  const { promise, resolve } = withResolvers<number | null>();
+  child.once('exit', resolve);
+  return promise;
 }

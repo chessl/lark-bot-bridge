@@ -46,7 +46,6 @@ program
     'App Secret for --app-id; prefer interactive input on shared machines',
   )
   .option('--tenant <tenant>', 'tenant for --app-id (feishu or lark; default feishu)')
-  .option('--skip-check-lark-cli', 'skip lark-cli pre-flight check (auto-install + bind)')
   .action(
     async (opts: {
       config?: string;
@@ -57,7 +56,6 @@ program
       appId?: string;
       appSecret?: string;
       tenant?: string;
-      skipCheckLarkCli?: boolean;
     }) => {
       await runStart(opts);
     },
@@ -182,7 +180,6 @@ program
     'App Secret for --app-id; prefer interactive input on shared machines',
   )
   .option('--tenant <tenant>', 'tenant for --app-id (feishu or lark; default feishu)')
-  .option('--skip-check-lark-cli', 'skip lark-cli pre-flight check (auto-install + bind)')
   .action(
     async (opts: {
       profile?: string;
@@ -192,7 +189,6 @@ program
       appId?: string;
       appSecret?: string;
       tenant?: string;
-      skipCheckLarkCli?: boolean;
     }) => {
       await runServiceStart(opts);
     },
@@ -243,9 +239,7 @@ const secrets = program
 
 secrets
   .command('get')
-  .description(
-    'Exec-provider protocol: read JSON request from stdin, write JSON response to stdout. Used by lark-cli config bind --source lark-channel.',
-  )
+  .description('Exec-provider protocol: read a JSON request from stdin and write JSON to stdout.')
   .action(async () => {
     await runSecretsGet();
   });

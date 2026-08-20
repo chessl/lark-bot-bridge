@@ -2,16 +2,18 @@
 
 > 调研时间：2026-08-20
 
-## 结论
+## 结论与实施状态
 
-有更好的方向，但当前没有一个能同时满足“同进程、全能力、用户 OAuth、现有安全门禁”的稳定 drop-in replacement。
+推荐架构已于 2026-08-20 一次性落地：
 
-推荐采用**渐进式混合方案**：
+1. Bridge 的 bot 调用统一复用 `channel.rawClient`；`CotClient` 和会议 preflight 不再自行取 tenant token 或启动 `lark-cli`。
+2. Bridge 在同一 Node 进程内提供只绑定 `127.0.0.1` 的 Streamable HTTP MCP endpoint。每个 run 单独签发 bearer token，并绑定 profile、会话和 policy fingerprint。
+3. Claude Code、Codex、OMP 都在启动时获得临时 MCP 配置；token 只在环境变量中传递，不进入 argv、system prompt、session 记录或持久配置。
+4. 常用 bot reads、Docx blocks、CardKit 发送、用户 OAuth 和拉 bot 入群已迁入原生工具。写操作由 bridge 在原飞书会话内发确认卡，签名确认绑定 run/scope/actor 且一次性消费。
+5. 用户 access/refresh token 存在 OS keychain；磁盘只保存 profile-local 元数据。刷新在 profile/app/user 跨进程锁内完成完整的 read-refresh-write。
+6. 原 `src/lark-cli/user-im.ts`、身份策略、启动 preflight、profile projection 和 CLI-specific agent 配置均已删除；runtime 不再依赖 `lark-cli`。
 
-1. **Bridge 内部的应用身份调用**：直接复用现有 `@larksuite/channel` 的 `channel.rawClient`，不再自行取 tenant token，也不再启动 `lark-cli`。
-2. **Agent 面向的常用能力**：由 bridge 在同一 Node 进程内提供一个只绑定 `127.0.0.1` 的 Streamable HTTP MCP endpoint；底层仍用 `channel.rawClient`。Claude Code、Codex、OMP 都把它识别为原生结构化 tool，从而消除“每次调用再 spawn 一个 lark-cli”的路径。
-3. **暂时保留 `lark-cli`**：只负责用户身份的 device flow、OS keychain、refresh token 生命周期、尚未迁移的长尾能力，以及现有 high-risk-write 保护。
-4. **不要现在直接内嵌 `@larksuiteoapi/lark-mcp@0.5.1`**：方向正确，但当前 npm 公共入口有 CLI 顶层副作用，且 pnpm 10 下 `keytar` 构建需要额外批准。可把它作为长期运行的 MCP sidecar 做过渡，或等上游提供稳定、无副作用的 library export 后再内嵌。
+仍不内嵌 `@larksuiteoapi/lark-mcp`：公共入口副作用、私有 export 和 `keytar` 构建风险没有变化。工具继续按真实产品需求加入 bridge-owned allowlist，不复制全量 OpenAPI schema。
 
 这同时区分了两个“native”：
 
@@ -20,39 +22,29 @@
 
 Agent 本身已经是独立进程，因此 Agent 到 bridge 之间仍会有 loopback MCP 传输；应消除的是每次 Lark 操作新增的 CLI 子进程，而不是假装不存在进程边界。
 
-## 当前调用链
+## 迁移后的调用链
 
 ### Agent 的通用 Lark 能力
 
-`src/agent/bridge-system-prompt.ts:66-128` 明确要求 Agent 通过 `lark-cli` 发卡片、做 OAuth，并把 CLI 的运行约束写入 system prompt。三个 adapter 都只给 Agent 子进程注入 lark-channel 环境变量：
+`src/lark-native/server.ts` 在 bridge 进程内提供 MCP endpoint，并直接闭包捕获当前 profile 的 `channel.rawClient`。`src/runtime/run-executor.ts` 为每个 run 创建/销毁 endpoint；三个 adapter 只注入临时 MCP 配置：
 
-- Claude：`src/agent/claude/adapter.ts:58-90`
-- Codex：`src/agent/codex/adapter.ts:91-115`
-- OMP：`src/agent/omp/adapter.ts:71-85`
-- 环境构造：`src/agent/lark-channel-env.ts:11-30`
-
-因此正常路径是：
+- Claude：临时 `--mcp-config`
+- Codex：临时 server 配置 + bearer 环境变量
+- OMP：bridge-owned profile `mcp.json` overlay，run 结束后恢复
 
 ```text
 bridge Node process
-  -> coding-agent process
-     -> shell/tool call
-        -> lark-cli Go process
-           -> Lark OpenAPI
+  ├─ LarkChannel.rawClient
+  └─ 127.0.0.1 Streamable HTTP MCP
+       ↑ bearer token bound to one run
+       └─ coding-agent process
 ```
 
-问题不只是一点进程启动时间，还包括：命令行参数拼接、stdout/stderr envelope 解析、超时/kill、CLI 版本耦合，以及 OAuth 进程生命周期与 Agent run 生命周期绑定。
+模型看到 JSON Schema tool；OpenAPI 请求回到同一个 bridge 进程执行。不存在“Agent shell → lark-cli → OpenAPI”的逐调用子进程。
 
 ### Console 的“我的群”能力
 
-`src/lark-cli/user-im.ts:77-100` 直接 spawn `lark-cli`。同一文件通过 CLI 完成：
-
-- 用户登录状态：`getUserAuthStatus`，`164-181`
-- device flow：`startDeviceLogin` / `completeDeviceLogin`，`192-260`
-- 用户群列表/搜索：`listUserChats` / `searchUserChats`，`297-338`
-- 以用户身份拉 bot 入群：`addBotToChat`，`340-389`
-
-UI 路由位于 `src/ui/api.ts:522-620`。这一组能力必须使用 user access token；bot 身份无法等价地访问“用户自己的群”。
+`src/lark-native/user-im.ts` 原生实现用户登录状态、device flow、token refresh/rotation、群列表/搜索和以用户身份拉 bot 入群。SDK 调用通过 `withUserAccessToken` 使用 UAT；`src/lark-native/keychain.ts` 把 token 存入 macOS Keychain 或 Linux Secret Service。UI 路由复用同一模块，不再有第二套 token store。
 
 ### 已经存在的原生能力
 
@@ -128,7 +120,7 @@ UI 路由位于 `src/ui/api.ts:522-620`。这一组能力必须使用 user acces
 
 | 方案 | 同进程 OpenAPI | 模型结构化 tool | 用户 OAuth/刷新 | 现有风险门禁 | 能力覆盖 | 结论 |
 |---|---:|---:|---:|---:|---:|---|
-| 继续每次调用 `lark-cli` | 否 | 否，模型走 shell | 完整 | 完整 | 最广 | 保留作 fallback，不再扩张 |
+| 继续每次调用 `lark-cli` | 否 | 否，模型走 shell | 完整 | 完整 | 最广 | **已从 runtime 删除** |
 | 直接复用 `channel.rawClient` | 是 | 否 | 不负责 | 需调用方处理 | SDK 全量，但无 tool schema | Bridge 内部调用首选 |
 | bridge 内自建最小 MCP + `rawClient` | 是 | 是 | 初期仅 bot | 可在 bridge 统一实现 | 只覆盖显式 allowlist | **当前推荐** |
 | 常驻 `lark-openapi-mcp` sidecar | 否，常驻进程 | 是 | 自带 OAuth，但与现有 token store 分叉 | 不等价 | 广 | 仅作过渡/验证，不是最终同进程方案 |
@@ -153,26 +145,24 @@ MCP endpoint 必须在 server 端绑定 profile；不要让模型通过参数选
 
 ### User identity
 
-暂时不要重写：
+原生 UAT 已落地，并维持原安全等级：
 
-- 当前 CLI device flow 自动追加 `offline_access`、轮询 token endpoint、处理 `authorization_pending` / `slow_down` / expiry；官方实现见 <https://github.com/larksuite/cli/blob/main/internal/auth/device_flow.go>。
-- token 存在 OS keychain，并按 app id + user open id 隔离；见 <https://github.com/larksuite/cli/blob/main/internal/auth/token_store.go>。
-- refresh 包含锁、generation compare-and-swap、失败时保留/清理策略；见 <https://github.com/larksuite/cli/blob/main/internal/auth/uat_client.go>。
-
-仓库现有 `src/config/keystore.ts:8-20` 明确只是防止备份/git/log 意外泄漏，不防同用户进程主动解密。直接把 refresh token 塞进去会降低当前安全等级，不能为了去掉一个子进程这样做。
-
-真正 native UAT 的升级触发条件应是：已有可靠 OS keychain adapter，且 device flow、refresh locking、token rotation、logout/revoke、scope 增量授权都有行为测试。达到之前继续让 CLI 做 auth broker 更便宜、更安全。
+- device flow 自动申请 `offline_access`，处理 `authorization_pending`、`slow_down` 和 expiry。
+- keychain account 由 app id + user open id 隔离；`user-auth.json` 只保存非敏感元数据。
+- refresh 在 profile/app/user 跨进程锁内串行完成 read-refresh-write，避免并发 token rotation 覆盖。
+- refresh 失败保留仍可重试的 token；终止错误才清理；logout 同时 revoke 并删除 keychain/metadata。
+- user tool 只对 personal profile 的 p2p IM run 开放；team、群聊、topic、评论和会议 run 在 server 端拒绝。
 
 ### 写操作
 
-MCP tool 是直接调用，不自动继承 CLI 的 high-risk confirmation。第一阶段只开放明确的 read-only allowlist。新增写 tool 时，bridge 必须实现自己的确认协议：
+MCP 不继承外部 CLI 的风险门禁，因此 bridge 自己执行确认协议：
 
-1. 首次调用返回 `confirmation_required`，包含规范化 action、关键参数和一次性 nonce。
-2. Agent 把请求展示给用户。
-3. 用户明确同意后，下一轮携带 bridge 签发的确认 token 重试。
-4. token 绑定 profile、tool、参数摘要、会话和短过期时间，且只能消费一次。
+1. 写 tool 规范化操作并向当前会话发送确认卡。
+2. 卡片 callback 携带 bridge 签名 token，绑定 run、scope、chat、actor、action 和短 TTL。
+3. callback dispatcher 校验签名和操作者后，唤醒对应 pending approval。
+4. approval id 只能消费一次；拒绝、超时、run 结束或 server 关闭都不会发送写请求。
 
-现有卡片 `bridge_token` 也是 bridge 本地语义，不属于 OpenAPI/MCP；它应成为自定义 bridge tool，而不是指望通用 Lark MCP 自动生成。
+Agent 生成的 CardKit callback 同样由 bridge 递归签名；回调只会恢复原 run/scope，模型不能伪造跨会话 callback。
 
 ## 推荐架构
 
@@ -193,7 +183,7 @@ MCP tool 是直接调用，不自动继承 CLI 的 high-risk confirmation。第�
         │ native tools  │      │ native tools│      │ native tools   │
         └───────────────┘      └─────────────┘      └────────────────┘
 
-fallback only: coding agent -> lark-cli -> user auth / long tail / guarded writes
+all Lark operations shown above execute in the bridge process
 ```
 
 MCP 是真实 seam：迁移期间确实有 native 与 CLI 两个 adapter；迁移完成后，CLI adapter 可整体删除。不要再加一层只做 pass-through 的通用 `LarkService`。
@@ -213,7 +203,7 @@ MCP 是真实 seam：迁移期间确实有 native 与 CLI 两个 adapter；迁�
 3. endpoint 只绑定 loopback，并要求每次 bridge run 生成的 bearer token。
 4. 先开放 2–3 个实际需要的只读工具，例如 bot 可见群列表、消息列表、读取单个群信息。不要一开始复制 2,500 个 OpenAPI schema。
 5. adapter 注入：Claude 生成临时 `--mcp-config`；Codex 使用 isolated config/`mcp_servers`；OMP 写入其 bridge-owned profile 的 `mcp.json` 或等价 overlay。
-6. 保留现有 lark-cli skill，但把已迁移能力的说明改为优先 native tool；未迁移能力继续 CLI。
+6. 已迁移能力只通过 native tool；未暴露能力明确报错，不做隐式写 fallback。
 
 ### 阶段 C：受控写操作
 
@@ -242,8 +232,6 @@ MCP 是真实 seam：迁移期间确实有 native 与 CLI 两个 adapter；迁�
 
 ## 最终判断
 
-如果目标是**马上减少 subprocess**：先把 bridge 自己的 bot 调用改用 `channel.rawClient`，再做一个最小、只读的 bridge-owned MCP pilot。
+当前实现已经达到目标状态：常用 Lark 能力对模型和 bridge runtime 都是 native；三个 agent adapter 共用一个 MCP seam；bot token、user token、写确认和 callback 签名都由 bridge 统一管理。
 
-如果目标是**马上获得广覆盖结构化 tools**：可评估一个长期运行的 `lark-openapi-mcp` Streamable HTTP sidecar，但要接受它仍是独立进程、用户 token store 分叉、缺少 CLI high-risk gate；它更适合验证 tool UX，不适合直接替代现有安全模型。
-
-如果目标是**彻底删除 lark-cli**：现在不划算。真正的阻塞点不是 HTTP 调用，而是用户 OAuth/keychain/refresh 和写操作安全语义。先迁 bot-only + read-only，等这两块有稳定原生实现再 clean cutover。
+后续只在出现真实产品需求时增加窄工具。继续拒绝全量 schema 复制、通用 pass-through `LarkService`、私有 `lark-mcp/dist/*` import，以及任何 native/CLI 间的隐式写 fallback。

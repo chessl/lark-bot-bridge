@@ -1,10 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
+import { saveRootConfig } from '../../../src/config/profile-store';
 import {
   checkMeetingPreflight,
   classifyPreflight,
   MEETING_REQUIRED_EVENTS,
   MEETING_REQUIRED_SCOPES,
-  type PreflightExec,
+  type PreflightClientFactory,
 } from '../../../src/meeting/preflight';
 
 /** The exact error lark-cli returns when the app identity lacks the scope. */
@@ -73,45 +78,74 @@ describe('classifyPreflight', () => {
 });
 
 describe('checkMeetingPreflight', () => {
-  it('runs a read-only bot probe and passes the probe user id through', async () => {
-    const calls: string[][] = [];
-    const exec: PreflightExec = vi.fn(async (args) => {
-      calls.push(args);
-      return { code: 1, stdout: JSON.stringify(SCOPE_ERROR), stderr: '' };
+  let rootDir: string;
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), 'meeting-preflight-'));
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'claude',
+        preferences: {},
+        profiles: {
+          claude: createDefaultProfileConfig({
+            agentKind: 'claude',
+            accounts: { app: { id: 'cli_test', secret: 'app-secret', tenant: 'feishu' } },
+          }),
+        },
+      },
+      join(rootDir, 'config.json'),
+    );
+  });
+
+  afterEach(async () => rm(rootDir, { recursive: true, force: true }));
+
+  it('runs a native read-only bot probe with the target user id', async () => {
+    const request = vi.fn(async () => ({
+      code: 99991672,
+      msg: 'access denied',
+      error: { permission_violations: [{ subject: 'vc:meeting.bot.join:write' }] },
+    }));
+    const createClient: PreflightClientFactory = vi.fn(() => ({ request }));
+
+    const result = await checkMeetingPreflight(
+      { profile: 'claude', rootDir, probeUserId: 'ou_owner' },
+      createClient,
+    );
+
+    expect(request).toHaveBeenCalledWith({
+      method: 'GET',
+      url: '/open-apis/vc/v1/bots/user_active_meeting',
+      params: { user_id: 'ou_owner' },
     });
-
-    const r = await checkMeetingPreflight({ profile: 'claude', probeUserId: 'ou_owner' }, exec);
-
-    expect(calls[0]).toEqual([
-      'vc',
-      '+meeting-list-active',
-      '--as',
-      'bot',
-      '--json',
-      '--user-id',
-      'ou_owner',
-    ]);
-    expect(r.status).toBe('scope-missing');
-    expect(r.consoleUrl).toBe(SCOPE_ERROR.error.console_url);
+    expect(result.status).toBe('scope-missing');
+    expect(result.consoleUrl).toContain('clientID=cli_test');
   });
 
-  it('reports unknown (not a throw) when lark-cli produces no JSON', async () => {
-    const exec: PreflightExec = vi.fn(async () => ({
-      code: 127,
-      stdout: '',
-      stderr: 'lark-cli: command not found',
-    }));
-    const r = await checkMeetingPreflight({ profile: 'claude' }, exec);
-    expect(r.status).toBe('unknown');
-    expect(r.message).toMatch(/command not found/);
+  it('reports unknown when the native request fails without an API envelope', async () => {
+    const createClient: PreflightClientFactory = () => ({
+      request: vi.fn(async () => {
+        throw new Error('network unavailable');
+      }),
+    });
+    const result = await checkMeetingPreflight(
+      { profile: 'claude', rootDir, probeUserId: 'ou_owner' },
+      createClient,
+    );
+    expect(result.status).toBe('unknown');
+    expect(result.message).toContain('network unavailable');
   });
 
-  it('reads the error envelope off stderr too', async () => {
-    const exec: PreflightExec = vi.fn(async () => ({
-      code: 1,
-      stdout: '',
-      stderr: JSON.stringify(SCOPE_ERROR),
-    }));
-    expect((await checkMeetingPreflight({ profile: 'claude' }, exec)).status).toBe('scope-missing');
+  it('classifies a rejected SDK response envelope', async () => {
+    const createClient: PreflightClientFactory = () => ({
+      request: vi.fn(async () => {
+        throw { response: { data: { code: 20017, msg: 'ErrNotInGray' } } };
+      }),
+    });
+    const result = await checkMeetingPreflight(
+      { profile: 'claude', rootDir, probeUserId: 'ou_owner' },
+      createClient,
+    );
+    expect(result.status).toBe('not-in-beta');
   });
 });
