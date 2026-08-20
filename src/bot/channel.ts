@@ -44,7 +44,6 @@ import { attachMeetingAgent, summarizeEndedMeeting } from '../meeting/orchestrat
 import { canUseDm, canUseGroup, requireMentionForChat } from '../policy/access';
 import { createOwnerRefreshController } from '../policy/owner';
 import type { ScopeContext } from '../policy/run-policy';
-import { RunExecutor } from '../runtime/run-executor';
 import type { SessionCatalog } from '../session/catalog';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
@@ -258,9 +257,11 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     callbackAuth,
     profileConfig: () => controls.profileConfig,
   });
-  const executor = new RunExecutor({ agent, pool, activeRuns, nativeTools: nativeServer });
   const scopedRuns = new ScopedRuns({
-    executor,
+    agent,
+    pool,
+    activeRuns,
+    nativeTools: nativeServer,
     ...(sessionCatalog ? { sessionCatalog } : {}),
     workspaces,
     profile: controls.profile,
@@ -336,15 +337,12 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           sessions,
           sessionCatalog,
           workspaces,
-          activeRuns,
           pending,
           msg,
           controls,
           chatModeCache,
           logThreadModeOverride,
-          executor,
           scopedRuns,
-          pool,
         }),
       ).catch((err) => log.fail('intake', err));
     },
@@ -359,10 +357,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           sessions,
           sessionCatalog,
           workspaces,
-          activeRuns,
           agent,
-          processPool: pool,
-          runExecutor: executor,
           scopedRuns,
           controls,
           pending,
@@ -496,7 +491,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   return {
     channel,
     disconnect: async () => {
-      activeRuns.pauseNewRuns('bridge-disconnect');
+      scopedRuns.pauseNewRuns('bridge-disconnect');
       ownerRefresh.stop();
       knownChatsRefresh.stop();
       keepalive.stop();
@@ -508,7 +503,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
       pending.cancelAll();
       const [disconnectResult, stopAllResult, ...flushResults] = await Promise.allSettled([
         channel.disconnect(),
-        activeRuns.stopAll(),
+        scopedRuns.stopAll(),
         nativeServer.close(),
         sessions.flush(),
         sessionCatalog?.flush(),
@@ -596,15 +591,12 @@ interface IntakeDeps {
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
-  activeRuns: ActiveRuns;
   pending: PendingQueue;
   msg: NormalizedMessage;
   controls: Controls;
   chatModeCache: ChatModeCache;
   logThreadModeOverride: LogThreadModeOverride;
-  executor: RunExecutor;
   scopedRuns: ScopedRuns;
-  pool: ProcessPool;
 }
 
 type LogThreadModeOverride = (input: {
@@ -620,15 +612,12 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     sessions,
     sessionCatalog,
     workspaces,
-    activeRuns,
     pending,
     msg,
     controls,
     chatModeCache,
     logThreadModeOverride,
-    executor,
     scopedRuns,
-    pool,
   } = deps;
   const preview = msg.content.length > 80 ? `${msg.content.slice(0, 80)}…` : msg.content;
   // Resolve scope (and underlying chat mode) once at intake — every
@@ -742,7 +731,6 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     sessions,
     workspaces,
     agent,
-    activeRuns,
     sessionCatalog,
     sessionCatalogIdentity: await commandSessionCatalogIdentity({
       msg: emsg,
@@ -752,9 +740,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
       controls,
       access: accessDecision,
     }),
-    runExecutor: executor,
     scopedRuns,
-    processPool: pool,
     controls,
   });
   if (handled) {

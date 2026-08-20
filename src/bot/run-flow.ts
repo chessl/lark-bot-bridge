@@ -1,9 +1,12 @@
 import { mkdir } from 'node:fs/promises';
 import { capabilityForProfile, type AgentCapability } from '../agent/capability';
 import { resolveModelArg } from '../agent/models';
-import type { AgentEvent } from '../agent/types';
+import type { NativeToolProvider } from '../agent/native-tools';
+import type { AgentAdapter, AgentEvent } from '../agent/types';
 import type { ProfileConfig } from '../config/profile-schema';
 import { log } from '../core/logger';
+import type { ActiveRuns } from './active-runs';
+import type { ProcessPool } from './process-pool';
 import type { AccessDecision } from '../policy/access';
 import {
   type AgentAttachment,
@@ -17,29 +20,39 @@ import {
   type WorkingDirectoryRejectReason,
 } from '../policy/workspace';
 import { RunRejected, type RunRejectedCode } from '../runtime/errors';
-import type { RunExecution, RunExecutor } from '../runtime/run-executor';
+import { RunExecutor, type RunExecution } from '../runtime/run-executor';
 import type { SessionCatalog } from '../session/catalog';
 import type { WorkspaceStore } from '../workspace/store';
 
 export interface ScopedRunsDeps {
-  executor: RunExecutor;
+  agent: AgentAdapter;
+  pool: ProcessPool;
+  activeRuns: ActiveRuns;
+  nativeTools?: NativeToolProvider;
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
   profile: string;
   profileConfig: () => ProfileConfig;
   stopGraceMs?: () => number | undefined;
   now?: () => number;
+  createRunId?: () => string;
+  postDoneExitGraceMs?: number;
 }
 
 export interface StartScopedRunInput {
   scopeId: string;
-  sessionScopeId?: string;
+  workspaceScopeId?: string;
+  sessionScopeId?: string | null;
   scope: ScopeContext;
   prompt: string;
   attachments: AgentAttachment[];
   access: AccessDecision;
   nowait?: boolean;
   managedFallbackCwd?: string;
+  observability?: {
+    source: string;
+    stage: string;
+  };
   ttlMs?: number;
 }
 
@@ -50,6 +63,10 @@ export interface ScopedRunMetadata {
   policyFingerprint: string;
   expiresAt: number;
   resumeFrom?: string;
+  runtimeAccess: {
+    label: 'access' | 'permission' | 'sandbox';
+    value: string;
+  };
 }
 
 export interface ScopedRun {
@@ -65,6 +82,21 @@ export type RunFlowRejectCode =
   | RunPolicyReject['rejectReason']['code']
   | RunRejectedCode;
 
+export interface ScopedRunPreparedMetadata {
+  cwdRealpath: string;
+  runtimeAccess: ScopedRunMetadata['runtimeAccess'];
+}
+
+export class ScopedRunStartFailed extends Error {
+  constructor(
+    readonly metadata: ScopedRunPreparedMetadata,
+    override readonly cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'ScopedRunStartFailed';
+  }
+}
+
 export type StartScopedRunResult =
   | { ok: true; run: ScopedRun }
   | {
@@ -73,13 +105,22 @@ export type StartScopedRunResult =
         code: RunFlowRejectCode;
         userVisible: string;
       };
+      cwdRealpath?: string;
+      runtimeAccess?: ScopedRunMetadata['runtimeAccess'];
     };
+
+export interface ScopedRunsSnapshot {
+  activeScopes: string[];
+  queue: { active: number; waiting: number; cap: number };
+}
 
 export class ScopedRuns {
   private readonly executor: RunExecutor;
   private readonly sessionCatalog: SessionCatalog | undefined;
   private readonly workspaces: WorkspaceStore;
   private readonly profile: string;
+  private readonly activeRuns: ActiveRuns;
+  private readonly pool: ProcessPool;
   private readonly profileConfig: () => ProfileConfig;
   private readonly stopGraceMs: (() => number | undefined) | undefined;
   private readonly now: () => number;
@@ -87,20 +128,34 @@ export class ScopedRuns {
   private readonly activeSessionScopes = new Map<string, number>();
 
   constructor(deps: ScopedRunsDeps) {
-    this.executor = deps.executor;
+    this.now = deps.now ?? Date.now;
+    this.executor = new RunExecutor({
+      agent: deps.agent,
+      pool: deps.pool,
+      activeRuns: deps.activeRuns,
+      ...(deps.nativeTools ? { nativeTools: deps.nativeTools } : {}),
+      ...(deps.createRunId ? { createRunId: deps.createRunId } : {}),
+      ...(deps.postDoneExitGraceMs !== undefined
+        ? { postDoneExitGraceMs: deps.postDoneExitGraceMs }
+        : {}),
+      now: this.now,
+    });
+    this.activeRuns = deps.activeRuns;
+    this.pool = deps.pool;
     this.sessionCatalog = deps.sessionCatalog;
     this.workspaces = deps.workspaces;
     this.profile = deps.profile;
     this.profileConfig = deps.profileConfig;
     this.stopGraceMs = deps.stopGraceMs;
-    this.now = deps.now ?? Date.now;
   }
 
   async start(input: StartScopedRunInput): Promise<StartScopedRunResult> {
     const profileConfig = this.profileConfig();
     const capability = capabilityForProfile(profileConfig);
-    const sessionScopeId = input.sessionScopeId ?? input.scopeId;
-    const configuredCwd = this.workspaces.cwdFor(sessionScopeId);
+    const sessionScopeId =
+      input.sessionScopeId === null ? undefined : (input.sessionScopeId ?? input.scopeId);
+    const workspaceScopeId = input.workspaceScopeId ?? sessionScopeId ?? input.scopeId;
+    const configuredCwd = this.workspaces.cwdFor(workspaceScopeId);
     const workspace = input.managedFallbackCwd
       ? await resolveScopedWorkingDirectory(
           configuredCwd,
@@ -133,17 +188,26 @@ export class ScopedRuns {
       inheritCodexHome: profileConfig.codex?.inheritCodexHome,
       ...(input.ttlMs !== undefined ? { ttlMs: input.ttlMs } : {}),
     });
-    if (!policy.ok) return policy;
+    if (!policy.ok) return { ...policy, cwdRealpath: workspace.cwdRealpath };
 
-    const sessionScopeRun = this.reserveSessionScope(sessionScopeId);
-    const catalogEntry = sessionScopeRun.wasActive
-      ? undefined
-      : this.sessionCatalog?.activeFor({
-          scopeId: sessionScopeId,
-          agentId: capability.agentId,
-          cwdRealpath: workspace.cwdRealpath,
-          policyFingerprint: policy.policyFingerprint,
-        });
+    const runtimeAccess: ScopedRunMetadata['runtimeAccess'] =
+      profileConfig.agentKind === 'claude'
+        ? { label: 'permission', value: policy.permissionMode }
+        : profileConfig.agentKind === 'omp'
+          ? { label: 'access', value: policy.permissionMode }
+          : { label: 'sandbox', value: policy.sandbox };
+    const sessionScopeRun = sessionScopeId
+      ? this.reserveSessionScope(sessionScopeId)
+      : { wasActive: false, release() {} };
+    const catalogEntry =
+      sessionScopeId && !sessionScopeRun.wasActive
+        ? this.sessionCatalog?.activeFor({
+            scopeId: sessionScopeId,
+            agentId: capability.agentId,
+            cwdRealpath: workspace.cwdRealpath,
+            policyFingerprint: policy.policyFingerprint,
+          })
+        : undefined;
     const threadId =
       catalogEntry && capability.sessionKind === 'codex-thread'
         ? catalogEntry.threadId
@@ -163,11 +227,15 @@ export class ScopedRuns {
       execution = await this.executor.submit({
         scopeId: input.scopeId,
         policy,
-        scope: input.scope,
-        allowUserIdentity:
-          profileConfig.mode === 'personal' &&
-          input.scope.source === 'im' &&
-          input.scope.chatType === 'p2p',
+        ...(sessionScopeId
+          ? {
+              scope: input.scope,
+              allowUserIdentity:
+                profileConfig.mode === 'personal' &&
+                input.scope.source === 'im' &&
+                input.scope.chatType === 'p2p',
+            }
+          : {}),
         sessionId,
         threadId,
         model: requestedModel,
@@ -186,13 +254,18 @@ export class ScopedRuns {
         observability: {
           profile: this.profile,
           agent: capability.agentId,
-          source: input.scope.source,
-          stage: 'submit',
+          source: input.observability?.source ?? input.scope.source,
+          stage: input.observability?.stage ?? 'submit',
         },
       });
     } catch (err) {
       sessionScopeRun.release();
-      if (!(err instanceof RunRejected)) throw err;
+      if (!(err instanceof RunRejected)) {
+        throw new ScopedRunStartFailed(
+          { cwdRealpath: workspace.cwdRealpath, runtimeAccess },
+          err,
+        );
+      }
       return {
         ok: false,
         rejectReason: {
@@ -204,6 +277,8 @@ export class ScopedRuns {
                 ? '当前会话已有运行在执行，请稍后再试或先停止当前运行。'
                 : '当前无法发起运行，请稍后重试。',
         },
+        cwdRealpath: workspace.cwdRealpath,
+        runtimeAccess,
       };
     }
 
@@ -213,6 +288,7 @@ export class ScopedRuns {
       cwdRealpath: workspace.cwdRealpath,
       policyFingerprint: policy.policyFingerprint,
       expiresAt: policy.expiresAt,
+      runtimeAccess,
       ...(resumeFrom ? { resumeFrom } : {}),
     };
     let stopPromise: Promise<void> | undefined;
@@ -239,7 +315,7 @@ export class ScopedRuns {
         cleanup,
       ),
       stop,
-      wasInterrupted: () => execution.handle.interrupted,
+      wasInterrupted: execution.wasInterrupted,
     };
     this.active.set(input.scopeId, run);
     return { ok: true, run };
@@ -266,9 +342,28 @@ export class ScopedRuns {
       : undefined;
   }
 
+  snapshot(): ScopedRunsSnapshot {
+    return {
+      activeScopes: this.activeRuns.scopes(),
+      queue: this.pool.snapshot(),
+    };
+  }
+
+  pauseNewRuns(reason: string): () => void {
+    return this.activeRuns.pauseNewRuns(reason);
+  }
+
+  waitForAll(timeoutMs?: number): Promise<void> {
+    return this.activeRuns.waitForAll(timeoutMs);
+  }
+
+  async stopAll(): Promise<void> {
+    await Promise.allSettled([...this.active.values()].map((run) => run.stop()));
+  }
+
   private observe(
     execution: RunExecution,
-    scopeId: string,
+    scopeId: string | undefined,
     capability: AgentCapability,
     policy: RunPolicyAllow,
     requestedModel: string | undefined,
@@ -279,24 +374,26 @@ export class ScopedRuns {
       async *[Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
         try {
           for await (const event of execution.events) {
-            recordRunSessionEvent({
-              scopeId,
-              sessionCatalog,
-              capability,
-              policy,
-              event,
-            });
-            if (event.type === 'system' && event.sessionId) {
-              log.info('session', 'set', { sessionId: event.sessionId });
-            }
-            if (event.type === 'system' && event.threadId) {
-              log.info('session', 'set-thread', { threadId: event.threadId });
-            }
-            if (event.type === 'system' && event.model) {
-              log.info('session', 'model', {
-                requested: requestedModel ?? 'default',
-                actual: event.model,
+            if (scopeId) {
+              recordRunSessionEvent({
+                scopeId,
+                sessionCatalog,
+                capability,
+                policy,
+                event,
               });
+              if (event.type === 'system' && event.sessionId) {
+                log.info('session', 'set', { sessionId: event.sessionId });
+              }
+              if (event.type === 'system' && event.threadId) {
+                log.info('session', 'set-thread', { threadId: event.threadId });
+              }
+              if (event.type === 'system' && event.model) {
+                log.info('session', 'model', {
+                  requested: requestedModel ?? 'default',
+                  actual: event.model,
+                });
+              }
             }
             yield event;
           }
@@ -334,7 +431,7 @@ export class ScopedRuns {
   }
 }
 
-export interface RecordRunSessionEventInput {
+interface RecordRunSessionEventInput {
   scopeId: string;
   sessionCatalog?: SessionCatalog;
   capability: AgentCapability;
@@ -342,7 +439,7 @@ export interface RecordRunSessionEventInput {
   event: AgentEvent;
 }
 
-export function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
+function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
   if (input.event.type !== 'system') return;
   if (input.capability.sessionKind !== 'codex-thread' && input.event.sessionId) {
     const cwdRealpath = input.policy.cwdRealpath;

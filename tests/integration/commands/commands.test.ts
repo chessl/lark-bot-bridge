@@ -23,6 +23,7 @@ import { createFakeAgent } from '../../helpers/fake-agent.js';
 import { createFakeChannel, type FakeChannel } from '../../helpers/fake-channel.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
 
+import { createTestScopedRuns } from '../../helpers/scoped-runs.js';
 interface RunOverrides {
   scope?: string;
   senderId?: string;
@@ -307,7 +308,12 @@ async function createHarness(): Promise<Harness> {
       sessions,
       workspaces,
       agent,
-      activeRuns,
+      scopedRuns: createTestScopedRuns({
+        agent,
+        activeRuns,
+        workspaces,
+        profileConfig: () => controls.profileConfig,
+      }),
       controls,
     });
   };

@@ -9,12 +9,12 @@ import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/con
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { ProcessPool } from '../../../src/bot/process-pool';
 import { ScopedRuns } from '../../../src/bot/run-flow';
-import { RunExecutor } from '../../../src/runtime/run-executor';
 import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { createFakeChannel, type FakeChannel } from '../../helpers/fake-channel';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { makeFakeCommentSurface } from '../../helpers/fake-comment-surface';
+import { createTestScopedRuns } from '../../helpers/scoped-runs';
 
 const roots: string[] = [];
 
@@ -105,16 +105,14 @@ describe('unified access gates', () => {
     };
     const agent = new FakeAgentAdapter({ events: [] });
     const activeRuns = new ActiveRuns();
-    const executor = new RunExecutor({
-      agent,
-      pool: new ProcessPool(() => 1),
-      activeRuns,
-      createRunId: () => 'comment-run-1',
-    });
+    const pool = new ProcessPool(() => 1);
     const workspaces = new WorkspaceStore(join(root, 'workspaces.json'));
     const controls = makeControls({ owner: 'ou_owner' });
     const scopedRuns = new ScopedRuns({
-      executor,
+      agent,
+      pool,
+      activeRuns,
+      createRunId: () => 'comment-run-1',
       workspaces,
       profile: 'claude',
       profileConfig: () => controls.profileConfig,
@@ -180,6 +178,7 @@ function commandContext(args: {
   senderId: string;
   content: string;
 }): CommandContext {
+  const agent = new FakeAgentAdapter({ events: [] });
   return {
     channel: args.channel as unknown as CommandContext['channel'],
     msg: message(args.senderId, args.content),
@@ -187,8 +186,12 @@ function commandContext(args: {
     chatMode: 'p2p',
     sessions: args.sessions,
     workspaces: args.workspaces,
-    agent: new FakeAgentAdapter({ events: [] }),
-    activeRuns: new ActiveRuns(),
+    agent,
+    scopedRuns: createTestScopedRuns({
+      agent,
+      workspaces: args.workspaces,
+      profileConfig: () => args.controls.profileConfig,
+    }),
     controls: args.controls,
   };
 }

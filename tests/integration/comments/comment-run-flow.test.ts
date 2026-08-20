@@ -19,7 +19,6 @@ import {
   type ProfileConfig,
 } from '../../../src/config/profile-schema.js';
 import { evaluateRunPolicy } from '../../../src/policy/run-policy.js';
-import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionCatalog } from '../../../src/session/catalog.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
@@ -58,7 +57,7 @@ describe('comment run flow', () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
   });
 
-  it('runs mentioned comments through RunExecutor with document token prompt', async () => {
+  it('runs mentioned comments through ScopedRuns with the document token prompt', async () => {
     const h = await createHarness();
 
     await handleCommentMention(h.deps(event({ commentId: 'comment-1', replyId: 'reply-1' })));
@@ -338,14 +337,12 @@ async function createHarness(
   workspaces.setCwd(docSessionScope('doc-token'), tmp.workspace);
   const profileConfig = profile(tmp.workspace, agentKind);
   const activeRuns = new ActiveRuns();
-  const executor = new RunExecutor({
+  const pool = new ProcessPool(() => 1);
+  const scopedRuns = new ScopedRuns({
     agent,
-    pool: new ProcessPool(() => 1),
+    pool,
     activeRuns,
     createRunId: () => `comment-run-${agent.runOptions.length + 1}`,
-  });
-  const scopedRuns = new ScopedRuns({
-    executor,
     sessionCatalog,
     workspaces,
     profile: 'claude',
@@ -443,14 +440,12 @@ async function createBlockingHarness(options: {
   workspaces.setCwd(docSessionScope('doc-token'), tmp.workspace);
   const profileConfig = profile(tmp.workspace, options.agentKind);
   const activeRuns = new ActiveRuns();
-  const executor = new RunExecutor({
+  const pool = new ProcessPool(() => 2);
+  const scopedRuns = new ScopedRuns({
     agent,
-    pool: new ProcessPool(() => 2),
+    pool,
     activeRuns,
     createRunId: () => `comment-run-${agent.runOptions.length + 1}`,
-  });
-  const scopedRuns = new ScopedRuns({
-    executor,
     sessionCatalog,
     workspaces,
     profile: 'claude',

@@ -8,7 +8,6 @@ import {
   type AgentKind,
   type ProfileConfig,
 } from '../../../src/config/profile-schema.js';
-import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionCatalog } from '../../../src/session/catalog.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
@@ -261,13 +260,10 @@ async function createHarness(agentKind: AgentKind): Promise<ResumeHarness> {
     tmp,
     agent,
     scopedRuns: new ScopedRuns({
-      executor: new RunExecutor({
-        agent,
-        pool: new ProcessPool(() => 10),
-        activeRuns: new ActiveRuns(),
-        createRunId: () => `run-${agent.runOptions.length + 1}`,
-        now: () => 1000,
-      }),
+      agent,
+      pool: new ProcessPool(() => 10),
+      activeRuns: new ActiveRuns(),
+      createRunId: () => `run-${agent.runOptions.length + 1}`,
       sessionCatalog: catalog,
       workspaces,
       profile: agentKind,

@@ -2,15 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute } from 'node:path';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
-import { capabilityForProfile } from '../agent/capability';
 import { DEFAULT_MODEL, normalizeModelSelection, supportedModels } from '../agent/models';
 import type { AgentAdapter } from '../agent/types';
-import type { ActiveRuns } from '../bot/active-runs';
 import { GROUP_MSG_SCOPE, hasGroupMsgScope } from '../bot/app-scope';
 import { createBoundChat, defaultChatName } from '../bot/group';
 import { fetchKnownChats, type KnownChat } from '../bot/lark-info';
-import type { ProcessPool } from '../bot/process-pool';
-import type { ScopedRuns } from '../bot/run-flow';
+import { ScopedRunStartFailed, type ScopedRuns, type StartScopedRunResult } from '../bot/run-flow';
 import { requestScopeGrantLink } from '../bot/wizard';
 import {
   accountCurrentCard,
@@ -42,7 +39,6 @@ import { accessToClaudePermissionMode, accessToCodexSandbox } from '../config/pe
 import type { ProfileAccess, ProfileConfig, ProfileMode } from '../config/profile-schema';
 import type { AppConfig, AppPreferences, MessageReplyMode, TenantBrand } from '../config/schema';
 import {
-  getAgentStopGraceMs,
   getCotMessages,
   getMaxConcurrentRuns,
   getMessageReplyMode,
@@ -62,11 +58,8 @@ import {
   canUseGroup,
   type OwnerRefreshState,
 } from '../policy/access';
-import { evaluateRunPolicy } from '../policy/run-policy';
 import { resolveWorkingDirectory } from '../policy/workspace';
-import { RunRejected } from '../runtime/errors';
 import { isAlive, readRegistry, resolveTarget } from '../runtime/registry';
-import type { RunExecutor } from '../runtime/run-executor';
 import type { SessionCatalog, SessionCatalogIdentity } from '../session/catalog';
 import {
   type CodexThreadHistoryEntry,
@@ -113,8 +106,7 @@ export interface CommandContext {
   /**
    * Session scope string. For p2p / regular group it equals `msg.chatId`;
    * for topic groups it's `${chatId}:${threadId}` (so each topic gets its
-   * own session / cwd / active-run). All handlers should read/write
-   * session / workspace / activeRuns through this — never through
+   * own session / workspace / scopedRuns through this — never through
    * `msg.chatId` directly.
    */
   scope: string;
@@ -126,10 +118,7 @@ export interface CommandContext {
   sessionCatalogIdentity?: SessionCatalogIdentity;
   workspaces: WorkspaceStore;
   agent: AgentAdapter;
-  activeRuns: ActiveRuns;
-  processPool?: ProcessPool;
-  runExecutor?: RunExecutor;
-  scopedRuns?: ScopedRuns;
+  scopedRuns: ScopedRuns;
   controls: Controls;
   codexHistoryProvider?: (
     options: ListCodexThreadHistoryOptions,
@@ -312,8 +301,7 @@ function isAbsoluteOrTilde(p: string): boolean {
 }
 
 function interruptRun(ctx: CommandContext, scope = ctx.scope): boolean {
-  if (ctx.scopedRuns?.interrupt(scope)) return true;
-  return ctx.activeRuns.interrupt(scope);
+  return ctx.scopedRuns.interrupt(scope);
 }
 
 async function handleNew(args: string, ctx: CommandContext): Promise<void> {
@@ -339,7 +327,7 @@ async function handleNewChat(rawName: string, ctx: CommandContext): Promise<void
   const sourceCwd = effectiveWorkspaceCwd(ctx);
   const name = rawName || defaultChatName(ctx.agent.displayName);
 
-  let created;
+  let created: Awaited<ReturnType<typeof createBoundChat>>;
   try {
     created = await createBoundChat({
       channel: ctx.channel,
@@ -719,6 +707,7 @@ async function handleStatus(_args: string, ctx: CommandContext): Promise<void> {
       ? ctx.sessionCatalog.activeFor(ctx.sessionCatalogIdentity)
       : undefined;
   const sessionId = isCodex ? catalogEntry?.threadId : catalogEntry?.sessionId;
+  const runs = ctx.scopedRuns.snapshot();
   const card = statusCard({
     profileName: ctx.controls.profile,
     cwd,
@@ -727,10 +716,10 @@ async function handleStatus(_args: string, ctx: CommandContext): Promise<void> {
     sessionStale: false,
     agentName: ctx.agent.displayName,
     runtimeAccess: runtimeAccessStatus(ctx.controls.profileConfig),
-    activeRun: Boolean(ctx.activeRuns.get(ctx.scope)),
-    activeScopes: ctx.activeRuns.scopes().filter((scope) => !scope.startsWith('comment:')),
-    activeCommentScopes: ctx.activeRuns.scopes().filter((scope) => scope.startsWith('comment:')),
-    queue: ctx.processPool?.snapshot(),
+    activeRun: runs.activeScopes.includes(ctx.scope),
+    activeScopes: runs.activeScopes.filter((scope) => !scope.startsWith('comment:')),
+    activeCommentScopes: runs.activeScopes.filter((scope) => scope.startsWith('comment:')),
+    queue: runs.queue,
     ownerState: formatOwnerState(ctx),
     scope: ctx.scope,
     chatMode: ctx.chatMode,
@@ -946,11 +935,11 @@ async function handleReconnect(args: string, ctx: CommandContext): Promise<void>
   await reply(ctx, wait ? '⏳ 将在当前运行结束后重连…' : '⏳ 正在停止当前运行并重连…');
   let resumeNewRuns: (() => void) | undefined;
   try {
-    resumeNewRuns = ctx.activeRuns.pauseNewRuns('reconnect-in-progress');
+    resumeNewRuns = ctx.scopedRuns.pauseNewRuns('reconnect-in-progress');
     if (wait) {
-      await ctx.activeRuns.waitForAll();
+      await ctx.scopedRuns.waitForAll();
     } else {
-      await ctx.activeRuns.stopAll();
+      await ctx.scopedRuns.stopAll();
     }
     await ctx.controls.restart({ wait });
     log.info('command', 'reconnect-ok');
@@ -995,174 +984,167 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const workspace = await resolveWorkingDirectory(requestedCwd);
-  if (!workspace.ok) {
-    await reply(
-      ctx,
-      buildDoctorReport(ctx, {
-        workspaceCheck: `${workspace.userVisible} 工作目录不可用时只执行 self-check，不启动 agent。`,
-        echoCheck: 'skipped',
-      }),
-    );
-    return;
-  }
-
-  if (!ctx.runExecutor) {
-    await reply(
-      ctx,
-      buildDoctorReport(ctx, {
-        workspaceCheck: `ok (${workspace.cwdRealpath})`,
-        echoCheck: 'run executor unavailable',
-      }),
-    );
-    return;
-  }
-
   const profileKey = ctx.controls.profile;
   if (doctorInFlightProfiles.has(profileKey)) {
     await reply(ctx, 'doctor in-flight: 当前 profile 已有诊断运行中。');
     return;
   }
-  doctorLastByOperator.set(rateKey, now);
-
-  const capability = capabilityForProfile(ctx.controls.profileConfig);
-  const policy = evaluateRunPolicy({
-    scope: {
-      source: 'im',
-      chatId: ctx.msg.chatId,
-      actorId: ctx.msg.senderId,
-      ...(ctx.msg.threadId ? { threadId: ctx.msg.threadId } : {}),
-    },
-    attachments: [],
-    prompt: DOCTOR_ECHO_PROMPT,
-    requestedCwd,
-    cwdRealpath: workspace.cwdRealpath,
-    access: canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId),
-    capability,
-    profileConfig: ctx.controls.profileConfig,
-    now,
-    ttlMs: 60_000,
-  });
-  if (!policy.ok) {
-    await reply(
-      ctx,
-      buildDoctorReport(ctx, {
-        workspaceCheck: `ok (${workspace.cwdRealpath})`,
-        echoCheck: policy.rejectReason.userVisible,
-      }),
-    );
-    return;
-  }
-  const runtimeAccess = runtimeAccessStatus(ctx.controls.profileConfig);
-  const doctorReport = (echoCheck: string): string =>
-    buildDoctorReport(ctx, {
-      workspaceCheck: `ok (${workspace.cwdRealpath})`,
-      policyCheck:
-        runtimeAccess.label === 'sandbox'
-          ? `ok sandbox=${policy.sandbox}`
-          : `ok ${runtimeAccess.label}=${policy.permissionMode}`,
-      echoCheck,
-    });
-
-  // In group / topic chats other members would see the result card. Ack
-  // in-channel, deliver the actual analysis privately to the operator's
-  // open_id (Lark auto-opens the p2p chat with the bot).
-  const isP2p = ctx.chatMode === 'p2p';
-  if (!isP2p) {
-    await reply(ctx, '🔍 已收到诊断请求，分析结果将私信发给你。');
-  }
-
   doctorInFlightProfiles.add(profileKey);
-  let execution: Awaited<ReturnType<RunExecutor['submit']>>;
+
   try {
-    execution = await ctx.runExecutor.submit({
-      scopeId: `${ctx.scope}:doctor`,
-      policy,
-      nowait: true,
-      stopGraceMs: getAgentStopGraceMs(ctx.controls.cfg),
-      observability: {
-        profile: ctx.controls.profile,
-        agent: capability.agentId,
-        source: 'doctor',
-        stage: 'agent-probe',
-      },
-    });
-  } catch (err) {
-    doctorInFlightProfiles.delete(profileKey);
-    if (err instanceof RunRejected && err.code === 'pool-full') {
-      await reply(ctx, doctorReport('pool-full'));
+    let started: StartScopedRunResult;
+    try {
+      started = await ctx.scopedRuns.start({
+        scopeId: `${ctx.scope}:doctor`,
+        workspaceScopeId: ctx.scope,
+        sessionScopeId: null,
+        scope: {
+          source: 'im',
+          chatId: ctx.msg.chatId,
+          actorId: ctx.msg.senderId,
+          ...(ctx.msg.threadId ? { threadId: ctx.msg.threadId } : {}),
+        },
+        attachments: [],
+        prompt: DOCTOR_ECHO_PROMPT,
+        access: canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId),
+        nowait: true,
+        ttlMs: 60_000,
+        observability: { source: 'doctor', stage: 'agent-probe' },
+      });
+    } catch (err) {
+      log.fail('command', err, { step: 'doctor.submit' });
+      const metadata = err instanceof ScopedRunStartFailed ? err.metadata : undefined;
+      if (metadata) doctorLastByOperator.set(rateKey, now);
+      await reply(
+        ctx,
+        buildDoctorReport(ctx, {
+          workspaceCheck: `ok (${metadata?.cwdRealpath ?? requestedCwd})`,
+          ...(metadata
+            ? {
+                policyCheck: `ok ${metadata.runtimeAccess.label}=${metadata.runtimeAccess.value}`,
+              }
+            : {}),
+          echoCheck: 'failed',
+        }),
+      );
       return;
     }
-    log.fail('command', err, { step: 'doctor.submit' });
-    await reply(ctx, doctorReport('failed'));
-    return;
-  }
 
-  try {
-    if (isP2p) {
-      // Streaming card path — operator is the only viewer in p2p.
-      await ctx.channel.stream(
-        ctx.msg.chatId,
-        {
-          card: {
-            initial: renderCard(withDoctorReport(initialState, doctorReport('pending'))),
-            producer: async (ctrl) => {
-              let state: RunState = initialState;
-              let echoText = '';
-              const echoStatus = (): string => formatDoctorEchoStatus(echoText, state);
-              const flush = (): Promise<void> =>
-                ctrl.update(renderCard(withDoctorReport(state, doctorReport(echoStatus()))));
-              for await (const evt of execution.events) {
-                if (execution.handle.interrupted) break;
-                // /doctor runs are session-less: skip 'system' so we don't
-                // persist a doctor's sessionId over the user's real session.
-                if (evt.type === 'system') continue;
-                if (evt.type === 'usage') {
-                  continue;
-                }
-                if (evt.type === 'text') echoText += evt.delta;
-                if (evt.type === 'final_text') echoText = evt.content;
-                state = reduce(state, evt);
-                await flush();
-                // Don't wait for stdout to close — some claude versions hang
-                // briefly post-result, which would leave the for-await stuck.
-                if (state.terminal !== 'running') break;
+    if (!started.ok) {
+      if (started.cwdRealpath) doctorLastByOperator.set(rateKey, now);
+      const workspaceCheck = started.cwdRealpath
+        ? `ok (${started.cwdRealpath})`
+        : `${started.rejectReason.userVisible} 工作目录不可用时只执行 self-check，不启动 agent。`;
+      const policyRejected =
+        started.rejectReason.code === 'access-denied' ||
+        started.rejectReason.code === 'folder-allowlist-unverified' ||
+        started.rejectReason.code === 'required-attachment-rejected' ||
+        started.rejectReason.code === 'unsupported-agent-access';
+      const echoCheck =
+        started.rejectReason.code === 'pool-full'
+          ? 'pool-full'
+          : policyRejected
+            ? started.rejectReason.userVisible
+            : started.cwdRealpath
+              ? 'failed'
+              : 'skipped';
+      await reply(
+        ctx,
+        buildDoctorReport(ctx, {
+          workspaceCheck,
+          ...(started.runtimeAccess
+            ? {
+                policyCheck: `ok ${started.runtimeAccess.label}=${started.runtimeAccess.value}`,
               }
-              state = execution.handle.interrupted
-                ? markInterrupted(state)
-                : finalizeIfRunning(state);
-              await flush();
+            : {}),
+          echoCheck,
+        }),
+      );
+      return;
+    }
+
+    doctorLastByOperator.set(rateKey, now);
+    const run = started.run;
+    const doctorReport = (echoCheck: string): string =>
+      buildDoctorReport(ctx, {
+        workspaceCheck: `ok (${run.metadata.cwdRealpath})`,
+        policyCheck: `ok ${run.metadata.runtimeAccess.label}=${run.metadata.runtimeAccess.value}`,
+        echoCheck,
+      });
+
+    try {
+      // In group / topic chats other members would see the result card. Ack
+      // in-channel, deliver the actual analysis privately to the operator's
+      // open_id (Lark auto-opens the p2p chat with the bot).
+      const isP2p = ctx.chatMode === 'p2p';
+      if (!isP2p) {
+        await reply(ctx, '🔍 已收到诊断请求，分析结果将私信发给你。');
+      }
+
+      if (isP2p) {
+        // Streaming card path — operator is the only viewer in p2p.
+        await ctx.channel.stream(
+          ctx.msg.chatId,
+          {
+            card: {
+              initial: renderCard(withDoctorReport(initialState, doctorReport('pending'))),
+              producer: async (ctrl) => {
+                let state: RunState = initialState;
+                let echoText = '';
+                const echoStatus = (): string => formatDoctorEchoStatus(echoText, state);
+                const flush = (): Promise<void> =>
+                  ctrl.update(renderCard(withDoctorReport(state, doctorReport(echoStatus()))));
+                for await (const evt of run.events) {
+                  if (run.wasInterrupted()) break;
+                  if (evt.type === 'system' || evt.type === 'usage') continue;
+                  if (evt.type === 'text') echoText += evt.delta;
+                  if (evt.type === 'final_text') echoText = evt.content;
+                  state = reduce(state, evt);
+                  await flush();
+                  // Don't wait for stdout to close — some claude versions hang
+                  // briefly post-result, which would leave the for-await stuck.
+                  if (state.terminal !== 'running') break;
+                }
+                state = run.wasInterrupted() ? markInterrupted(state) : finalizeIfRunning(state);
+                await flush();
+              },
             },
           },
-        },
-        { replyTo: ctx.msg.messageId },
-      );
-    } else {
-      // Group / topic: buffer to completion, then DM the final card to the
-      // operator. No live streaming — the group should see nothing past the
-      // ack reply above.
-      let state: RunState = initialState;
-      let echoText = '';
-      for await (const evt of execution.events) {
-        if (execution.handle.interrupted) break;
-        if (evt.type === 'system') continue;
-        if (evt.type === 'usage') {
-          continue;
+          { replyTo: ctx.msg.messageId },
+        );
+      } else {
+        // Group / topic: buffer to completion, then DM the final card to the
+        // operator. No live streaming — the group should see nothing past the
+        // ack reply above.
+        let state: RunState = initialState;
+        let echoText = '';
+        for await (const evt of run.events) {
+          if (run.wasInterrupted()) break;
+          if (evt.type === 'system' || evt.type === 'usage') continue;
+          if (evt.type === 'text') echoText += evt.delta;
+          if (evt.type === 'final_text') echoText = evt.content;
+          state = reduce(state, evt);
+          if (state.terminal !== 'running') break;
         }
-        if (evt.type === 'text') echoText += evt.delta;
-        if (evt.type === 'final_text') echoText = evt.content;
-        state = reduce(state, evt);
-        if (state.terminal !== 'running') break;
+        state = run.wasInterrupted() ? markInterrupted(state) : finalizeIfRunning(state);
+        // Send a one-shot interactive card by open_id. Lark routes it to the
+        // user's p2p chat with the bot (auto-creates it if needed); other
+        // group members never see this payload.
+        await ctx.channel.send(ctx.msg.senderId, {
+          card: renderCard(
+            withDoctorReport(state, doctorReport(formatDoctorEchoStatus(echoText, state))),
+          ),
+        });
       }
-      state = execution.handle.interrupted ? markInterrupted(state) : finalizeIfRunning(state);
-      // Send a one-shot interactive card by open_id. Lark routes it to the
-      // user's p2p chat with the bot (auto-creates it if needed); other
-      // group members never see this payload.
-      await ctx.channel.send(ctx.msg.senderId, {
-        card: renderCard(
-          withDoctorReport(state, doctorReport(formatDoctorEchoStatus(echoText, state))),
-        ),
-      });
+    } finally {
+      const active = ctx.scopedRuns.activeMetadata(run.metadata.scopeId);
+      if (active?.runId === run.metadata.runId) {
+        await run.stop().catch((err) =>
+          log.warn('command', 'doctor-stop-failed', {
+            err: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
     }
   } catch (err) {
     log.fail('command', err, { step: 'doctor' });
@@ -1179,10 +1161,8 @@ function buildDoctorReport(
     echoCheck?: string;
   } = {},
 ): string {
-  const queue = ctx.processPool?.snapshot();
-  const queueLine = queue
-    ? `${queue.active}/${queue.cap} active, ${queue.waiting} waiting`
-    : 'unknown';
+  const queue = ctx.scopedRuns.snapshot().queue;
+  const queueLine = `${queue.active}/${queue.cap} active, ${queue.waiting} waiting`;
   const cwd = effectiveWorkspaceCwd(ctx);
   const runtimeAccess = runtimeAccessStatus(ctx.controls.profileConfig);
   const access =
@@ -1199,7 +1179,7 @@ function buildDoctorReport(
     `access: ${access.ok ? 'ok' : 'denied'} (${access.reason})`,
     `owner API: ${formatOwnerState(ctx)}`,
     `queue: ${queueLine}`,
-    `run executor: ${ctx.runExecutor ? 'available' : 'unavailable'}`,
+    'run executor: available',
     ...(opts.workspaceCheck ? [`workspace check: ${opts.workspaceCheck}`] : []),
     ...(opts.policyCheck ? [`policy check: ${opts.policyCheck}`] : []),
     ...(opts.echoCheck ? [`agent echo check: ${opts.echoCheck}`] : []),
@@ -1841,7 +1821,7 @@ async function promptGroupMsgScopeIfMissing(ctx: CommandContext): Promise<void> 
   if (has !== false) return;
   log.info('command', 'group-msg-scope-missing', { appId });
 
-  let link;
+  let link: Awaited<ReturnType<typeof requestScopeGrantLink>>;
   try {
     link = await requestScopeGrantLink({ appId, tenantScopes: [GROUP_MSG_SCOPE] });
   } catch (err) {
@@ -1850,7 +1830,7 @@ async function promptGroupMsgScopeIfMissing(ctx: CommandContext): Promise<void> 
   }
 
   const expireMins = Math.max(1, Math.round(link.expireIn / 60));
-  let sent;
+  let sent: Awaited<ReturnType<typeof sendManagedCard>>;
   try {
     sent = await sendManagedCard(
       ctx.channel,
@@ -1998,7 +1978,7 @@ async function handleMeeting(args: string, ctx: CommandContext): Promise<void> {
         await reply(ctx, picked.message);
         return;
       }
-      const stopped = ctx.scopedRuns?.interrupt(meetingScopeId(picked.session.meetingId));
+      const stopped = ctx.scopedRuns.interrupt(meetingScopeId(picked.session.meetingId));
       await reply(ctx, stopped ? '✅ 已中断该会议的当前任务。' : '该会议当前没有正在执行的任务。');
       return;
     }
@@ -2018,10 +1998,6 @@ async function handleMeeting(args: string, ctx: CommandContext): Promise<void> {
           : rest;
       if (!question) {
         await reply(ctx, '用法：`/meeting ask <问题>`');
-        return;
-      }
-      if (!ctx.scopedRuns) {
-        await reply(ctx, '当前上下文无法执行 agent（缺少 scoped run）。');
         return;
       }
       await reply(ctx, sub === 'notes' ? '正在总结会议…' : '正在思考…');

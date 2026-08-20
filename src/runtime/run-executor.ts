@@ -37,12 +37,10 @@ export interface SubmitRunInput {
 }
 
 export interface RunExecution {
-  runId: string;
-  scopeId: string;
-  run: AgentRun;
-  handle: RunHandle;
-  events: AsyncIterable<AgentEvent>;
+  readonly runId: string;
+  readonly events: AsyncIterable<AgentEvent>;
   stop(): Promise<void>;
+  wasInterrupted(): boolean;
 }
 
 const DEFAULT_POST_DONE_EXIT_GRACE_MS = 2000;
@@ -203,9 +201,6 @@ export class RunExecutor {
 
     return {
       runId,
-      scopeId: input.scopeId,
-      run,
-      handle,
       events,
       stop: async () => {
         handle.interrupted = true;
@@ -216,6 +211,7 @@ export class RunExecutor {
           await cleanup(false);
         }
       },
+      wasInterrupted: () => handle.interrupted,
     };
   }
 }

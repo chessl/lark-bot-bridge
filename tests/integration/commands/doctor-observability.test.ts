@@ -4,10 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizedMessage } from '@larksuite/channel';
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { ProcessPool } from '../../../src/bot/process-pool';
+import { ScopedRuns } from '../../../src/bot/run-flow';
 import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { closeLogger, configureLogger, flushLogger } from '../../../src/core/logger';
-import { RunExecutor } from '../../../src/runtime/run-executor';
 import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
@@ -89,10 +89,13 @@ async function createHarness(): Promise<{
     cfg: profileConfig,
     processId: 'proc-1',
   } satisfies Controls;
-  const executor = new RunExecutor({
+  const scopedRuns = new ScopedRuns({
     agent,
     pool,
     activeRuns,
+    workspaces,
+    profile: 'claude',
+    profileConfig: () => profileConfig,
     createRunId: () => 'doctor-run-1',
     now: () => 1_700_000_000_000,
     postDoneExitGraceMs: 1,
@@ -110,9 +113,7 @@ async function createHarness(): Promise<{
         sessions,
         workspaces,
         agent,
-        activeRuns,
-        processPool: pool,
-        runExecutor: executor,
+        scopedRuns,
         controls,
       }),
   };

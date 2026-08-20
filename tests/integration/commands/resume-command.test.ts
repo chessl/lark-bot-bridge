@@ -306,7 +306,14 @@ async function createHarness(
       sessionCatalogIdentity: runOptions.withCatalogIdentity === false ? undefined : identity,
       workspaces,
       agent,
-      activeRuns,
+      scopedRuns: {
+        activeMetadata: () => undefined,
+        interrupt: (scope: string) => activeRuns.interrupt(scope),
+        snapshot: () => ({
+          activeScopes: activeRuns.scopes(),
+          queue: { active: 0, waiting: 0, cap: 1 },
+        }),
+      } as never,
       controls,
       claudeHistoryProvider: async () => claudeHistory,
       codexHistoryProvider: async () => codexHistory,
@@ -319,7 +326,6 @@ async function createHarness(
       sessions,
       sessionCatalog: catalog,
       workspaces,
-      activeRuns,
       scopedRuns: {
         activeMetadata: () => undefined,
         interrupt: (scope: string) => activeRuns.interrupt(scope),

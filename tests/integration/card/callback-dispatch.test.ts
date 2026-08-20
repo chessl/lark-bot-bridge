@@ -207,7 +207,6 @@ async function createHarness(
         evt: cardEvent(value, formValue),
         sessions,
         workspaces,
-        activeRuns,
         scopedRuns: {
           activeMetadata: (scope: string) =>
             activeRuns.get(scope)

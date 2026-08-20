@@ -2,13 +2,14 @@ import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { NativeToolProvider, NativeToolRunContext } from '../../../src/agent/native-tools';
-import type { AgentEvent } from '../../../src/agent/types';
+import type { AgentEvent, AgentRun, AgentRunOptions } from '../../../src/agent/types';
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { ProcessPool } from '../../../src/bot/process-pool';
-import { ScopedRuns } from '../../../src/bot/run-flow';
+import { type ScopedRunStartFailed, ScopedRuns } from '../../../src/bot/run-flow';
 import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema';
+import { withResolvers } from '../../../src/platform/promise';
 import { SpawnFailed } from '../../../src/runtime/errors';
-import { RunExecutor } from '../../../src/runtime/run-executor';
+import { SessionCatalog } from '../../../src/session/catalog';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter, type FakeAgentEvents } from '../../helpers/fake-agent';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
@@ -40,7 +41,7 @@ describe('ScopedRuns', () => {
     expect(h.agent.runOptions).toEqual([]);
   });
 
-  it('submits the selected working directory through RunExecutor', async () => {
+  it('submits the selected working directory through the scoped seam', async () => {
     const h = await createHarness();
     const workspaceRealpath = await realpath(h.tmp.workspace);
     h.workspaces.setCwd('chat-1', h.tmp.workspace);
@@ -137,13 +138,56 @@ describe('ScopedRuns', () => {
     expect(opened[0]?.allowUserIdentity).toBe(true);
   });
 
-  it('rejects duplicate scopes, reconnect pauses, and immediate capacity without leaking', async () => {
+  it('keeps sessionless diagnostics from resuming, recording, or opening native tools', async () => {
+    const opened: NativeToolRunContext[] = [];
     const h = await createHarness({
       defaultWorkspace: true,
       events: [
-        [{ type: 'text', delta: 'first' }],
-        [{ type: 'done', terminationReason: 'normal' }],
+        { type: 'system', sessionId: 'doctor-session' },
+        { type: 'done', terminationReason: 'normal' },
       ],
+      nativeTools: {
+        openRun(context) {
+          opened.push(context);
+          return { name: 'lark_bridge', url: 'http://127.0.0.1:12345/mcp', bearerToken: 'x' };
+        },
+        closeRun: async () => {},
+      },
+    });
+    h.sessionCatalog.upsertActive({
+      scopeId: 'chat-1',
+      agentId: 'claude',
+      cwdRealpath: await realpath(h.tmp.workspace),
+      policyFingerprint: 'user-policy',
+      sessionId: 'user-session',
+      now: 1,
+    });
+    const before = h.sessionCatalog.entries();
+
+    const result = await h.scopedRuns.start({
+      scopeId: 'chat-1:doctor',
+      workspaceScopeId: 'chat-1',
+      sessionScopeId: null,
+      scope: { source: 'im', chatId: 'chat-1', actorId: 'ou_user' },
+      prompt: 'diagnose',
+      attachments: [],
+      access: { ok: true, reason: 'allowed-user' },
+      nowait: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected diagnostic run');
+    await collect(result.run.events);
+
+    expect(h.agent.runOptions[0]?.sessionId).toBeUndefined();
+    expect(h.agent.runOptions[0]?.threadId).toBeUndefined();
+    expect(h.sessionCatalog.entries()).toEqual(before);
+    expect(opened).toEqual([]);
+  });
+
+  it('rejects duplicate scopes, reconnect pauses, and immediate capacity without leaking', async () => {
+    const h = await createHarness({
+      defaultWorkspace: true,
+      events: [[{ type: 'text', delta: 'first' }], [{ type: 'done', terminationReason: 'normal' }]],
       poolCap: 1,
     });
     const first = await start(h, 'scope-1');
@@ -154,16 +198,16 @@ describe('ScopedRuns', () => {
       ok: false,
       rejectReason: { code: 'run-already-active' },
     });
-    await expect(start(h, 'scope-2', { ok: true, reason: 'allowed-user' }, true)).resolves.toMatchObject(
-      {
-        ok: false,
-        rejectReason: { code: 'pool-full' },
-      },
-    );
+    await expect(
+      start(h, 'scope-2', { ok: true, reason: 'allowed-user' }, true),
+    ).resolves.toMatchObject({
+      ok: false,
+      rejectReason: { code: 'pool-full' },
+    });
     expect(h.pool.snapshot()).toMatchObject({ active: 1, waiting: 0 });
 
     await first.run.stop();
-    const resume = h.activeRuns.pauseNewRuns('reconnect');
+    const resume = h.scopedRuns.pauseNewRuns('reconnect');
     try {
       await expect(start(h, 'scope-3')).resolves.toMatchObject({
         ok: false,
@@ -173,6 +217,59 @@ describe('ScopedRuns', () => {
       resume();
     }
     expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
+  });
+  it('rejects a queued run when reconnect draining starts before admission', async () => {
+    const h = await createHarness({
+      defaultWorkspace: true,
+      events: [
+        [{ type: 'done', terminationReason: 'normal' }],
+        [{ type: 'done', terminationReason: 'normal' }],
+      ],
+      poolCap: 1,
+    });
+    const first = await start(h, 'scope-1');
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error('expected first run');
+
+    const second = start(h, 'scope-2');
+    await expect.poll(() => h.pool.snapshot()).toMatchObject({ active: 1, waiting: 1 });
+
+    const resume = h.scopedRuns.pauseNewRuns('reconnect');
+    try {
+      await collect(first.run.events);
+      await expect(second).resolves.toMatchObject({
+        ok: false,
+        rejectReason: { code: 'reconnect-in-progress' },
+      });
+      expect(h.agent.runs).toHaveLength(1);
+      expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
+    } finally {
+      resume();
+    }
+  });
+
+  it('stops a run when reconnect draining starts during adapter startup', async () => {
+    const agent = new DelayedStartAgent({
+      events: [{ type: 'done', terminationReason: 'normal' }],
+    });
+    const h = await createHarness({ defaultWorkspace: true, agent });
+
+    const starting = start(h, 'scope-1');
+    await agent.startCalled;
+
+    const resume = h.scopedRuns.pauseNewRuns('reconnect');
+    try {
+      agent.releaseStart();
+      await expect(starting).resolves.toMatchObject({
+        ok: false,
+        rejectReason: { code: 'reconnect-in-progress' },
+      });
+      expect(agent.runs[0]?.stopped).toBe(true);
+      expect(h.activeRuns.get('scope-1')).toBeUndefined();
+      expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
+    } finally {
+      resume();
+    }
   });
 
   it('releases completion, error, and stream closure promptly at the scoped seam', async () => {
@@ -205,6 +302,24 @@ describe('ScopedRuns', () => {
     }
   });
 
+  it('stops the process when it remains alive after terminal completion', async () => {
+    const h = await createHarness({
+      defaultWorkspace: true,
+      events: [{ type: 'done', terminationReason: 'normal' }],
+      waitForExit: false,
+    });
+    const result = await start(h, 'scope-terminal');
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected terminal run');
+
+    await collect(result.run.events);
+
+    expect(h.agent.runs[0]?.waitForExitCalls).toBe(1);
+    expect(h.agent.runs[0]?.stopped).toBe(true);
+    expect(h.activeRuns.get('scope-terminal')).toBeUndefined();
+    expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
+  });
+
   it('makes interruption idempotent and closes native tools once', async () => {
     const closed: string[] = [];
     const h = await createHarness({
@@ -233,7 +348,10 @@ describe('ScopedRuns', () => {
       nativeTools: nativeTools(closed),
     });
 
-    await expect(start(h, 'scope-failed')).rejects.toBeInstanceOf(SpawnFailed);
+    await expect(start(h, 'scope-failed')).rejects.toMatchObject({
+      name: 'ScopedRunStartFailed',
+      cause: expect.any(SpawnFailed),
+    } satisfies Partial<ScopedRunStartFailed>);
 
     expect(h.activeRuns.get('scope-failed')).toBeUndefined();
     expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
@@ -249,12 +367,14 @@ interface ScopedRunHarness {
   profileConfig: ProfileConfig;
   activeRuns: ActiveRuns;
   pool: ProcessPool;
+  sessionCatalog: SessionCatalog;
 }
 
 interface HarnessOptions {
   defaultWorkspace?: boolean;
   personal?: boolean;
   events?: FakeAgentEvents;
+  waitForExit?: boolean | readonly boolean[];
   poolCap?: number;
   agent?: FakeAgentAdapter;
   nativeTools?: NativeToolProvider;
@@ -266,18 +386,11 @@ async function createHarness(options: HarnessOptions = {}): Promise<ScopedRunHar
     options.agent ??
     new FakeAgentAdapter({
       events: options.events ?? [{ type: 'done', terminationReason: 'normal' }],
+      waitForExit: options.waitForExit,
     });
   const pool = new ProcessPool(() => options.poolCap ?? 1);
   const activeRuns = new ActiveRuns();
   let nextRun = 1;
-  const executor = new RunExecutor({
-    agent,
-    pool,
-    activeRuns,
-    createRunId: () => `run-${nextRun++}`,
-    now: () => 1000,
-    nativeTools: options.nativeTools,
-  });
   const profileConfig = createDefaultProfileConfig({
     agentKind: 'claude',
     accounts: {
@@ -297,8 +410,9 @@ async function createHarness(options: HarnessOptions = {}): Promise<ScopedRunHar
       ...(options.defaultWorkspace ? { default: tmp.workspace } : {}),
     },
   };
+  const sessionCatalog = new SessionCatalog(join(tmp.profile, 'session-catalog.json'));
   cleanups.push(async () => {
-    await workspaces.flush();
+    await Promise.all([workspaces.flush(), sessionCatalog.flush()]);
     await tmp.cleanup();
   });
   return {
@@ -306,8 +420,14 @@ async function createHarness(options: HarnessOptions = {}): Promise<ScopedRunHar
     agent,
     activeRuns,
     pool,
+    sessionCatalog,
     scopedRuns: new ScopedRuns({
-      executor,
+      agent,
+      pool,
+      activeRuns,
+      createRunId: () => `run-${nextRun++}`,
+      nativeTools: options.nativeTools,
+      sessionCatalog,
       workspaces,
       profile: 'claude',
       profileConfig: () => finalConfig,
@@ -359,5 +479,21 @@ function nativeTools(closed: string[]): NativeToolProvider {
 class ThrowingAgent extends FakeAgentAdapter {
   override async start(): Promise<never> {
     throw new Error('startup failed');
+  }
+}
+
+class DelayedStartAgent extends FakeAgentAdapter {
+  private readonly called = withResolvers<void>();
+  private readonly release = withResolvers<void>();
+  readonly startCalled = this.called.promise;
+
+  override async start(opts: AgentRunOptions): Promise<AgentRun> {
+    this.called.resolve();
+    await this.release.promise;
+    return super.start(opts);
+  }
+
+  releaseStart(): void {
+    this.release.resolve();
   }
 }

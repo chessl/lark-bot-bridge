@@ -5,7 +5,6 @@ import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
 import { ScopedRuns } from '../../../src/bot/run-flow.js';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
-import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
@@ -68,13 +67,6 @@ async function createHarness(): Promise<{
     displayName: 'Codex',
     events: [{ type: 'done', terminationReason: 'normal' }],
   });
-  const executor = new RunExecutor({
-    agent,
-    pool: new ProcessPool(() => 1),
-    activeRuns: new ActiveRuns(),
-    createRunId: () => 'run-1',
-    now: () => 1000,
-  });
   const profileConfig = createDefaultProfileConfig({
     agentKind: 'codex',
     accounts: {
@@ -99,7 +91,10 @@ async function createHarness(): Promise<{
     tmp,
     agent,
     scopedRuns: new ScopedRuns({
-      executor,
+      agent,
+      pool: new ProcessPool(() => 1),
+      activeRuns: new ActiveRuns(),
+      createRunId: () => 'run-1',
       workspaces,
       profile: 'codex',
       profileConfig: () => profileConfig,

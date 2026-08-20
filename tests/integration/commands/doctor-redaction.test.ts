@@ -13,6 +13,7 @@ import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
 import { createFakeChannel, type FakeChannel } from '../../helpers/fake-channel.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
+import { createTestScopedRuns } from '../../helpers/scoped-runs.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -95,7 +96,12 @@ async function createHarness(): Promise<{
         sessions,
         workspaces,
         agent,
-        activeRuns,
+        scopedRuns: createTestScopedRuns({
+          agent,
+          activeRuns,
+          workspaces,
+          profileConfig: () => controls.profileConfig,
+        }),
         controls,
       }),
   };

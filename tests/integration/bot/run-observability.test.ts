@@ -7,7 +7,6 @@ import { ProcessPool } from '../../../src/bot/process-pool';
 import { ScopedRuns } from '../../../src/bot/run-flow';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { closeLogger, configureLogger, flushLogger } from '../../../src/core/logger';
-import { RunExecutor } from '../../../src/runtime/run-executor';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
@@ -68,14 +67,6 @@ async function createHarness(): Promise<{
   const agent = new FakeAgentAdapter({
     events: [{ type: 'done', terminationReason: 'normal' }],
   });
-  const executor = new RunExecutor({
-    agent,
-    pool: new ProcessPool(() => 1),
-    activeRuns: new ActiveRuns(),
-    createRunId: () => 'run-1',
-    now: () => 1_700_000_000_000,
-    postDoneExitGraceMs: 1,
-  });
   const base = createDefaultProfileConfig({
     agentKind: 'claude',
     accounts: {
@@ -103,7 +94,11 @@ async function createHarness(): Promise<{
     logsDir,
     agent,
     scopedRuns: new ScopedRuns({
-      executor,
+      agent,
+      pool: new ProcessPool(() => 1),
+      activeRuns: new ActiveRuns(),
+      createRunId: () => 'run-1',
+      postDoneExitGraceMs: 1,
       workspaces,
       profile: 'claude',
       profileConfig: () => profileConfig,

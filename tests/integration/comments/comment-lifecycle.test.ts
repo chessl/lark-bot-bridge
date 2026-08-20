@@ -16,7 +16,6 @@ import {
   createDefaultProfileConfig,
   type ProfileConfig,
 } from '../../../src/config/profile-schema.js';
-import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { makeFakeCommentSurface } from '../../helpers/fake-comment-surface.js';
@@ -260,14 +259,12 @@ async function createHarness(options: { autoCompleteAgent?: boolean } = {}): Pro
   const profileConfig = profile(tmp.workspace);
   const activeRuns = new ActiveRuns();
   const agent = new BlockingAgentAdapter(options.autoCompleteAgent === true);
-  const executor = new RunExecutor({
+  const pool = new ProcessPool(() => 2);
+  const scopedRuns = new ScopedRuns({
     agent,
-    pool: new ProcessPool(() => 2),
+    pool,
     activeRuns,
     createRunId: () => 'comment-run-1',
-  });
-  const scopedRuns = new ScopedRuns({
-    executor,
     workspaces,
     profile: 'claude',
     profileConfig: () => profileConfig,

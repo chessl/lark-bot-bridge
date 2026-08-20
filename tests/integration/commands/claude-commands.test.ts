@@ -240,7 +240,17 @@ async function createHarness(): Promise<Harness> {
     cfg: profileConfig,
     processId: 'proc-1',
   } satisfies Controls;
-  const scopedInterrupt = vi.fn((_scope: string) => false);
+  const scopedInterrupt = vi.fn((scope: string) => activeRuns.interrupt(scope));
+  const scopedRuns = {
+    interrupt: scopedInterrupt,
+    snapshot: () => ({
+      activeScopes: activeRuns.scopes(),
+      queue: { active: 0, waiting: 0, cap: 2 },
+    }),
+    pauseNewRuns: (reason: string) => activeRuns.pauseNewRuns(reason),
+    waitForAll: (timeoutMs?: number) => activeRuns.waitForAll(timeoutMs),
+    stopAll: () => activeRuns.stopAll(),
+  } as never;
 
   const run = (content: string): Promise<boolean> =>
     tryHandleCommand({
@@ -251,8 +261,7 @@ async function createHarness(): Promise<Harness> {
       sessions,
       workspaces,
       agent,
-      activeRuns,
-      scopedRuns: { interrupt: scopedInterrupt } as never,
+      scopedRuns,
       controls,
     });
 

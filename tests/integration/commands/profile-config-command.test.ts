@@ -18,6 +18,7 @@ import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { createFakeChannel } from '../../helpers/fake-channel';
+import { createTestScopedRuns } from '../../helpers/scoped-runs';
 
 vi.mock('../../../src/utils/feishu-auth', () => ({
   validateAppCredentials: vi.fn(async () => ({
@@ -183,6 +184,14 @@ async function createHarness(
     cfg: runtimeProfileConfig(root, 'claude'),
     processId: 'proc-1',
   } satisfies Controls;
+  const agent = new FakeAgentAdapter();
+  const activeRuns = new ActiveRuns();
+  const scopedRuns = createTestScopedRuns({
+    agent,
+    activeRuns,
+    workspaces,
+    profileConfig: () => controls.profileConfig,
+  });
 
   return {
     rootDir,
@@ -195,8 +204,8 @@ async function createHarness(
         chatMode: 'p2p',
         sessions,
         workspaces,
-        agent: new FakeAgentAdapter(),
-        activeRuns: new ActiveRuns(),
+        agent,
+        scopedRuns,
         controls,
         formValue,
         fromCardAction: true,

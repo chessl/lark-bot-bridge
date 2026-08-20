@@ -10,6 +10,7 @@ import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { createFakeChannel } from '../../helpers/fake-channel';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
+import { createTestScopedRuns } from '../../helpers/scoped-runs';
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -21,20 +22,18 @@ afterEach(async () => {
 describe('/reconnect profile lifecycle', () => {
   it('stops current profile runs before reconnect by default', async () => {
     const h = await createHarness();
-    const run = new ManualRun('run-1');
-    h.activeRuns.register('chat-1', run);
+    const run = await h.startRun();
 
     await expect(h.command('/reconnect')).resolves.toBe(true);
 
     expect(run.stopCalls).toBe(1);
-    expect(run.waitForExitCalls).toBe(0);
+    expect(run.waitForExitCalls).toBe(1);
     expect(h.restart).toHaveBeenCalledWith({ wait: false });
   });
 
   it('waits for current runs when --wait is requested', async () => {
     const h = await createHarness();
-    const run = new ManualRun('run-1');
-    h.activeRuns.register('chat-1', run);
+    const run = await h.startRun();
 
     await expect(h.command('/reconnect --wait')).resolves.toBe(true);
 
@@ -46,8 +45,8 @@ describe('/reconnect profile lifecycle', () => {
 
 async function createHarness(): Promise<{
   tmp: TmpProfile;
-  activeRuns: ActiveRuns;
   restart: ReturnType<typeof vi.fn>;
+  startRun(): Promise<ManualRun>;
   command(content: string): Promise<boolean>;
 }> {
   const tmp = await createTmpProfile('reconnect-profile-');
@@ -62,6 +61,7 @@ async function createHarness(): Promise<{
     accounts: { app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' } },
     access: { admins: ['ou-admin'] },
   });
+  profileConfig.workspaces.default = tmp.workspace;
   const restart = vi.fn(async () => {});
   const controls = {
     profile: 'claude',
@@ -74,11 +74,28 @@ async function createHarness(): Promise<{
     cfg: profileConfig,
     processId: 'proc-1',
   } satisfies Controls;
+  const manualAgent = new ManualAgent();
+  const scopedRuns = createTestScopedRuns({
+    agent: manualAgent,
+    activeRuns,
+    workspaces,
+    profileConfig: () => profileConfig,
+  });
 
   return {
     tmp,
-    activeRuns,
     restart,
+    startRun: async () => {
+      const started = await scopedRuns.start({
+        scopeId: 'chat-1',
+        scope: { source: 'im', chatId: 'chat-1', actorId: 'ou-admin' },
+        prompt: 'running',
+        attachments: [],
+        access: { ok: true, reason: 'allowed-admin' },
+      });
+      if (!started.ok) throw new Error('expected active run');
+      return manualAgent.run;
+    },
     command: (content: string) =>
       tryHandleCommand({
         channel: channel as unknown as CommandContext['channel'],
@@ -88,10 +105,18 @@ async function createHarness(): Promise<{
         sessions,
         workspaces,
         agent,
-        activeRuns,
+        scopedRuns,
         controls,
       }),
   };
+}
+
+class ManualAgent extends FakeAgentAdapter {
+  readonly run = new ManualRun('run-1');
+
+  override async start(): Promise<AgentRun> {
+    return this.run;
+  }
 }
 
 class ManualRun implements AgentRun {

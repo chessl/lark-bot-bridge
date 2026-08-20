@@ -13,6 +13,7 @@ import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { createFakeAgent } from '../../helpers/fake-agent.js';
 import { createFakeChannel } from '../../helpers/fake-channel.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
+import { createTestScopedRuns } from '../../helpers/scoped-runs.js';
 
 const saveGate = vi.hoisted(() => ({
   calls: 0,
@@ -131,7 +132,12 @@ async function createHarness(): Promise<{
         sessions,
         workspaces,
         agent,
-        activeRuns,
+        scopedRuns: createTestScopedRuns({
+          agent,
+          activeRuns,
+          workspaces,
+          profileConfig: () => controls.profileConfig,
+        }),
         controls,
       }),
   };

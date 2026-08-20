@@ -1,9 +1,7 @@
 import type { CardActionEvent, LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import type { AgentAdapter } from '../agent/types';
-import type { ActiveRuns } from '../bot/active-runs';
 import type { ChatModeCache } from '../bot/chat-mode-cache';
 import type { PendingQueue } from '../bot/pending-queue';
-import type { ProcessPool } from '../bot/process-pool';
 import { commandSessionCatalogIdentity } from '../bot/session-catalog-identity';
 import type { ScopedRuns } from '../bot/run-flow';
 import { lookupMessageThreadId } from '../bot/thread-id';
@@ -11,7 +9,6 @@ import { type CommandContext, type Controls, runCommandHandler } from '../comman
 import { log } from '../core/logger';
 import { nativeApprovalAction } from '../lark-native/server';
 import { canUseDm, canUseGroup } from '../policy/access';
-import type { RunExecutor } from '../runtime/run-executor';
 import type { SessionCatalog } from '../session/catalog';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
@@ -31,10 +28,7 @@ export interface CardDispatchDeps {
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
-  activeRuns: ActiveRuns;
   agent: AgentAdapter;
-  processPool?: ProcessPool;
-  runExecutor?: RunExecutor;
   scopedRuns: ScopedRuns;
   controls: Controls;
   pending: PendingQueue;
@@ -109,10 +103,7 @@ export async function handleCardAction(deps: CardDispatchDeps): Promise<void> {
         access: accessDecision,
       }),
       workspaces: deps.workspaces,
-      activeRuns: deps.activeRuns,
       agent: deps.agent,
-      processPool: deps.processPool,
-      runExecutor: deps.runExecutor,
       scopedRuns: deps.scopedRuns,
       controls: deps.controls,
       formValue,

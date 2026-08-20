@@ -6,7 +6,6 @@ import { handleCommentMention } from '../../../src/bot/comments.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
 import { ScopedRuns } from '../../../src/bot/run-flow.js';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
-import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionCatalog } from '../../../src/session/catalog.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
@@ -247,14 +246,12 @@ async function createCommentHarness(options: {
   });
   profileConfig.workspaces.default = tmp.workspace;
   const activeRuns = new ActiveRuns();
-  const executor = new RunExecutor({
+  const pool = new ProcessPool(() => 1);
+  const scopedRuns = new ScopedRuns({
     agent,
-    pool: new ProcessPool(() => 1),
+    pool,
     activeRuns,
     createRunId: () => `comment-run-${agent.runOptions.length + 1}`,
-  });
-  const scopedRuns = new ScopedRuns({
-    executor,
     sessionCatalog,
     workspaces,
     profile: 'claude',
