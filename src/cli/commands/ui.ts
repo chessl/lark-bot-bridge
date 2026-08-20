@@ -1,4 +1,4 @@
-import { resolveAppPaths } from '../../config/app-paths';
+import { defaultAppPaths } from '../../config/app-paths';
 import { spawnProcess } from '../../platform/spawn';
 import { isAlive } from '../../runtime/registry';
 import { readUiSidecar } from '../../ui/sidecar';
@@ -15,10 +15,7 @@ export interface RunUiOptions {
  * the user to start one.
  */
 export async function runUi(opts: RunUiOptions = {}): Promise<void> {
-  const rootDir = process.env.LARK_CHANNEL_HOME;
-  const appPaths = resolveAppPaths({ rootDir });
-
-  const sidecar = await readUiSidecar(appPaths.hostUiFile);
+  const sidecar = await readUiSidecar(defaultAppPaths.hostUiFile);
   if (sidecar && isAlive(sidecar.pid)) {
     if (opts.print) {
       console.log(sidecar.url);

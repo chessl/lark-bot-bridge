@@ -19,7 +19,7 @@ describe('AgentAdapter lifecycle', () => {
     const binary = await writeAgentBinary('agent 1.2.3');
     const adapters: AgentAdapter[] = [
       new ClaudeAdapter({ binary }),
-      new CodexAdapter({ binary, profileStateDir: join(tmpdir(), 'codex-profile') }),
+      new CodexAdapter({ binary, codexHomeDir: join(tmpdir(), 'codex-home') }),
       new OmpAdapter({ binary }),
     ];
 
@@ -36,7 +36,7 @@ describe('AgentAdapter lifecycle', () => {
     const binary = await writeAgentBinary('codex 1.2.3');
     const adapter = new CodexAdapter({
       binary,
-      profileStateDir: join(tmpdir(), 'codex-profile'),
+      codexHomeDir: join(tmpdir(), 'codex-home'),
     });
     adapter.setBotIdentity({ openId: 'ou_bot' });
 
@@ -54,7 +54,7 @@ describe('AgentAdapter lifecycle', () => {
     const binary = join(tmpdir(), 'missing-codex');
     const adapter = new CodexAdapter({
       binary,
-      profileStateDir: join(tmpdir(), 'codex-profile'),
+      codexHomeDir: join(tmpdir(), 'codex-home'),
     });
 
     await expect(

@@ -4,7 +4,7 @@ import { runRegistrationWizard } from '../bot/wizard';
 import { type DetectedAgent, detectInstalledAgents } from '../cli/agent-detection';
 import { createBootstrapProfileConfig } from '../cli/profile-bootstrap';
 import { promptPassword } from '../cli/prompt';
-import { type AppPaths, resolveAppPaths } from '../config/app-paths';
+import { type AppPaths, defaultAppPaths, resolveAppPaths } from '../config/app-paths';
 import { setSecret } from '../config/keystore';
 import {
   type AgentKind,
@@ -95,7 +95,7 @@ export async function resolveProfileRuntime(
   if (!profile && !opts.allowBootstrap) {
     throw new Error('active profile is required');
   }
-  profile ??= 'claude';
+  profile ??= defaultAppPaths.profile;
   let appPaths = resolveAppPaths({ rootDir, profile });
   const configPath = opts.config ?? appPaths.configFile;
 
@@ -139,7 +139,7 @@ export async function resolveProfileRuntime(
     secrets: encrypted.secrets,
     workspace,
     defaultWorkspace: appPaths.defaultWorkspaceDir,
-    profileDir: appPaths.profileDir,
+    codexHomeDir: appPaths.codexHomeDir,
   });
   const root = createRootConfig(profile, profileConfig, encrypted.secrets);
   await saveRootConfig(root, configPath);
@@ -168,7 +168,7 @@ async function bootstrapProfileIntoExistingRoot(args: {
     secrets: encrypted.secrets,
     workspace,
     defaultWorkspace: appPaths.defaultWorkspaceDir,
-    profileDir: appPaths.profileDir,
+    codexHomeDir: appPaths.codexHomeDir,
   });
   const nextRoot: RootConfig = {
     ...rootConfig,
@@ -288,7 +288,7 @@ export async function materializeEnvSecretForService(
   const rootDir = opts.config ? dirname(opts.config) : undefined;
   const explicitProfile = opts.profile;
   const activeProfile = explicitProfile ?? (await readActiveProfile(rootDir));
-  let profile = activeProfile ?? 'claude';
+  let profile = activeProfile ?? defaultAppPaths.profile;
   let appPaths = resolveAppPaths({ rootDir, profile });
   const configPath = opts.config ?? appPaths.configFile;
 

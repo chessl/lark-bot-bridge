@@ -1,6 +1,5 @@
-import { type AppPaths, resolveAppPaths } from '../../config/app-paths';
+import { type AppPaths, defaultAppPaths, resolveAppPaths } from '../../config/app-paths';
 import { getSecret, listSecretIds, removeSecret, setSecret } from '../../config/keystore';
-import { paths } from '../../config/paths';
 import { loadRootConfig, readActiveProfile } from '../../config/profile-store';
 import { secretKeyForApp } from '../../config/schema';
 import { listAllProfiles } from '../../runtime/profile-discovery';
@@ -127,7 +126,7 @@ export async function runSecretsRemove(
 
 export async function resolveSecretAcrossProfiles(
   id: string,
-  rootDir: string = paths.rootDir,
+  rootDir: string = defaultAppPaths.rootDir,
   warn: (message: string) => void = (message) => console.error(message),
   profile: string | undefined = process.env.LARK_CHANNEL_PROFILE,
 ): Promise<string | undefined> {
@@ -174,11 +173,14 @@ export async function removeAppSecret(
 }
 
 async function resolveSecretProfilePaths(opts: SecretProfileOptions): Promise<AppPaths> {
-  const rootDir = opts.rootDir ?? paths.rootDir;
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
   const rootPaths = resolveAppPaths({ rootDir });
   const root = await loadRootConfig(rootPaths.configFile);
   const profile =
-    opts.profile ?? (await readActiveProfile(rootDir)) ?? root?.activeProfile ?? 'claude';
+    opts.profile ??
+    (await readActiveProfile(rootDir)) ??
+    root?.activeProfile ??
+    defaultAppPaths.profile;
   if (root && !root.profiles[profile]) throw new Error(`profile not found: ${profile}`);
   return resolveAppPaths({ rootDir, profile });
 }

@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline';
-import { paths } from '../../config/paths';
+import { defaultAppPaths } from '../../config/app-paths';
 import { loadRootConfig, readActiveProfile } from '../../config/profile-store';
 import { isComplete } from '../../config/schema';
 import { daemonStderrPath, daemonStdoutPath, SUPERVISOR_SERVICE_ID } from '../../daemon/paths';
@@ -511,13 +511,13 @@ export async function runServiceUnregister(opts: ServiceProfileOptions = {}): Pr
   }
   if (result.previousState === 'running') console.log(`✓ 已停止 ${label}`);
   console.log('✓ 已清除后台运行注册');
-  console.log(`  (配置 / 日志 / 会话保留在 ${paths.rootDir})`);
+  console.log(`  (配置 / 日志 / 会话保留在 ${defaultAppPaths.rootDir})`);
 }
 
 async function resolveServiceProfile(explicitProfile: string | undefined): Promise<string> {
   if (explicitProfile) return explicitProfile;
-  const root = await loadRootConfig(paths.configFile);
-  const profile = (await readActiveProfile(paths.rootDir)) ?? root?.activeProfile;
+  const root = await loadRootConfig(defaultAppPaths.configFile);
+  const profile = (await readActiveProfile(defaultAppPaths.rootDir)) ?? root?.activeProfile;
   if (!profile) {
     throw new Error('active profile is required for service command; pass --profile <name>');
   }

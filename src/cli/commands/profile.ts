@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { resolveAppPaths } from '../../config/app-paths';
-import { paths } from '../../config/paths';
+import { defaultAppPaths, resolveAppPaths } from '../../config/app-paths';
 import type { RootConfig } from '../../config/profile-schema';
 import {
   agentKindFromString,
@@ -47,7 +46,7 @@ export interface ProfileExportOptions extends ProfileCommandOptions {
 }
 
 export async function runProfileList(opts: ProfileCommandOptions = {}): Promise<void> {
-  const rootDir = opts.rootDir ?? paths.rootDir;
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
   let profiles;
   try {
     profiles = await listAllProfiles(rootDir);
@@ -107,7 +106,7 @@ export async function runProfileCreate(
   name: string,
   opts: ProfileCreateOptions = {},
 ): Promise<void> {
-  const rootDir = opts.rootDir ?? paths.rootDir;
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
   const configFile = resolveAppPaths({ rootDir }).configFile;
   await withConfigFileLock(configFile, async () => {
     const root = await loadRootConfig(configFile);
@@ -140,7 +139,7 @@ export async function runProfileCreate(
 }
 
 export async function runProfileUse(name: string, opts: ProfileCommandOptions = {}): Promise<void> {
-  const rootDir = opts.rootDir ?? paths.rootDir;
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
   const configFile = resolveAppPaths({ rootDir }).configFile;
   await withConfigFileLock(configFile, async () => {
     const root = await loadRootConfig(configFile);
@@ -156,7 +155,7 @@ export async function runProfileRemove(
   name: string,
   opts: ProfileRemoveOptions = {},
 ): Promise<void> {
-  const rootDir = opts.rootDir ?? paths.rootDir;
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
   if (opts.purge && !opts.yes) {
     throw new Error('profile remove --purge requires --yes');
   }
@@ -230,7 +229,7 @@ export async function runProfileExport(
   if (opts.includeSecrets && !opts.yes) {
     throw new Error('profile export --include-secrets requires --yes');
   }
-  const rootDir = opts.rootDir ?? paths.rootDir;
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
   const configFile = resolveAppPaths({ rootDir }).configFile;
   const root = await loadRootConfig(configFile);
   if (!root) throw new Error('config not initialized');

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { paths } from '../config/paths';
+import { defaultAppPaths } from '../config/app-paths';
 import { log } from '../core/logger';
 import { writeFileAtomic } from '../platform/atomic-write';
 
@@ -16,7 +16,7 @@ export class SessionStore {
   private saving: Promise<void> = Promise.resolve();
   private readonly path: string;
 
-  constructor(path: string = paths.sessionsFile) {
+  constructor(path: string = defaultAppPaths.sessionsFile) {
     this.path = path;
   }
 

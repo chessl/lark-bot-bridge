@@ -2,8 +2,7 @@ import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from 'node:
 import { readFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
 import { writeFileAtomic } from '../platform/atomic-write';
-import type { AppPaths } from './app-paths';
-import { paths } from './paths';
+import { type AppPaths, defaultAppPaths } from './app-paths';
 
 /**
  * Local AES-256-GCM keystore for App Secrets and similar.
@@ -43,7 +42,7 @@ interface StoreFile {
 export type KeystorePaths = Pick<AppPaths, 'secretsFile' | 'keystoreSaltFile'>;
 
 /** Read + return the full keystore. Missing file or unreadable → empty store. */
-async function readStore(storePaths: KeystorePaths = paths): Promise<StoreFile> {
+async function readStore(storePaths: KeystorePaths = defaultAppPaths): Promise<StoreFile> {
   try {
     const text = await readFile(storePaths.secretsFile, 'utf8');
     const parsed = JSON.parse(text) as Partial<StoreFile>;
@@ -59,7 +58,10 @@ function emptyStore(): StoreFile {
   return { version: FILE_VERSION, entries: {} };
 }
 
-async function writeStore(store: StoreFile, storePaths: KeystorePaths = paths): Promise<void> {
+async function writeStore(
+  store: StoreFile,
+  storePaths: KeystorePaths = defaultAppPaths,
+): Promise<void> {
   await writeFileAtomic(storePaths.secretsFile, `${JSON.stringify(store, null, 2)}\n`, {
     mode: 0o600,
   });
@@ -70,7 +72,7 @@ async function writeStore(store: StoreFile, storePaths: KeystorePaths = paths): 
  * an attacker that can read this file can also read the keystore. Its job
  * is to ensure two users on the same machine don't derive the same key.
  */
-async function loadOrCreateSalt(storePaths: KeystorePaths = paths): Promise<Buffer> {
+async function loadOrCreateSalt(storePaths: KeystorePaths = defaultAppPaths): Promise<Buffer> {
   try {
     const buf = await readFile(storePaths.keystoreSaltFile);
     if (buf.length === KEY_LEN) return buf;
@@ -82,7 +84,7 @@ async function loadOrCreateSalt(storePaths: KeystorePaths = paths): Promise<Buff
   return salt;
 }
 
-async function deriveKey(storePaths: KeystorePaths = paths): Promise<Buffer> {
+async function deriveKey(storePaths: KeystorePaths = defaultAppPaths): Promise<Buffer> {
   const cacheKey = `${storePaths.keystoreSaltFile}`;
   const cached = derivedKeyCache.get(cacheKey);
   if (cached) return cached;
@@ -122,7 +124,7 @@ function decrypt(key: Buffer, env: Envelope): string {
  * propagate. */
 export async function getSecret(
   id: string,
-  storePaths: KeystorePaths = paths,
+  storePaths: KeystorePaths = defaultAppPaths,
 ): Promise<string | undefined> {
   const store = await readStore(storePaths);
   const env = store.entries[id];
@@ -135,7 +137,7 @@ export async function getSecret(
 export async function setSecret(
   id: string,
   plaintext: string,
-  storePaths: KeystorePaths = paths,
+  storePaths: KeystorePaths = defaultAppPaths,
 ): Promise<void> {
   const key = await deriveKey(storePaths);
   const env = encrypt(key, plaintext);
@@ -147,7 +149,7 @@ export async function setSecret(
 /** Remove an entry. Returns true if something was removed. */
 export async function removeSecret(
   id: string,
-  storePaths: KeystorePaths = paths,
+  storePaths: KeystorePaths = defaultAppPaths,
 ): Promise<boolean> {
   const store = await readStore(storePaths);
   if (!(id in store.entries)) return false;
@@ -157,7 +159,9 @@ export async function removeSecret(
 }
 
 /** List ids (no secrets in the output, by design). */
-export async function listSecretIds(storePaths: KeystorePaths = paths): Promise<string[]> {
+export async function listSecretIds(
+  storePaths: KeystorePaths = defaultAppPaths,
+): Promise<string[]> {
   const store = await readStore(storePaths);
   return Object.keys(store.entries);
 }

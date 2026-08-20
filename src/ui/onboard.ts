@@ -143,7 +143,7 @@ export async function writeNewProfile(
       secrets: encrypted.secrets,
       ...(input.workspace ? { workspace: input.workspace } : {}),
       defaultWorkspace: appPaths.defaultWorkspaceDir,
-      profileDir: appPaths.profileDir,
+      codexHomeDir: appPaths.codexHomeDir,
     });
   } catch (err) {
     throw new HttpError(400, err instanceof Error ? err.message : String(err));

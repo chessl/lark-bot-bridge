@@ -12,8 +12,7 @@ import {
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 import * as lockfile from 'proper-lockfile';
-import { resolveAppPaths } from '../config/app-paths';
-import { paths } from '../config/paths';
+import { defaultAppPaths, resolveAppPaths } from '../config/app-paths';
 import type { AgentKind } from '../config/profile-schema';
 import type { TenantBrand } from '../config/schema';
 import { writeFileAtomic } from '../platform/atomic-write';
@@ -78,7 +77,7 @@ export function isAlive(pid: number): boolean {
 }
 
 /** Read the registry without pruning or rewriting it. */
-export function readRegistry(path: string = paths.processesFile): ProcessEntry[] {
+export function readRegistry(path: string = defaultAppPaths.userRegistryFile): ProcessEntry[] {
   return readRaw(path).entries;
 }
 
@@ -127,13 +126,13 @@ export interface RegisterArgs {
  * Caller is responsible for installing cleanup that calls `unregister`.
  */
 export async function register(args: RegisterArgs): Promise<ProcessEntry> {
-  const registryFile = args.registryFile ?? paths.processesFile;
+  const registryFile = args.registryFile ?? defaultAppPaths.userRegistryFile;
   const entry: ProcessEntry = {
     id: generateShortId(),
     pid: process.pid,
     appId: args.appId,
     tenant: args.tenant,
-    profileName: args.profileName ?? 'claude',
+    profileName: args.profileName ?? defaultAppPaths.profile,
     agentKind: args.agentKind ?? 'claude',
     configPath: args.configPath,
     startedAt: new Date().toISOString(),
@@ -149,7 +148,7 @@ export async function register(args: RegisterArgs): Promise<ProcessEntry> {
 /** Remove an entry by id. Atomic + prunes dead in same write. Async. */
 export async function unregister(
   id: string,
-  registryFile: string = paths.processesFile,
+  registryFile: string = defaultAppPaths.userRegistryFile,
 ): Promise<void> {
   await withRegistryFileLock(registryFile, async () => {
     const { entries: live, pruned } = await readForWriteState(registryFile);
@@ -167,7 +166,7 @@ export async function unregister(
 export async function updateEntry(
   id: string,
   patch: Partial<Pick<ProcessEntry, 'appId' | 'tenant' | 'configPath' | 'botName'>>,
-  registryFile: string = paths.processesFile,
+  registryFile: string = defaultAppPaths.userRegistryFile,
 ): Promise<void> {
   await withRegistryFileLock(registryFile, async () => {
     const { entries: live, pruned } = await readForWriteState(registryFile);
@@ -186,7 +185,10 @@ export async function updateEntry(
  * Synchronous unregister — for use inside `process.on('exit')` and other
  * sync-only contexts where async file I/O doesn't run. Best-effort.
  */
-export function unregisterSync(id: string, registryFile: string = paths.processesFile): void {
+export function unregisterSync(
+  id: string,
+  registryFile: string = defaultAppPaths.userRegistryFile,
+): void {
   try {
     withRegistryFileLockSync(registryFile, () => {
       const live = readRaw(registryFile).entries;
@@ -200,7 +202,9 @@ export function unregisterSync(id: string, registryFile: string = paths.processe
 }
 
 /** Best-effort: try to unlink any leftover tmp file we wrote. */
-export function cleanupTmpFiles(registryFile: string = paths.processesFile): void {
+export function cleanupTmpFiles(
+  registryFile: string = defaultAppPaths.userRegistryFile,
+): void {
   try {
     unlinkSync(`${registryFile}.tmp-${process.pid}`);
   } catch {
@@ -215,7 +219,7 @@ export function cleanupTmpFiles(registryFile: string = paths.processesFile): voi
 export function sameAppOthers(
   appId: string,
   excludePid = process.pid,
-  registryFile: string = paths.processesFile,
+  registryFile: string = defaultAppPaths.userRegistryFile,
 ): ProcessEntry[] {
   return readRegistry(registryFile).filter((e) => e.appId === appId && e.pid !== excludePid);
 }
@@ -223,7 +227,7 @@ export function sameAppOthers(
 export async function sameAppLiveOthers(
   appId: string,
   excludePid = process.pid,
-  registryFile: string = paths.processesFile,
+  registryFile: string = defaultAppPaths.userRegistryFile,
 ): Promise<ProcessEntry[]> {
   const candidates = sameAppOthers(appId, excludePid, registryFile);
   const checks = await Promise.all(

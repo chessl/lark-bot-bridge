@@ -319,7 +319,7 @@ export class Supervisor {
 
     const sessions = new SessionStore(appPaths.sessionsFile);
     await sessions.load();
-    const sessionCatalog = new SessionCatalog(`${appPaths.sessionsFile}.catalog.json`);
+    const sessionCatalog = new SessionCatalog(appPaths.sessionCatalogFile);
     await sessionCatalog.load();
     const workspaces = new WorkspaceStore(appPaths.workspacesFile);
     await workspaces.load();

@@ -2,9 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { type SpawnedProcessByStdio, spawnProcess } from '../platform/spawn';
-import type { AppPaths } from './app-paths';
+import { type AppPaths, defaultAppPaths } from './app-paths';
 import { getSecret, type KeystorePaths } from './keystore';
-import { paths } from './paths';
 import type { AppConfig, ProviderConfig, SecretInput, SecretRef } from './schema';
 import { isSecretRef, secretKeyForApp } from './schema';
 
@@ -34,7 +33,7 @@ const DEFAULT_EXEC_MAX_OUTPUT = 64 * 1024;
 
 export async function resolveAppSecret(
   cfg: AppConfig,
-  secretPaths: SecretResolverPaths = paths,
+  secretPaths: SecretResolverPaths = defaultAppPaths,
 ): Promise<string> {
   const appId = cfg.accounts.app.id;
   const secret = cfg.accounts.app.secret;
@@ -140,7 +139,7 @@ async function resolveExecRef(
 }
 
 function isSelfBridgeCommand(command: string, secretPaths: SecretResolverPaths): boolean {
-  const wrapper = secretPaths.secretsGetterScript ?? paths.secretsGetterScript;
+  const wrapper = secretPaths.secretsGetterScript ?? defaultAppPaths.secretsGetterScript;
   return command === wrapper;
 }
 

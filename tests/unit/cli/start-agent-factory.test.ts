@@ -14,7 +14,7 @@ describe('start runtime agent factory', () => {
         agentKind: 'claude',
         accounts: appAccount(),
       }),
-      { profileDir: tmpdir() },
+      { codexHomeDir: tmpdir() },
     );
 
     expect(agent.id).toBe('claude');
@@ -29,7 +29,7 @@ describe('start runtime agent factory', () => {
       permissions: { defaultAccess: 'workspace', maxAccess: 'workspace' },
     });
     const agent = createRuntimeAgent(profile, {
-      profileDir: '/tmp/lark-bot-bridge/profiles/codex-e2e',
+      codexHomeDir: '/tmp/lark-bot-bridge/profiles/codex-e2e/codex-home',
     });
 
     expect(agent.id).toBe('codex');
@@ -47,7 +47,7 @@ describe('start runtime agent factory', () => {
         accounts: appAccount(),
         codex: { binaryPath: '/usr/local/bin/codex' },
       }),
-      { profileDir: '/tmp/lark-bot-bridge/profiles/codex-e2e' },
+      { codexHomeDir: '/tmp/lark-bot-bridge/profiles/codex-e2e/codex-home' },
     );
 
     expect(agent.id).toBe('codex');
@@ -69,7 +69,7 @@ describe('start runtime agent factory', () => {
       accounts: appAccount(),
     });
     const agent = createRuntimeAgent(profile, {
-      profileDir: '/tmp/lark-bot-bridge/profiles/omp-e2e',
+      codexHomeDir: '/tmp/lark-bot-bridge/profiles/omp-e2e/codex-home',
     });
 
     expect(profile.omp?.binaryPath).toBe('omp');

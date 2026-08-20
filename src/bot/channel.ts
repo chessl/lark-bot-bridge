@@ -1,4 +1,3 @@
-import { dirname, join } from 'node:path';
 import type { LarkChannel, LarkChannelOptions, NormalizedMessage } from '@larksuite/channel';
 import { createLarkChannel } from '@larksuite/channel';
 import { capabilityForProfile } from '../agent/capability';
@@ -166,7 +165,10 @@ export interface StartChannelDeps {
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
   controls: Controls;
-  appPaths?: Pick<AppPaths, 'rootDir' | 'secretsFile' | 'keystoreSaltFile' | 'mediaDir'>;
+  appPaths?: Pick<
+    AppPaths,
+    'rootDir' | 'secretsFile' | 'keystoreSaltFile' | 'mediaDir' | 'callbackNoncesFile'
+  >;
 }
 
 export async function startChannel(deps: StartChannelDeps): Promise<BridgeChannel> {
@@ -184,8 +186,8 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // the encrypted keystore / env / file / exec provider. Re-resolved on
   // every startChannel so /account change picks up new secrets.
   const appSecret = await resolveAppSecret(cfg, deps.appPaths);
-  const callbackNonceStore = deps.appPaths?.mediaDir
-    ? new CallbackNonceStore(join(dirname(deps.appPaths.mediaDir), 'callback-nonces.json'))
+  const callbackNonceStore = deps.appPaths?.callbackNoncesFile
+    ? new CallbackNonceStore(deps.appPaths.callbackNoncesFile)
     : undefined;
   await callbackNonceStore?.load();
   const callbackAuth = callbackNonceStore

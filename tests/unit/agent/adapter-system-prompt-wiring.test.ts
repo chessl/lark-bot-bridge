@@ -85,7 +85,7 @@ describe('CodexAdapter system prompt wiring', () => {
   function codexAdapter(): CodexAdapter {
     const adapter = new CodexAdapter({
       binary: '/usr/local/bin/codex',
-      profileStateDir: '/tmp/codex-profile',
+      codexHomeDir: '/tmp/codex-profile/codex-home',
     });
     vi.spyOn(adapter, 'checkAvailability').mockResolvedValue({ ok: true });
     return adapter;

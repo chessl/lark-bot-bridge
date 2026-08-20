@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { paths } from '../config/paths';
+import { defaultAppPaths } from '../config/app-paths';
 import { log } from '../core/logger';
 import { writeFileAtomic } from '../platform/atomic-write';
 
@@ -13,7 +13,7 @@ export class WorkspaceStore {
   private saving: Promise<void> = Promise.resolve();
   private readonly path: string;
 
-  constructor(path: string = paths.workspacesFile) {
+  constructor(path: string = defaultAppPaths.workspacesFile) {
     this.path = path;
   }
 

@@ -1,5 +1,4 @@
 import { mkdir, realpath } from 'node:fs/promises';
-import { join } from 'node:path';
 import { AgentPreflightError } from '../agent/preflight';
 import {
   type AgentKind,
@@ -19,7 +18,7 @@ export interface BootstrapProfileInput {
   defaultWorkspace?: string;
   codexBinaryPath?: string;
   ompBinaryPath?: string;
-  profileDir?: string;
+  codexHomeDir?: string;
 }
 
 export async function createBootstrapProfileConfig(
@@ -54,8 +53,8 @@ export async function createBootstrapProfileConfig(
       default: workspace,
     };
   }
-  if (input.profileDir && profile.codex?.inheritCodexHome === false) {
-    await mkdir(join(input.profileDir, 'codex-home'), { recursive: true });
+  if (input.codexHomeDir && profile.codex?.inheritCodexHome === false) {
+    await mkdir(input.codexHomeDir, { recursive: true });
   }
   return profile;
 }

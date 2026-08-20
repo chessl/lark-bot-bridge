@@ -13,7 +13,7 @@ import type { AcquiredRuntimeLock } from './locks';
  */
 export function createRuntimeAgent(
   profileConfig: ProfileConfig,
-  appPaths: Pick<AppPaths, 'profileDir'>,
+  appPaths: Pick<AppPaths, 'codexHomeDir'>,
 ): AgentAdapter {
   if (profileConfig.agentKind === 'codex') {
     const codex = profileConfig.codex;
@@ -22,7 +22,7 @@ export function createRuntimeAgent(
     }
     return new CodexAdapter({
       binary: codex.binaryPath,
-      profileStateDir: appPaths.profileDir,
+      codexHomeDir: appPaths.codexHomeDir,
       ...(codex.codexHome ? { codexHome: codex.codexHome } : {}),
       inheritCodexHome: codex.inheritCodexHome === true,
       ignoreUserConfig: codex.ignoreUserConfig === true,

@@ -1,5 +1,4 @@
 import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import { resolveAppPaths } from '../config/app-paths';
 import { loadRootConfig, readActiveProfile } from '../config/profile-store';
 import type { AgentKind } from '../config/profile-schema';
@@ -22,7 +21,7 @@ export async function listAllProfiles(rootDir?: string): Promise<DiscoveredProfi
   }
 
   const configured = Object.keys(root.profiles);
-  const stateDirs = await readProfileStateDirs(rootPaths.rootDir);
+  const stateDirs = await readProfileStateDirs(rootPaths.profilesDir);
   const configuredSet = new Set(configured);
   const stateSet = new Set(stateDirs);
   const missingState = configured.filter((name) => !stateSet.has(name));
@@ -53,8 +52,7 @@ export async function listAllProfiles(rootDir?: string): Promise<DiscoveredProfi
     });
 }
 
-async function readProfileStateDirs(rootDir: string): Promise<string[]> {
-  const profilesDir = join(rootDir, 'profiles');
+async function readProfileStateDirs(profilesDir: string): Promise<string[]> {
   try {
     const entries = await readdir(profilesDir, { withFileTypes: true });
     return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
@@ -66,7 +64,9 @@ async function readProfileStateDirs(rootDir: string): Promise<string[]> {
 
 async function isLogOnlyProfileState(rootDir: string, profile: string): Promise<boolean> {
   try {
-    const entries = await readdir(join(rootDir, 'profiles', profile), { withFileTypes: true });
+    const entries = await readdir(resolveAppPaths({ rootDir, profile }).profileDir, {
+      withFileTypes: true,
+    });
     return entries.length === 1 && entries[0]?.isDirectory() === true && entries[0].name === 'logs';
   } catch {
     return false;

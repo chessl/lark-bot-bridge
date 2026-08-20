@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ServiceAdapter } from '../../../src/daemon/service-adapter';
+import type {
+  ServiceAdapter,
+  ServiceRemoveResult,
+  ServiceRestartResult,
+  ServiceStartResult,
+  ServiceStatus,
+  ServiceStopResult,
+} from '../../../src/daemon/service-adapter';
 import type { ProcessEntry } from '../../../src/runtime/registry';
 
 const mocks = vi.hoisted(() => ({
@@ -68,15 +75,27 @@ describe('profile-aware service commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.adapter = {
-      status: vi.fn(() => ({
-        state: 'inactive',
-        platformName: 'mock',
-        definitionPath: '/tmp/service',
-      })),
-      start: vi.fn(async () => ({ ok: true, replaced: false })),
-      stop: vi.fn(async () => ({ ok: true, previousState: 'inactive' })),
-      restart: vi.fn(async () => ({ ok: true, action: 'started' })),
-      remove: vi.fn(async () => ({ ok: true, removed: true, previousState: 'inactive' })),
+      status: vi.fn(
+        (): ServiceStatus => ({
+          state: 'inactive',
+          platformName: 'mock',
+          definitionPath: '/tmp/service',
+        }),
+      ),
+      start: vi.fn(async (): Promise<ServiceStartResult> => ({ ok: true, replaced: false })),
+      stop: vi.fn(
+        async (): Promise<ServiceStopResult> => ({ ok: true, previousState: 'inactive' }),
+      ),
+      restart: vi.fn(
+        async (): Promise<ServiceRestartResult> => ({ ok: true, action: 'started' }),
+      ),
+      remove: vi.fn(
+        async (): Promise<ServiceRemoveResult> => ({
+          ok: true,
+          removed: true,
+          previousState: 'inactive',
+        }),
+      ),
     };
     mocks.getServiceAdapter.mockReturnValue(mocks.adapter);
     mocks.materializeEnvSecretForService.mockResolvedValue(false);
@@ -195,13 +214,17 @@ describe('profile-aware service commands', () => {
 
   it('allows start to replace the managed daemon that owns the runtime locks', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    mocks.adapter.status = vi.fn(() => ({
-      state: 'running',
-      pid: '2468',
-      platformName: 'mock',
-      definitionPath: '/tmp/service',
-    }));
-    mocks.adapter.start = vi.fn(async () => ({ ok: true, replaced: true }));
+    mocks.adapter.status = vi.fn(
+      (): ServiceStatus => ({
+        state: 'running',
+        pid: '2468',
+        platformName: 'mock',
+        definitionPath: '/tmp/service',
+      }),
+    );
+    mocks.adapter.start = vi.fn(
+      async (): Promise<ServiceStartResult> => ({ ok: true, replaced: true }),
+    );
     mocks.checkRuntimeLock.mockResolvedValue({
       locked: true,
       meta: {
@@ -358,11 +381,13 @@ describe('profile-aware service commands', () => {
 
   it('uses the active profile when --profile is omitted and fails if none exists', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    mocks.adapter.status = vi.fn(() => ({
-      state: 'not-installed',
-      platformName: 'mock',
-      definitionPath: '/tmp/service',
-    }));
+    mocks.adapter.status = vi.fn(
+      (): ServiceStatus => ({
+        state: 'not-installed',
+        platformName: 'mock',
+        definitionPath: '/tmp/service',
+      }),
+    );
 
     await runServiceStatus();
     // Lifecycle commands (status/stop/restart/unregister) don't install, so
@@ -383,24 +408,30 @@ describe('profile-aware service commands', () => {
     // exists on disk, and it is the process hosting profile codex-dev.
     const supervisor = {
       ...mocks.adapter,
-      status: vi.fn(() => ({
-        state: 'running',
-        pid: '12345',
-        platformName: 'mock',
-        definitionPath: '/tmp/supervisor',
-      })),
-      stop: vi.fn(async () => ({ ok: true, previousState: 'running' })),
+      status: vi.fn(
+        (): ServiceStatus => ({
+          state: 'running',
+          pid: '12345',
+          platformName: 'mock',
+          definitionPath: '/tmp/supervisor',
+        }),
+      ),
+      stop: vi.fn(
+        async (): Promise<ServiceStopResult> => ({ ok: true, previousState: 'running' }),
+      ),
     } as ServiceAdapter;
     mocks.getServiceAdapter.mockImplementation((serviceId: string) =>
       serviceId === 'supervisor'
         ? supervisor
         : {
             ...mocks.adapter,
-            status: vi.fn(() => ({
-              state: 'not-installed',
-              platformName: 'mock',
-              definitionPath: '/tmp/service',
-            })),
+            status: vi.fn(
+              (): ServiceStatus => ({
+                state: 'not-installed',
+                platformName: 'mock',
+                definitionPath: '/tmp/service',
+              }),
+            ),
           },
     );
     mocks.readRegistry.mockReturnValue([]);
@@ -433,20 +464,26 @@ describe('profile-aware service commands', () => {
     });
     const supervisor = {
       ...mocks.adapter,
-      status: vi.fn(() => ({
-        state: 'running',
-        platformName: 'mock',
-        definitionPath: '/tmp/supervisor',
-      })),
+      status: vi.fn(
+        (): ServiceStatus => ({
+          state: 'running',
+          platformName: 'mock',
+          definitionPath: '/tmp/supervisor',
+        }),
+      ),
     } as ServiceAdapter;
     const classic = {
       ...mocks.adapter,
-      status: vi.fn(() => ({
-        state: 'not-installed',
-        platformName: 'mock',
-        definitionPath: '/tmp/service',
-      })),
-      stop: vi.fn(async () => ({ ok: true, previousState: 'not-installed' })),
+      status: vi.fn(
+        (): ServiceStatus => ({
+          state: 'not-installed',
+          platformName: 'mock',
+          definitionPath: '/tmp/service',
+        }),
+      ),
+      stop: vi.fn(
+        async (): Promise<ServiceStopResult> => ({ ok: true, previousState: 'not-installed' }),
+      ),
     } as ServiceAdapter;
     mocks.getServiceAdapter.mockImplementation((serviceId: string) =>
       serviceId === 'supervisor' ? supervisor : classic,
@@ -528,12 +565,14 @@ describe('profile-aware service commands', () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
     });
-    mocks.adapter.restart = vi.fn(async () => ({
-      ok: false,
-      reason: 'not-installed',
-      operation: 'restart',
-      stderr: '',
-    }));
+    mocks.adapter.restart = vi.fn(
+      async (): Promise<ServiceRestartResult> => ({
+        ok: false,
+        reason: 'not-installed',
+        operation: 'restart',
+        stderr: '',
+      }),
+    );
     mocks.readRegistry.mockReturnValue([]);
 
     await expect(runServiceRestart({ profile: 'codex-dev' })).rejects.toThrow('exit:1');
@@ -547,12 +586,14 @@ describe('profile-aware service commands', () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
     });
-    mocks.adapter.stop = vi.fn(async () => ({
-      ok: false,
-      reason: 'stop-timeout',
-      operation: 'stop',
-      stderr: '',
-    }));
+    mocks.adapter.stop = vi.fn(
+      async (): Promise<ServiceStopResult> => ({
+        ok: false,
+        reason: 'stop-timeout',
+        operation: 'stop',
+        stderr: '',
+      }),
+    );
 
     await expect(runServiceStop({ profile: 'codex-dev' })).rejects.toThrow('exit:1');
 
@@ -567,12 +608,14 @@ describe('profile-aware service commands', () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
     });
-    mocks.adapter.start = vi.fn(async () => ({
-      ok: false,
-      reason: 'platform',
-      operation: 'start',
-      stderr: 'service manager unavailable',
-    }));
+    mocks.adapter.start = vi.fn(
+      async (): Promise<ServiceStartResult> => ({
+        ok: false,
+        reason: 'platform',
+        operation: 'start',
+        stderr: 'service manager unavailable',
+      }),
+    );
     mocks.readRegistry.mockReturnValue([]);
 
     await expect(runServiceStart({ profile: 'codex-dev' })).rejects.toThrow('exit:1');
@@ -585,7 +628,7 @@ describe('profile-aware service commands', () => {
     const lines: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
     const remove = vi
-      .fn()
+      .fn<() => Promise<ServiceRemoveResult>>()
       .mockResolvedValueOnce({ ok: true, removed: true, previousState: 'running' })
       .mockResolvedValueOnce({ ok: true, removed: false, previousState: 'not-installed' });
     mocks.adapter.remove = remove;
@@ -601,14 +644,18 @@ describe('profile-aware service commands', () => {
   it('reports and stops a running classic daemon through structured outcomes', async () => {
     const lines: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
-    mocks.adapter.status = vi.fn(() => ({
-      state: 'running',
-      pid: '7373',
-      lastExitCode: '0',
-      platformName: 'mock',
-      definitionPath: '/tmp/service',
-    }));
-    mocks.adapter.stop = vi.fn(async () => ({ ok: true, previousState: 'running' }));
+    mocks.adapter.status = vi.fn(
+      (): ServiceStatus => ({
+        state: 'running',
+        pid: '7373',
+        lastExitCode: '0',
+        platformName: 'mock',
+        definitionPath: '/tmp/service',
+      }),
+    );
+    mocks.adapter.stop = vi.fn(
+      async (): Promise<ServiceStopResult> => ({ ok: true, previousState: 'running' }),
+    );
     mocks.readRegistry.mockReturnValue([
       processEntry({
         pid: 7373,
@@ -629,13 +676,17 @@ describe('profile-aware service commands', () => {
   it('reports and restarts a running supervisor through structured outcomes', async () => {
     const lines: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
-    mocks.adapter.status = vi.fn(() => ({
-      state: 'running',
-      pid: '8383',
-      platformName: 'mock',
-      definitionPath: '/tmp/supervisor',
-    }));
-    mocks.adapter.restart = vi.fn(async () => ({ ok: true, action: 'restarted' }));
+    mocks.adapter.status = vi.fn(
+      (): ServiceStatus => ({
+        state: 'running',
+        pid: '8383',
+        platformName: 'mock',
+        definitionPath: '/tmp/supervisor',
+      }),
+    );
+    mocks.adapter.restart = vi.fn(
+      async (): Promise<ServiceRestartResult> => ({ ok: true, action: 'restarted' }),
+    );
     const online = processEntry({
       id: 'before-restart',
       pid: 8383,

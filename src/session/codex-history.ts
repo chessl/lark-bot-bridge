@@ -1,6 +1,5 @@
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
-import { join } from 'node:path';
 import { mergeProcessEnv, spawnProcess, type SpawnedProcessByStdio } from '../platform/spawn';
 import { normalizeSessionPreview } from './preview';
 
@@ -23,7 +22,7 @@ export interface ListCodexThreadHistoryOptions {
   binary: string;
   cwd: string;
   limit: number;
-  profileStateDir: string;
+  codexHomeDir: string;
   codexHome?: string;
   inheritCodexHome?: boolean;
   timeoutMs?: number;
@@ -171,7 +170,7 @@ function spawnCodexAppServer(options: ListCodexThreadHistoryOptions): CodexAppSe
   if (options.codexHome) {
     envOverrides.CODEX_HOME = options.codexHome;
   } else if (options.inheritCodexHome === false) {
-    envOverrides.CODEX_HOME = join(options.profileStateDir, 'codex-home');
+    envOverrides.CODEX_HOME = options.codexHomeDir;
   }
 
   return spawnProcess(options.binary, ['app-server', '--listen', 'stdio://'], {

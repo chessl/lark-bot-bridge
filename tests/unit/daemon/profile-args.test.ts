@@ -14,8 +14,8 @@ describe('profile-scoped daemon paths and arguments', () => {
     // ASCII-safe names pass through unchanged (stable existing labels).
     expect(serviceProfileId('codex_dev')).toBe('codex_dev');
     expect(serviceProfileId('codex-dev')).toBe('codex-dev');
-    // Non-ASCII / label-unsafe names get a deterministic ASCII-safe id.
-    expect(serviceProfileId('codex dev')).toMatch(/^codex-dev-[0-9a-f]{8}$/);
+    // Unicode names retain deterministic ASCII-safe ids; invalid path segments are rejected.
+    expect(() => serviceProfileId('codex dev')).toThrow(/invalid profile name/i);
     expect(serviceProfileId('助手')).toMatch(/^profile-[0-9a-f]{8}$/);
     expect(serviceProfileId('助手')).toBe(serviceProfileId('助手'));
     expect(() => serviceProfileId('.')).toThrow(/invalid profile name/i);

@@ -1,3 +1,4 @@
+import { defaultAppPaths } from '../config/app-paths';
 import * as launchd from './launchd';
 import { launchAgentPlistPath, systemdUnitPath } from './paths';
 import * as systemd from './systemd';
@@ -256,7 +257,7 @@ function makeSystemdAdapter(profile: string, runArgs: string[]): ServiceAdapter 
 }
 
 export function getServiceAdapter(
-  profile = 'claude',
+  profile = defaultAppPaths.profile,
   runArgs: string[] = ['run'],
 ): ServiceAdapter | null {
   if (process.platform === 'darwin') return makeLaunchdAdapter(profile, runArgs);

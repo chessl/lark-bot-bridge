@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { open, readFile, rename, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { paths } from '../config/paths';
+import { defaultAppPaths } from '../config/app-paths';
 import { log } from '../core/logger';
 import type { AgentCapabilityId } from '../agent/capability';
 
@@ -58,7 +58,7 @@ export class SessionCatalog {
   private saving: Promise<void> = Promise.resolve();
   private readonly path: string;
 
-  constructor(path = `${paths.sessionsFile}.catalog.json`) {
+  constructor(path = defaultAppPaths.sessionCatalogFile) {
     this.path = path;
   }
 

@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { dirname } from 'node:path';
-import { paths } from '../config/paths';
+import { defaultAppPaths } from '../config/app-paths';
 import {
   daemonLogDir,
   daemonStderrPath,
@@ -76,7 +76,7 @@ export async function writePlist(profile: string, runArgs: string[] = ['run']): 
     envPath: process.env.PATH ?? '',
     profile,
     runArgs,
-    channelHome: paths.rootDir,
+    channelHome: defaultAppPaths.rootDir,
   });
   const plistPath = launchAgentPlistPath(profile);
   await mkdir(dirname(plistPath), { recursive: true });

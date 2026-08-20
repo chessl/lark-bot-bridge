@@ -1,8 +1,7 @@
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { resolveAppPaths } from '../config/app-paths';
-import { paths } from '../config/paths';
+import { defaultAppPaths, resolveAppPaths } from '../config/app-paths';
 
 /** Logical service name used by launchd and systemd. */
 export const SERVICE_NAME = 'lark-bot-bridge.bot';
@@ -17,22 +16,20 @@ export const SERVICE_NAME = 'lark-bot-bridge.bot';
 export const SUPERVISOR_SERVICE_ID = 'supervisor';
 
 export function serviceProfileId(profile: string): string {
-  const trimmed = profile.trim();
-  if (!trimmed) throw new Error('profile name is required for service id');
-  if (trimmed === '.' || trimmed === '..') throw new Error(`invalid profile name: ${profile}`);
+  const validated = resolveAppPaths({ rootDir: defaultAppPaths.rootDir, profile }).profile;
   // ASCII-safe names pass through unchanged. Other names get a deterministic
   // ASCII-safe id.
-  if (/^[A-Za-z0-9._-]+$/.test(trimmed)) return trimmed;
+  if (/^[A-Za-z0-9._-]+$/.test(validated)) return validated;
   const base =
-    trimmed
+    validated
       .replace(/[^A-Za-z0-9._-]+/g, '-')
       .replace(/^[-.]+|[-.]+$/g, '')
       .slice(0, 24) || 'profile';
-  const hash = createHash('sha1').update(trimmed).digest('hex').slice(0, 8);
+  const hash = createHash('sha1').update(validated).digest('hex').slice(0, 8);
   return `${base}-${hash}`;
 }
 
-export function serviceNameForProfile(profile: string = paths.profile): string {
+export function serviceNameForProfile(profile: string = defaultAppPaths.profile): string {
   return `${SERVICE_NAME}.${serviceProfileId(profile)}`;
 }
 
@@ -40,7 +37,7 @@ export function serviceNameForProfile(profile: string = paths.profile): string {
 
 export const LAUNCH_AGENT_LABEL = launchAgentLabel();
 
-export function launchAgentLabel(profile: string = paths.profile): string {
+export function launchAgentLabel(profile: string = defaultAppPaths.profile): string {
   return `ai.${serviceNameForProfile(profile)}`;
 }
 
@@ -48,7 +45,7 @@ export function launchAgentLabel(profile: string = paths.profile): string {
  * macOS convention: user LaunchAgents under `~/Library/LaunchAgents/`.
  * launchd discovers plists only from a few well-known paths.
  */
-export function launchAgentPlistPath(profile: string = paths.profile): string {
+export function launchAgentPlistPath(profile: string = defaultAppPaths.profile): string {
   return join(homedir(), 'Library', 'LaunchAgents', `${launchAgentLabel(profile)}.plist`);
 }
 
@@ -56,7 +53,7 @@ export function launchAgentPlistPath(profile: string = paths.profile): string {
 
 export const SYSTEMD_UNIT_NAME = systemdUnitName();
 
-export function systemdUnitName(profile: string = paths.profile): string {
+export function systemdUnitName(profile: string = defaultAppPaths.profile): string {
   return `${serviceNameForProfile(profile)}.service`;
 }
 
@@ -65,7 +62,7 @@ export function systemdUnitName(profile: string = paths.profile): string {
  * `$XDG_CONFIG_HOME/systemd/user/`, defaulting to
  * `~/.config/systemd/user/` when XDG_CONFIG_HOME isn't set.
  */
-export function systemdUnitPath(profile: string = paths.profile): string {
+export function systemdUnitPath(profile: string = defaultAppPaths.profile): string {
   const base = process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config');
   return join(base, 'systemd', 'user', systemdUnitName(profile));
 }
@@ -77,14 +74,14 @@ export function systemdUnitPath(profile: string = paths.profile): string {
  * `~/.lark-bot-bridge/logs/` so users only need to remember one path. Filenames
  * are `daemon-*` to keep them distinct from the rolling per-day JSON files.
  */
-export function daemonLogDir(profile: string = paths.profile): string {
-  return join(resolveAppPaths({ rootDir: paths.rootDir, profile }).logsDir, 'daemon');
+export function daemonLogDir(profile: string = defaultAppPaths.profile): string {
+  return resolveAppPaths({ rootDir: defaultAppPaths.rootDir, profile }).daemonLogsDir;
 }
 
-export function daemonStdoutPath(profile: string = paths.profile): string {
-  return join(daemonLogDir(profile), 'daemon-stdout.log');
+export function daemonStdoutPath(profile: string = defaultAppPaths.profile): string {
+  return resolveAppPaths({ rootDir: defaultAppPaths.rootDir, profile }).daemonStdoutFile;
 }
 
-export function daemonStderrPath(profile: string = paths.profile): string {
-  return join(daemonLogDir(profile), 'daemon-stderr.log');
+export function daemonStderrPath(profile: string = defaultAppPaths.profile): string {
+  return resolveAppPaths({ rootDir: defaultAppPaths.rootDir, profile }).daemonStderrFile;
 }

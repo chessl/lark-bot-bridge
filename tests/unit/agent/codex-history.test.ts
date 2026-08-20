@@ -40,7 +40,7 @@ describe('Codex thread history provider', () => {
       binary: fake.path,
       cwd: '/repo',
       limit: 2,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       timeoutMs: 5000,
     });
 
@@ -100,7 +100,7 @@ describe('Codex thread history provider', () => {
       binary: fake.path,
       cwd: '/repo',
       limit: 1,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       inheritCodexHome: false,
       timeoutMs: 5000,
     });
@@ -120,7 +120,7 @@ describe('Codex thread history provider', () => {
         binary: fake.path,
         cwd: '/repo',
         limit: 1,
-        profileStateDir: fake.dir,
+        codexHomeDir: join(fake.dir, 'codex-home'),
         timeoutMs: 5000,
       }),
     ).rejects.toMatchObject({
@@ -148,7 +148,7 @@ describe('Codex thread history provider', () => {
       binary: fake.path,
       cwd: '/repo',
       limit: 1,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       timeoutMs: 5000,
     });
 

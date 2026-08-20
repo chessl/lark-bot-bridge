@@ -22,7 +22,7 @@ describe('first-run profile bootstrap', () => {
   it('creates a Codex profile with a default workspace and inherited user Codex home', async () => {
     const root = await makeRoot();
     const workspace = join(root, 'workspace');
-    const profileDir = join(root, 'profiles', 'codex-dev');
+    const codexHomeDir = join(root, 'profiles', 'codex-dev', 'codex-home');
     await mkdir(workspace, { recursive: true });
     const codex = await writeVersionExecutable(root, 'codex', 'codex 1.2.3');
 
@@ -31,7 +31,7 @@ describe('first-run profile bootstrap', () => {
       accounts: { app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' } },
       workspace,
       codexBinaryPath: codex,
-      profileDir,
+      codexHomeDir,
     });
 
     const workspaceRealpath = await realpath(workspace);
@@ -48,20 +48,20 @@ describe('first-run profile bootstrap', () => {
       defaultAccess: 'full',
       maxAccess: 'full',
     });
-    await expect(stat(join(profileDir, 'codex-home'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(codexHomeDir)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('creates a profile without requiring a user workspace', async () => {
     const root = await makeRoot();
     const defaultWorkspace = join(root, 'managed-workspaces', 'codex-dev', 'default');
-    const profileDir = join(root, 'profiles', 'codex-dev');
+    const codexHomeDir = join(root, 'profiles', 'codex-dev', 'codex-home');
     const codex = await writeVersionExecutable(root, 'codex', 'codex 1.2.3');
 
     const profile = await createBootstrapProfileConfig({
       agentKind: 'codex',
       accounts: { app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' } },
       codexBinaryPath: codex,
-      profileDir,
+      codexHomeDir,
       defaultWorkspace,
     });
 

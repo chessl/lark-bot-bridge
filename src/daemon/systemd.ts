@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { paths } from '../config/paths';
+import { defaultAppPaths } from '../config/app-paths';
 import {
   daemonLogDir,
   daemonStderrPath,
@@ -77,7 +77,7 @@ export async function writeUnit(profile: string, runArgs: string[] = ['run']): P
     envPath: process.env.PATH ?? '',
     profile,
     runArgs,
-    channelHome: paths.rootDir,
+    channelHome: defaultAppPaths.rootDir,
   });
   const unitPath = systemdUnitPath(profile);
   await mkdir(dirname(unitPath), { recursive: true });

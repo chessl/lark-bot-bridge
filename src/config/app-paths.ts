@@ -9,18 +9,26 @@ export interface ResolveAppPathsOptions {
 export interface AppPaths {
   rootDir: string;
   profile: string;
+  profilesDir: string;
+  trashDir: string;
   profileDir: string;
+  codexHomeDir: string;
   defaultWorkspaceDir: string;
   configFile: string;
   activeProfileFile: string;
   sessionsFile: string;
+  sessionCatalogFile: string;
   workspacesFile: string;
   secretsFile: string;
   keystoreSaltFile: string;
   userAuthFile: string;
   secretsGetterScript: string;
   mediaDir: string;
+  callbackNoncesFile: string;
   logsDir: string;
+  daemonLogsDir: string;
+  daemonStdoutFile: string;
+  daemonStderrFile: string;
   /** Sidecar file describing the running bridge's local web-config server
    * ({ url, token, port, pid }); written on start, removed on stop. */
   uiFile: string;
@@ -44,25 +52,37 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
   const rootDir =
     opts.rootDir ?? process.env.LARK_CHANNEL_HOME ?? join(homedir(), '.lark-bot-bridge');
   const profile = normalizeProfileName(opts.profile ?? DEFAULT_PROFILE);
-  const profileDir = join(rootDir, 'profiles', profile);
+  const profilesDir = join(rootDir, 'profiles');
+  const profileDir = join(profilesDir, profile);
   const registryDir = join(rootDir, 'registry');
   const userLockDir = join(registryDir, 'locks');
+  const sessionsFile = join(profileDir, 'sessions.json');
+  const logsDir = join(profileDir, 'logs');
+  const daemonLogsDir = join(logsDir, 'daemon');
 
   return {
     rootDir,
     profile,
+    profilesDir,
+    trashDir: join(rootDir, '.trash'),
     profileDir,
+    codexHomeDir: join(profileDir, 'codex-home'),
     defaultWorkspaceDir: join(`${rootDir}-workspaces`, profile, 'default'),
     configFile: join(rootDir, 'config.json'),
     activeProfileFile: join(rootDir, 'active-profile'),
-    sessionsFile: join(profileDir, 'sessions.json'),
+    sessionsFile,
+    sessionCatalogFile: `${sessionsFile}.catalog.json`,
     workspacesFile: join(profileDir, 'workspaces.json'),
     secretsFile: join(profileDir, 'secrets.enc'),
     keystoreSaltFile: join(profileDir, '.keystore.salt'),
     userAuthFile: join(profileDir, 'user-auth.json'),
     secretsGetterScript: join(rootDir, 'secrets-getter'),
+    callbackNoncesFile: join(profileDir, 'callback-nonces.json'),
     mediaDir: join(profileDir, 'media'),
-    logsDir: join(profileDir, 'logs'),
+    logsDir,
+    daemonLogsDir,
+    daemonStdoutFile: join(daemonLogsDir, 'daemon-stdout.log'),
+    daemonStderrFile: join(daemonLogsDir, 'daemon-stderr.log'),
     uiFile: join(profileDir, 'ui.json'),
     hostUiFile: join(rootDir, 'ui.json'),
     hostLogsDir: join(rootDir, 'logs'),
@@ -75,6 +95,8 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
     userAuthLockTarget: (appId: string) => join(userLockDir, 'user-auth', lockSafeName(appId)),
   };
 }
+
+export const defaultAppPaths = resolveAppPaths();
 
 function normalizeProfileName(profile: string): string {
   const trimmed = profile.trim();

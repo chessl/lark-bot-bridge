@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { LarkChannel, ResourceDescriptor } from '@larksuite/channel';
-import { paths } from '../config/paths';
+import { defaultAppPaths } from '../config/app-paths';
 import { log } from '../core/logger';
 import {
   normalizeAttachments,
@@ -29,7 +29,7 @@ export class MediaCache {
   private readonly channel: LarkChannel;
   private readonly rootDir: string;
 
-  constructor(channel: LarkChannel, rootDir: string = paths.mediaDir) {
+  constructor(channel: LarkChannel, rootDir: string = defaultAppPaths.mediaDir) {
     this.channel = channel;
     this.rootDir = rootDir;
   }
@@ -125,7 +125,10 @@ export class MediaCache {
 }
 
 /** Delete files under the media cache whose mtime is older than maxAgeMs. */
-export async function gcMediaCache(maxAgeMs: number, root: string = paths.mediaDir): Promise<void> {
+export async function gcMediaCache(
+  maxAgeMs: number,
+  root: string = defaultAppPaths.mediaDir,
+): Promise<void> {
   try {
     await stat(root);
   } catch {

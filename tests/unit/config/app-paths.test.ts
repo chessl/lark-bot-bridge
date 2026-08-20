@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveAppPaths } from '../../../src/config/app-paths';
+import { defaultAppPaths, resolveAppPaths } from '../../../src/config/app-paths';
 
 const roots: string[] = [];
 
@@ -28,6 +28,11 @@ describe('resolveAppPaths', () => {
     }
   });
 
+  it('exposes the process-wide defaults directly', () => {
+    expect(defaultAppPaths.rootDir).toBe(resolveAppPaths().rootDir);
+    expect(defaultAppPaths.profile).toBe(resolveAppPaths().profile);
+  });
+
   it('keeps root config, active profile, registry, and locks under the user root', async () => {
     const root = await tempRoot();
 
@@ -35,6 +40,8 @@ describe('resolveAppPaths', () => {
 
     expect(paths.rootDir).toBe(root);
     expect(paths.profile).toBe('codex-dev');
+    expect(paths.profilesDir).toBe(join(root, 'profiles'));
+    expect(paths.trashDir).toBe(join(root, '.trash'));
     expect(paths.configFile).toBe(join(root, 'config.json'));
     expect(paths.activeProfileFile).toBe(join(root, 'active-profile'));
     expect(paths.registryDir).toBe(join(root, 'registry'));
@@ -43,9 +50,15 @@ describe('resolveAppPaths', () => {
     expect(paths.profileLockFile).toBe(
       join(root, 'registry', 'locks', 'profile', 'codex-dev.lock'),
     );
-    expect(paths.appLockFile('cli_app')).toBe(
+    expect(paths.appLockFile('cli/app')).toBe(
       join(root, 'registry', 'locks', 'app', 'cli_app.lock'),
     );
+    expect(paths.userAuthLockTarget('cli/app')).toBe(
+      join(root, 'registry', 'locks', 'user-auth', 'cli_app'),
+    );
+    expect(paths.hostUiFile).toBe(join(root, 'ui.json'));
+    expect(paths.hostLogsDir).toBe(join(root, 'logs'));
+    expect(paths.hostLockFile).toBe(join(root, 'registry', 'locks', 'supervisor.lock'));
   });
 
   it('places runtime state inside the selected profile directory', async () => {
@@ -55,13 +68,25 @@ describe('resolveAppPaths', () => {
 
     const profileDir = join(root, 'profiles', 'claude');
     expect(paths.profileDir).toBe(profileDir);
+    expect(paths.codexHomeDir).toBe(join(profileDir, 'codex-home'));
     expect(paths.defaultWorkspaceDir).toBe(join(`${root}-workspaces`, 'claude', 'default'));
     expect(paths.sessionsFile).toBe(join(profileDir, 'sessions.json'));
+    expect(paths.sessionCatalogFile).toBe(join(profileDir, 'sessions.json.catalog.json'));
     expect(paths.workspacesFile).toBe(join(profileDir, 'workspaces.json'));
     expect(paths.secretsFile).toBe(join(profileDir, 'secrets.enc'));
     expect(paths.keystoreSaltFile).toBe(join(profileDir, '.keystore.salt'));
+    expect(paths.userAuthFile).toBe(join(profileDir, 'user-auth.json'));
     expect(paths.mediaDir).toBe(join(profileDir, 'media'));
+    expect(paths.callbackNoncesFile).toBe(join(profileDir, 'callback-nonces.json'));
     expect(paths.logsDir).toBe(join(profileDir, 'logs'));
+    expect(paths.daemonLogsDir).toBe(join(profileDir, 'logs', 'daemon'));
+    expect(paths.daemonStdoutFile).toBe(
+      join(profileDir, 'logs', 'daemon', 'daemon-stdout.log'),
+    );
+    expect(paths.daemonStderrFile).toBe(
+      join(profileDir, 'logs', 'daemon', 'daemon-stderr.log'),
+    );
+    expect(paths.uiFile).toBe(join(profileDir, 'ui.json'));
     expect(paths.secretsGetterScript).toBe(join(root, 'secrets-getter'));
   });
 

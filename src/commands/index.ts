@@ -665,7 +665,7 @@ async function listCodexResumeHistory(
       binary,
       cwd,
       limit,
-      profileStateDir: commandProfilePaths(ctx).profileDir,
+      codexHomeDir: commandProfilePaths(ctx).codexHomeDir,
       ...(codex.codexHome ? { codexHome: codex.codexHome } : {}),
       ...(codex.inheritCodexHome !== undefined ? { inheritCodexHome: codex.inheritCodexHome } : {}),
     });

@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import type { SandboxMode } from '../../config/profile-schema';
@@ -19,7 +18,7 @@ import { type CodexFinishReason, CodexJsonlTranslator } from './jsonl';
 
 export interface CodexAdapterOptions {
   binary: string;
-  profileStateDir: string;
+  codexHomeDir: string;
   codexHome?: string;
   inheritCodexHome?: boolean;
   ignoreUserConfig?: boolean;
@@ -35,7 +34,7 @@ export class CodexAdapter implements AgentAdapter {
   readonly displayName = 'Codex CLI';
 
   private readonly binary: string;
-  private readonly profileStateDir: string;
+  private readonly codexHomeDir: string;
   private readonly codexHome: string | undefined;
   private readonly inheritCodexHome: boolean;
   private readonly ignoreUserConfig: boolean;
@@ -46,7 +45,7 @@ export class CodexAdapter implements AgentAdapter {
 
   constructor(opts: CodexAdapterOptions) {
     this.binary = opts.binary;
-    this.profileStateDir = opts.profileStateDir;
+    this.codexHomeDir = opts.codexHomeDir;
     this.codexHome = opts.codexHome;
     this.inheritCodexHome = opts.inheritCodexHome !== false;
     this.ignoreUserConfig = opts.ignoreUserConfig === true;
@@ -99,7 +98,7 @@ export class CodexAdapter implements AgentAdapter {
     if (this.codexHome) {
       envOverrides.CODEX_HOME = this.codexHome;
     } else if (!this.inheritCodexHome) {
-      envOverrides.CODEX_HOME = join(this.profileStateDir, 'codex-home');
+      envOverrides.CODEX_HOME = this.codexHomeDir;
     }
     const child = spawnProcess(this.binary, args, {
       cwd: opts.cwd,

@@ -120,10 +120,7 @@ export async function withConfigFileLock<T>(configPath: string, fn: () => Promis
 }
 
 export async function readActiveProfile(rootDir?: string): Promise<string | undefined> {
-  const activeProfileFile = join(
-    rootDir ?? process.env.LARK_CHANNEL_HOME ?? resolveAppPaths().rootDir,
-    'active-profile',
-  );
+  const activeProfileFile = resolveAppPaths({ rootDir }).activeProfileFile;
   try {
     const text = await readFile(activeProfileFile, 'utf8');
     const profile = text.trim();
@@ -135,8 +132,9 @@ export async function readActiveProfile(rootDir?: string): Promise<string | unde
 }
 
 export async function writeActiveProfile(rootDir: string, profile: string): Promise<void> {
-  const activeProfileFile = join(rootDir, 'active-profile');
-  await writeFileAtomic(activeProfileFile, `${profile}\n`, { mode: 0o600 });
+  await writeFileAtomic(resolveAppPaths({ rootDir }).activeProfileFile, `${profile}\n`, {
+    mode: 0o600,
+  });
 }
 
 export function runtimeProfileConfig(root: RootConfig, profile: string): AppConfig & ProfileConfig {
@@ -203,10 +201,9 @@ export async function removeProfile(
   if (root.activeProfile === profile) {
     next.activeProfile = Object.keys(next.profiles).sort((a, b) => a.localeCompare(b))[0] ?? '';
   }
-  const profileDir = resolveAppPaths({ rootDir, profile }).profileDir;
+  const { profileDir, trashDir } = resolveAppPaths({ rootDir, profile });
   if (opts.purge) {
     if (!(await pathExists(profileDir))) return { root: next, purged: true };
-    const trashDir = join(rootDir, '.trash');
     await mkdir(trashDir, { recursive: true });
     const stagedTo = await nextArchivePath(trashDir, profile, opts.now?.() ?? new Date());
     await rename(profileDir, stagedTo);
@@ -224,7 +221,6 @@ export async function removeProfile(
     };
   }
 
-  const trashDir = join(rootDir, '.trash');
   await mkdir(trashDir, { recursive: true });
   const archivedTo = await nextArchivePath(trashDir, profile, opts.now?.() ?? new Date());
   await rename(profileDir, archivedTo);

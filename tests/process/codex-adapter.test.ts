@@ -50,7 +50,7 @@ describe('CodexAdapter process contract', () => {
 
     const run = await new CodexAdapter({
       binary: fake.path,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       sandbox: 'read-only',
     }).start({
       runId: 'run-fresh',
@@ -96,7 +96,7 @@ describe('CodexAdapter process contract', () => {
     };
     const run = await new CodexAdapter({
       binary: fake.path,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
     }).start({
       runId: 'run-mcp',
       prompt: 'use lark',
@@ -120,7 +120,7 @@ describe('CodexAdapter process contract', () => {
 
     const run = await new CodexAdapter({
       binary: fake.path,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
     }).start({
       runId: 'run-default-home',
       prompt: 'home',
@@ -142,7 +142,7 @@ describe('CodexAdapter process contract', () => {
 
     const run = await new CodexAdapter({
       binary: fake.path,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       sandbox: 'workspace-write',
     }).start({
       runId: 'run-resume',
@@ -173,7 +173,7 @@ describe('CodexAdapter process contract', () => {
 
     const run = await new CodexAdapter({
       binary: fake.path,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       sandbox: 'danger-full-access',
     }).start({
       runId: 'run-policy-sandbox',
@@ -197,7 +197,7 @@ describe('CodexAdapter process contract', () => {
 
     const run = await new CodexAdapter({
       binary: fake.path,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       codexHome,
     }).start({
       runId: 'run-home',
@@ -219,7 +219,7 @@ describe('CodexAdapter process contract', () => {
 
     const run = await new CodexAdapter({
       binary: fake.path,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       inheritCodexHome: false,
     }).start({
       runId: 'run-profile-local-home',
@@ -241,7 +241,7 @@ describe('CodexAdapter process contract', () => {
 
     const run = await new CodexAdapter({
       binary: fake.path,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       ignoreUserConfig: false,
       ignoreRules: false,
     }).start({
@@ -264,7 +264,7 @@ describe('CodexAdapter process contract', () => {
 
     const run = await new CodexAdapter({
       binary: fake.path,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       ignoreUserConfig: true,
     }).start({
       runId: 'run-ignore-user-config',
@@ -285,7 +285,10 @@ describe('CodexAdapter process contract', () => {
     });
     cleanup.push(fake.dir);
 
-    const run = await new CodexAdapter({ binary: fake.path, profileStateDir: fake.dir }).start({
+    const run = await new CodexAdapter({
+      binary: fake.path,
+      codexHomeDir: join(fake.dir, 'codex-home'),
+    }).start({
       runId: 'run-fail',
       prompt: 'fail',
       cwd: await realpath(fake.dir),
@@ -315,7 +318,10 @@ describe('CodexAdapter process contract', () => {
     });
     cleanup.push(fake.dir);
 
-    const run = await new CodexAdapter({ binary: fake.path, profileStateDir: fake.dir }).start({
+    const run = await new CodexAdapter({
+      binary: fake.path,
+      codexHomeDir: join(fake.dir, 'codex-home'),
+    }).start({
       runId: 'run-retry',
       prompt: 'retry',
       cwd: await realpath(fake.dir),
@@ -338,7 +344,7 @@ describe('CodexAdapter process contract', () => {
 
     const run = await new CodexAdapter({
       binary: fake.path,
-      profileStateDir: fake.dir,
+      codexHomeDir: join(fake.dir, 'codex-home'),
       stopGraceMs: 20,
     }).start({
       runId: 'run-stop',
@@ -362,7 +368,7 @@ describe('CodexAdapter process contract', () => {
 
   it('requires cwd to be resolved by policy before spawning', async () => {
     await expect(
-      new CodexAdapter({ binary: 'unused', profileStateDir: tmpdir() }).start({
+      new CodexAdapter({ binary: 'unused', codexHomeDir: join(tmpdir(), 'codex-home') }).start({
         runId: 'run-no-cwd',
         prompt: 'hi',
       }),
