@@ -13,6 +13,7 @@ import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { commentDocumentScopeId, commentTokenDigest } from '../../../src/bot/comment-resource.js';
 import { handleCommentMention } from '../../../src/bot/comments.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
+import { ScopedRuns } from '../../../src/bot/run-flow.js';
 import {
   createDefaultProfileConfig,
   type ProfileConfig,
@@ -149,7 +150,7 @@ describe('comment run flow', () => {
   it('does not reuse an existing Codex thread while another document comment run is active', async () => {
     const h = await createBlockingHarness({
       agentKind: 'codex',
-      threadIds: ['thread-one', 'thread-two'],
+      threadIds: ['thread-one', 'thread-two', 'thread-three'],
     });
     await seedCodexCatalog(h, 'seed-thread');
 
@@ -166,8 +167,16 @@ describe('comment run flow', () => {
     expect(h.agent.runOptions[1]?.threadId).toBeUndefined();
 
     h.agent.finishRun(0);
+    await first;
+    const third = handleCommentMention(
+      h.deps(event({ commentId: 'comment-3', replyId: 'reply-3' })),
+    );
+    await waitFor(() => h.agent.runOptions.length === 3);
+    expect(h.agent.runOptions[2]?.threadId).toBeUndefined();
+
     h.agent.finishRun(1);
-    await Promise.all([first, second]);
+    h.agent.finishRun(2);
+    await Promise.all([second, third]);
   });
 
   it('keeps replying when typing reaction add fails', async () => {
@@ -235,8 +244,7 @@ async function createHarness(
   sessionCatalog: SessionCatalog;
   workspaces: WorkspaceStore;
   profileConfig: ProfileConfig;
-  activeRuns: ActiveRuns;
-  executor: RunExecutor;
+  scopedRuns: ScopedRuns;
   inThreadReplies: string[];
   deps(evt: CommentEvent): Parameters<typeof handleCommentMention>[0];
 }> {
@@ -336,6 +344,13 @@ async function createHarness(
     activeRuns,
     createRunId: () => `comment-run-${agent.runOptions.length + 1}`,
   });
+  const scopedRuns = new ScopedRuns({
+    executor,
+    sessionCatalog,
+    workspaces,
+    profile: 'claude',
+    profileConfig: () => profileConfig,
+  });
   cleanups.push(async () => {
     await Promise.all([sessions.flush(), sessionCatalog.flush(), workspaces.flush()]);
     await tmp.cleanup();
@@ -348,18 +363,13 @@ async function createHarness(
     sessionCatalog,
     workspaces,
     profileConfig,
-    activeRuns,
-    executor,
+    scopedRuns,
     inThreadReplies,
     deps: (evt) => ({
       channel: channel as unknown as Parameters<typeof handleCommentMention>[0]['channel'],
       evt,
-      agent,
       sessions,
-      sessionCatalog,
-      workspaces,
-      activeRuns,
-      executor,
+      scopedRuns,
       controls: {
         profile: 'claude',
         profileConfig,
@@ -439,6 +449,13 @@ async function createBlockingHarness(options: {
     activeRuns,
     createRunId: () => `comment-run-${agent.runOptions.length + 1}`,
   });
+  const scopedRuns = new ScopedRuns({
+    executor,
+    sessionCatalog,
+    workspaces,
+    profile: 'claude',
+    profileConfig: () => profileConfig,
+  });
   cleanups.push(async () => {
     await Promise.all([sessions.flush(), sessionCatalog.flush(), workspaces.flush()]);
     await tmp.cleanup();
@@ -453,12 +470,8 @@ async function createBlockingHarness(options: {
     deps: (evt) => ({
       channel: channel as unknown as Parameters<typeof handleCommentMention>[0]['channel'],
       evt,
-      agent,
       sessions,
-      sessionCatalog,
-      workspaces,
-      activeRuns,
-      executor,
+      scopedRuns,
       controls: {
         profile: 'claude',
         profileConfig,

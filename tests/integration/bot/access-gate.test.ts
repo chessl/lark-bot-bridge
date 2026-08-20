@@ -8,6 +8,7 @@ import { tryHandleCommand, type CommandContext, type Controls } from '../../../s
 import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema';
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { ProcessPool } from '../../../src/bot/process-pool';
+import { ScopedRuns } from '../../../src/bot/run-flow';
 import { RunExecutor } from '../../../src/runtime/run-executor';
 import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
@@ -110,16 +111,21 @@ describe('unified access gates', () => {
       activeRuns,
       createRunId: () => 'comment-run-1',
     });
+    const workspaces = new WorkspaceStore(join(root, 'workspaces.json'));
+    const controls = makeControls({ owner: 'ou_owner' });
+    const scopedRuns = new ScopedRuns({
+      executor,
+      workspaces,
+      profile: 'claude',
+      profileConfig: () => controls.profileConfig,
+    });
 
     await handleCommentMention({
       channel: channel as Parameters<typeof handleCommentMention>[0]['channel'],
       evt: commentEvent('ou_other'),
-      agent,
       sessions: new SessionStore(join(root, 'sessions.json')),
-      workspaces: new WorkspaceStore(join(root, 'workspaces.json')),
-      activeRuns,
-      executor,
-      controls: makeControls({ owner: 'ou_owner' }),
+      scopedRuns,
+      controls,
     });
 
     expect(calls).toEqual(['wiki.getNode', 'fileComment.get']);

@@ -1,3 +1,4 @@
+import { mkdir } from 'node:fs/promises';
 import { capabilityForProfile, type AgentCapability } from '../agent/capability';
 import { resolveModelArg } from '../agent/models';
 import type { AgentEvent } from '../agent/types';
@@ -38,6 +39,8 @@ export interface StartScopedRunInput {
   attachments: AgentAttachment[];
   access: AccessDecision;
   nowait?: boolean;
+  managedFallbackCwd?: string;
+  ttlMs?: number;
 }
 
 export interface ScopedRunMetadata {
@@ -45,6 +48,7 @@ export interface ScopedRunMetadata {
   scopeId: string;
   cwdRealpath: string;
   policyFingerprint: string;
+  expiresAt: number;
   resumeFrom?: string;
 }
 
@@ -57,6 +61,7 @@ export interface ScopedRun {
 
 export type RunFlowRejectCode =
   | WorkingDirectoryRejectReason
+  | 'managed-fallback-unavailable'
   | RunPolicyReject['rejectReason']['code']
   | RunRejectedCode;
 
@@ -79,6 +84,7 @@ export class ScopedRuns {
   private readonly stopGraceMs: (() => number | undefined) | undefined;
   private readonly now: () => number;
   private readonly active = new Map<string, ScopedRun>();
+  private readonly activeSessionScopes = new Map<string, number>();
 
   constructor(deps: ScopedRunsDeps) {
     this.executor = deps.executor;
@@ -94,9 +100,14 @@ export class ScopedRuns {
     const profileConfig = this.profileConfig();
     const capability = capabilityForProfile(profileConfig);
     const sessionScopeId = input.sessionScopeId ?? input.scopeId;
-    const requestedCwd =
-      this.workspaces.cwdFor(sessionScopeId) ?? profileConfig.workspaces.default ?? '';
-    const workspace = await resolveWorkingDirectory(requestedCwd);
+    const configuredCwd = this.workspaces.cwdFor(sessionScopeId);
+    const workspace = input.managedFallbackCwd
+      ? await resolveScopedWorkingDirectory(
+          configuredCwd,
+          profileConfig.workspaces.default,
+          input.managedFallbackCwd,
+        )
+      : await resolveWorkingDirectory(configuredCwd ?? profileConfig.workspaces.default ?? '');
     if (!workspace.ok) {
       return {
         ok: false,
@@ -106,6 +117,7 @@ export class ScopedRuns {
         },
       };
     }
+    const requestedCwd = workspace.requestedCwd;
 
     const policy = evaluateRunPolicy({
       scope: input.scope,
@@ -119,15 +131,19 @@ export class ScopedRuns {
       now: this.now(),
       codexHome: profileConfig.codex?.codexHome,
       inheritCodexHome: profileConfig.codex?.inheritCodexHome,
+      ...(input.ttlMs !== undefined ? { ttlMs: input.ttlMs } : {}),
     });
     if (!policy.ok) return policy;
 
-    const catalogEntry = this.sessionCatalog?.activeFor({
-      scopeId: sessionScopeId,
-      agentId: capability.agentId,
-      cwdRealpath: workspace.cwdRealpath,
-      policyFingerprint: policy.policyFingerprint,
-    });
+    const sessionScopeRun = this.reserveSessionScope(sessionScopeId);
+    const catalogEntry = sessionScopeRun.wasActive
+      ? undefined
+      : this.sessionCatalog?.activeFor({
+          scopeId: sessionScopeId,
+          agentId: capability.agentId,
+          cwdRealpath: workspace.cwdRealpath,
+          policyFingerprint: policy.policyFingerprint,
+        });
     const threadId =
       catalogEntry && capability.sessionKind === 'codex-thread'
         ? catalogEntry.threadId
@@ -175,6 +191,7 @@ export class ScopedRuns {
         },
       });
     } catch (err) {
+      sessionScopeRun.release();
       if (!(err instanceof RunRejected)) throw err;
       return {
         ok: false,
@@ -195,18 +212,31 @@ export class ScopedRuns {
       scopeId: input.scopeId,
       cwdRealpath: workspace.cwdRealpath,
       policyFingerprint: policy.policyFingerprint,
+      expiresAt: policy.expiresAt,
       ...(resumeFrom ? { resumeFrom } : {}),
     };
     let stopPromise: Promise<void> | undefined;
+    let cleaned = false;
     let run: ScopedRun;
+    const cleanup = (): void => {
+      if (cleaned) return;
+      cleaned = true;
+      this.remove(input.scopeId, run);
+      sessionScopeRun.release();
+    };
     const stop = (): Promise<void> => {
-      stopPromise ??= execution.stop().finally(() => this.remove(input.scopeId, run));
+      stopPromise ??= execution.stop().finally(cleanup);
       return stopPromise;
     };
     run = {
       metadata,
-      events: this.observe(execution, sessionScopeId, capability, policy, requestedModel, () =>
-        this.remove(input.scopeId, run),
+      events: this.observe(
+        execution,
+        sessionScopeId,
+        capability,
+        policy,
+        requestedModel,
+        cleanup,
       ),
       stop,
       wasInterrupted: () => execution.handle.interrupted,
@@ -280,6 +310,28 @@ export class ScopedRuns {
   private remove(scopeId: string, run: ScopedRun): void {
     if (this.active.get(scopeId) === run) this.active.delete(scopeId);
   }
+
+  private reserveSessionScope(scopeId: string): {
+    wasActive: boolean;
+    release(): void;
+  } {
+    const count = this.activeSessionScopes.get(scopeId) ?? 0;
+    this.activeSessionScopes.set(scopeId, count + 1);
+    let released = false;
+    return {
+      wasActive: count > 0,
+      release: () => {
+        if (released) return;
+        released = true;
+        const next = (this.activeSessionScopes.get(scopeId) ?? 1) - 1;
+        if (next > 0) {
+          this.activeSessionScopes.set(scopeId, next);
+        } else {
+          this.activeSessionScopes.delete(scopeId);
+        }
+      },
+    };
+  }
 }
 
 export interface RecordRunSessionEventInput {
@@ -293,7 +345,7 @@ export interface RecordRunSessionEventInput {
 export function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
   if (input.event.type !== 'system') return;
   if (input.capability.sessionKind !== 'codex-thread' && input.event.sessionId) {
-    const cwdRealpath = input.event.cwd ?? input.policy.cwdRealpath;
+    const cwdRealpath = input.policy.cwdRealpath;
     input.sessionCatalog?.upsertActive({
       scopeId: input.scopeId,
       agentId: input.capability.agentId,
@@ -312,4 +364,46 @@ export function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
       threadId: input.event.threadId,
     });
   }
+}
+
+async function resolveScopedWorkingDirectory(
+  configuredCwd: string | undefined,
+  defaultCwd: string | undefined,
+  managedFallbackCwd: string,
+): Promise<
+  | { ok: true; requestedCwd: string; cwdRealpath: string }
+  | {
+      ok: false;
+      reason: WorkingDirectoryRejectReason | 'managed-fallback-unavailable';
+      requestedCwd: string;
+      userVisible: string;
+    }
+> {
+  const failures: string[] = [];
+  for (const requestedCwd of [configuredCwd, defaultCwd]) {
+    if (!requestedCwd) continue;
+    const workspace = await resolveWorkingDirectory(requestedCwd);
+    if (workspace.ok) return workspace;
+    failures.push(workspace.userVisible);
+  }
+
+  try {
+    await mkdir(managedFallbackCwd, { recursive: true, mode: 0o700 });
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'managed-fallback-unavailable',
+      requestedCwd: managedFallbackCwd,
+      userVisible: [
+        ...failures,
+        `托管工作目录不可用：${err instanceof Error ? err.message : String(err)}`,
+      ].join('；'),
+    };
+  }
+  const workspace = await resolveWorkingDirectory(managedFallbackCwd);
+  if (workspace.ok) return workspace;
+  return {
+    ...workspace,
+    userVisible: [...failures, workspace.userVisible].join('；'),
+  };
 }

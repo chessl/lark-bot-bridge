@@ -377,12 +377,8 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         await handleCommentMention({
           channel,
           evt,
-          agent,
           sessions,
-          sessionCatalog,
-          workspaces,
-          activeRuns,
-          executor,
+          scopedRuns,
           controls,
         }).catch((err) => log.fail('comment', err));
       }).catch((err) => log.fail('comment', err));

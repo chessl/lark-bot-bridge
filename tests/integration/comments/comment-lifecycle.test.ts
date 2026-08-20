@@ -11,6 +11,7 @@ import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { handleCommentMention } from '../../../src/bot/comments.js';
 import { commentTokenDigest } from '../../../src/bot/comment-resource.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
+import { ScopedRuns } from '../../../src/bot/run-flow.js';
 import {
   createDefaultProfileConfig,
   type ProfileConfig,
@@ -72,6 +73,19 @@ describe('comment lifecycle', () => {
 
     expect(h.channel.requests).toEqual([]);
     expect(h.agent.runOptions).toEqual([]);
+  });
+
+  it('replies when ScopedRuns rejects comment work during reconnect', async () => {
+    const h = await createHarness({ autoCompleteAgent: true });
+    const resume = h.activeRuns.pauseNewRuns('reconnect');
+    try {
+      await handleCommentMention(h.deps(event()));
+    } finally {
+      resume();
+    }
+
+    expect(h.agent.runOptions).toEqual([]);
+    expect(h.channel.inThreadReplies).toEqual(['当前 bot 正在重连，请稍后再试。']);
   });
 
   it('does not write a stale comment reply after the comment run is interrupted', async () => {
@@ -142,6 +156,7 @@ describe('comment lifecycle', () => {
     await running;
 
     expect(h.agent.stopped).toBe(true);
+    expect(h.agent.stopCalls).toBe(1);
     expect(h.channel.inThreadReplies).toEqual(['本次评论任务已超时，请重新 @ 我。']);
   });
 
@@ -159,6 +174,7 @@ describe('comment lifecycle', () => {
     await running;
 
     expect(h.agent.stopped).toBe(true);
+    expect(h.agent.stopCalls).toBe(1);
     expect(h.channel.inThreadReplies).toEqual(['本次评论任务已超时，请重新 @ 我。']);
   });
 
@@ -250,6 +266,12 @@ async function createHarness(options: { autoCompleteAgent?: boolean } = {}): Pro
     activeRuns,
     createRunId: () => 'comment-run-1',
   });
+  const scopedRuns = new ScopedRuns({
+    executor,
+    workspaces,
+    profile: 'claude',
+    profileConfig: () => profileConfig,
+  });
 
   return {
     tmp,
@@ -260,11 +282,8 @@ async function createHarness(options: { autoCompleteAgent?: boolean } = {}): Pro
     deps: (evt) => ({
       channel: channel as unknown as LarkChannel,
       evt,
-      agent,
       sessions,
-      workspaces,
-      activeRuns,
-      executor,
+      scopedRuns,
       controls: {
         profile: 'claude',
         profileConfig,
@@ -287,6 +306,7 @@ class BlockingAgentAdapter implements AgentAdapter {
   readonly runOptions: AgentRunOptions[] = [];
   private releases: Array<(() => void) | undefined> = [];
   private wasStopped = false;
+  private stops = 0;
 
   constructor(private readonly autoComplete: boolean = false) {}
 
@@ -299,6 +319,10 @@ class BlockingAgentAdapter implements AgentAdapter {
     return this.wasStopped;
   }
 
+  get stopCalls(): number {
+    return this.stops;
+  }
+
   async start(opts: AgentRunOptions): Promise<AgentRun> {
     const runIndex = this.runOptions.length;
     this.runOptions.push(opts);
@@ -306,6 +330,7 @@ class BlockingAgentAdapter implements AgentAdapter {
       runId: opts.runId,
       events: this.events(runIndex),
       stop: async () => {
+        this.stops++;
         this.wasStopped = true;
         this.release(runIndex);
       },

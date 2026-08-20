@@ -4,6 +4,7 @@ import type { AgentEvent } from '../../../src/agent/types.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { handleCommentMention } from '../../../src/bot/comments.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
+import { ScopedRuns } from '../../../src/bot/run-flow.js';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionCatalog } from '../../../src/session/catalog.js';
@@ -124,6 +125,30 @@ describe('cloud-doc comment delivery', () => {
     expect(h.inThreadReplies).toEqual([]);
     expect(h.createdTopLevelReplies).toEqual(['bold italic code\nitem\nquote']);
   });
+
+  it.each([
+    {
+      events: [{ type: 'error', message: 'boom', terminationReason: 'failed' }],
+      reply: '⚠️ Claude 报错：boom',
+    },
+    {
+      events: [{ type: 'done', terminationReason: 'normal' }],
+      reply: '（无回复内容）',
+    },
+  ] as const)('preserves the $events.0.type terminal reply outcome', async ({ events, reply }) => {
+    const h = await createCommentHarness({
+      getResponse: commentGet({
+        replyId: 'reply-terminal',
+        question: 'terminal outcome',
+        isWhole: false,
+      }),
+      agentEvents: events,
+    });
+
+    await handleCommentMention(h.deps(event({ replyId: 'reply-terminal' })));
+
+    expect(h.inThreadReplies).toEqual([reply]);
+  });
 });
 
 async function createCommentHarness(options: {
@@ -228,6 +253,13 @@ async function createCommentHarness(options: {
     activeRuns,
     createRunId: () => `comment-run-${agent.runOptions.length + 1}`,
   });
+  const scopedRuns = new ScopedRuns({
+    executor,
+    sessionCatalog,
+    workspaces,
+    profile: 'claude',
+    profileConfig: () => profileConfig,
+  });
   cleanups.push(async () => {
     await Promise.all([sessions.flush(), sessionCatalog.flush(), workspaces.flush()]);
     await tmp.cleanup();
@@ -241,12 +273,8 @@ async function createCommentHarness(options: {
     deps: (evt) => ({
       channel: channel as unknown as Parameters<typeof handleCommentMention>[0]['channel'],
       evt,
-      agent,
       sessions,
-      sessionCatalog,
-      workspaces,
-      activeRuns,
-      executor,
+      scopedRuns,
       controls: {
         profile: 'claude',
         profileConfig,
