@@ -60,7 +60,6 @@ export class OmpAdapter implements AgentAdapter {
     this.botIdentity = identity;
   }
 
-
   async checkAvailability(): Promise<AgentAvailability> {
     return checkAgentAvailability({
       agentId: 'omp',
@@ -69,7 +68,6 @@ export class OmpAdapter implements AgentAdapter {
       binaryPath: this.binary,
     });
   }
-
 
   async start(opts: AgentRunOptions): Promise<AgentRun> {
     if (opts.sandbox && opts.sandbox !== 'danger-full-access') {

@@ -1,10 +1,10 @@
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
+import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 import {
   assertReconnectAgentKindUnchanged,
   createRuntimeAgent,
 } from '../../../src/runtime/agent-runtime.js';
-import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 import { createRuntimeProfileConfig } from '../../../src/runtime/profile-runtime.js';
 
 describe('start runtime agent factory', () => {

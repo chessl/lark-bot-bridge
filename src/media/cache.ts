@@ -6,12 +6,12 @@ import type { LarkChannel, ResourceDescriptor } from '@larksuite/channel';
 import { defaultAppPaths } from '../config/app-paths';
 import { log } from '../core/logger';
 import {
-  normalizeAttachments,
-  safeExtensionForMime,
   type AttachmentCandidate,
   type AttachmentKind,
   type AttachmentPolicyOptions,
   type NormalizedAttachment,
+  normalizeAttachments,
+  safeExtensionForMime,
 } from './attachment';
 
 export type LocalAttachment = NormalizedAttachment;

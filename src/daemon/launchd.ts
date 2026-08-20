@@ -30,9 +30,11 @@ export interface PlistInputs {
 }
 
 export function buildPlist(inputs: PlistInputs): string {
-  const escape = (s: string): string =>
+  const escapeXml = (s: string): string =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  const argStrings = inputs.runArgs.map((a) => `        <string>${escape(a)}</string>`).join('\n');
+  const argStrings = inputs.runArgs
+    .map((a) => `        <string>${escapeXml(a)}</string>`)
+    .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -41,8 +43,8 @@ export function buildPlist(inputs: PlistInputs): string {
     <string>${launchAgentLabel(inputs.profile)}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${escape(inputs.nodePath)}</string>
-        <string>${escape(inputs.bridgeEntryPath)}</string>
+        <string>${escapeXml(inputs.nodePath)}</string>
+        <string>${escapeXml(inputs.bridgeEntryPath)}</string>
 ${argStrings}
     </array>
     <key>RunAtLoad</key>
@@ -50,15 +52,15 @@ ${argStrings}
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>${escape(daemonStdoutPath(inputs.profile))}</string>
+    <string>${escapeXml(daemonStdoutPath(inputs.profile))}</string>
     <key>StandardErrorPath</key>
-    <string>${escape(daemonStderrPath(inputs.profile))}</string>
+    <string>${escapeXml(daemonStderrPath(inputs.profile))}</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>${escape(inputs.envPath)}</string>
+        <string>${escapeXml(inputs.envPath)}</string>
         <key>LARK_CHANNEL_HOME</key>
-        <string>${escape(inputs.channelHome)}</string>
+        <string>${escapeXml(inputs.channelHome)}</string>
     </dict>
 </dict>
 </plist>

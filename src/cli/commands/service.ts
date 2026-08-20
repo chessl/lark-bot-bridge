@@ -306,8 +306,7 @@ async function reportConnectAfter(
     }
   }
 
-  const verb =
-    operation === 'restart' && 'action' in result ? result.action : ('started' as const);
+  const verb = operation === 'restart' && 'action' in result ? result.action : ('started' as const);
   console.log(verb === 'started' ? '正在等待 bot 连接...' : '正在等待 bot 重新连接...');
   const entry = await waitForServiceConnect(appId, profile, beforePids);
   if (entry) {

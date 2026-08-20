@@ -1,16 +1,16 @@
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizedMessage } from '@larksuite/channel';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRun } from '../../../src/agent/types';
 import { ActiveRuns } from '../../../src/bot/active-runs';
-import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index';
+import { type CommandContext, type Controls, tryHandleCommand } from '../../../src/commands/index';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { createFakeChannel } from '../../helpers/fake-channel';
-import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
 import { createTestScopedRuns } from '../../helpers/scoped-runs';
+import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
 
 const cleanups: Array<() => Promise<void>> = [];
 

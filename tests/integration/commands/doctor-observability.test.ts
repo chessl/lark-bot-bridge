@@ -1,11 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizedMessage } from '@larksuite/channel';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { ProcessPool } from '../../../src/bot/process-pool';
 import { ScopedRuns } from '../../../src/bot/run-flow';
-import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index';
+import { type CommandContext, type Controls, tryHandleCommand } from '../../../src/commands/index';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { closeLogger, configureLogger, flushLogger } from '../../../src/core/logger';
 import { SessionStore } from '../../../src/session/store';

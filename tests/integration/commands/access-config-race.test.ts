@@ -1,7 +1,7 @@
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizedMessage } from '@larksuite/channel';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import type { CommandContext, Controls } from '../../../src/commands/index.js';
 import {
@@ -12,8 +12,8 @@ import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { createFakeAgent } from '../../helpers/fake-agent.js';
 import { createFakeChannel } from '../../helpers/fake-channel.js';
-import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
 import { createTestScopedRuns } from '../../helpers/scoped-runs.js';
+import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
 
 const saveGate = vi.hoisted(() => ({
   calls: 0,

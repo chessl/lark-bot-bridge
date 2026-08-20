@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentRunOptions } from '../../../src/agent/types';
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { ProcessPool } from '../../../src/bot/process-pool';
+import type { RunPolicyAllow } from '../../../src/policy/run-policy';
 import { SpawnFailed } from '../../../src/runtime/errors';
 import { RunExecutor } from '../../../src/runtime/run-executor';
-import type { RunPolicyAllow } from '../../../src/policy/run-policy';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
 

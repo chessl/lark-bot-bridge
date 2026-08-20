@@ -177,9 +177,11 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
       });
       const reply = commentRunRejectedReply(started.rejectReason);
       if (reply) {
-        await postCommentReply(channel, target, evt, reply, { isWhole: ctx.isWhole }).catch((err) => {
-          log.fail('comment', err, { step: 'postRunRejectedReply' });
-        });
+        await postCommentReply(channel, target, evt, reply, { isWhole: ctx.isWhole }).catch(
+          (err) => {
+            log.fail('comment', err, { step: 'postRunRejectedReply' });
+          },
+        );
       }
       return;
     }
@@ -202,7 +204,10 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
     try {
       while (true) {
         const next = await nextCommentEvent(eventStream, commentExpiresAt);
-        if (next === 'expired' || (commentExpiresAt !== undefined && Date.now() > commentExpiresAt)) {
+        if (
+          next === 'expired' ||
+          (commentExpiresAt !== undefined && Date.now() > commentExpiresAt)
+        ) {
           await run.stop().catch((err) => {
             log.warn('comment', 'expired-stop-failed', {
               commentScopeId: runScopeId,
@@ -385,7 +390,6 @@ export function buildCommentPrompt(target: ResolvedTarget, ctx: CommentContext):
   return parts.join('\n');
 }
 
-
 function commentRunRejectedReply(rejectReason: {
   code: RunFlowRejectCode;
   userVisible: string;
@@ -416,7 +420,6 @@ function commentExecutionScopeId(commentThreadScopeId: string): string {
 function commentDocumentSessionScopeId(fileToken: string): string {
   return `doc:${commentTokenDigest(fileToken)}`;
 }
-
 
 function managedDefaultWorkspaceForComments(controls: Controls): string {
   return resolveAppPaths({

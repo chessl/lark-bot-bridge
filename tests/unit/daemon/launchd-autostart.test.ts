@@ -151,9 +151,7 @@ describe('structured platform daemon lifecycle', () => {
       previousState: 'not-installed',
     });
     expect(mocks.rm).toHaveBeenCalledTimes(2);
-    expect(callsFor('systemctl')).toContain(
-      '--user disable lark-bot-bridge.bot.codex-dev.service',
-    );
+    expect(callsFor('systemctl')).toContain('--user disable lark-bot-bridge.bot.codex-dev.service');
     expect(callsFor('systemctl').filter((call) => call === '--user daemon-reload')).toHaveLength(2);
   });
 

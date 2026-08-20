@@ -42,7 +42,7 @@ export interface UnitInputs {
  * this in the user-facing success message.
  */
 export function buildUnit(inputs: UnitInputs): string {
-  const escape = (s: string): string => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const escapeUnit = (s: string): string => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   // Profile names / flags are validated safe tokens (no spaces), so appending
   // them unquoted is fine.
   const runArgs = inputs.runArgs.join(' ');
@@ -53,13 +53,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart="${escape(inputs.nodePath)}" "${escape(inputs.bridgeEntryPath)}" ${runArgs}
+ExecStart="${escapeUnit(inputs.nodePath)}" "${escapeUnit(inputs.bridgeEntryPath)}" ${runArgs}
 Restart=always
 RestartSec=5
 StandardOutput=append:${daemonStdoutPath(inputs.profile)}
 StandardError=append:${daemonStderrPath(inputs.profile)}
-Environment="PATH=${escape(inputs.envPath)}"
-Environment="LARK_CHANNEL_HOME=${escape(inputs.channelHome)}"
+Environment="PATH=${escapeUnit(inputs.envPath)}"
+Environment="LARK_CHANNEL_HOME=${escapeUnit(inputs.channelHome)}"
 
 [Install]
 WantedBy=default.target

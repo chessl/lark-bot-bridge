@@ -334,7 +334,6 @@ describe('CodexAdapter process contract', () => {
     ]);
   });
 
-
   it('reports interrupted termination when stopped before a Codex terminal event', async () => {
     const fake = await createFakeCodex({
       lines: [{ type: 'thread.started', thread_id: 'thread-stop' }],

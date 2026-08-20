@@ -68,10 +68,12 @@ export async function runSecretsGet(): Promise<void> {
       if (v !== undefined) {
         resp.values[id] = v;
       } else {
-        (resp.errors ??= {})[id] = { message: 'not found' };
+        resp.errors ??= {};
+        resp.errors[id] = { message: 'not found' };
       }
     } catch (err) {
-      (resp.errors ??= {})[id] = { message: (err as Error).message };
+      resp.errors ??= {};
+      resp.errors[id] = { message: (err as Error).message };
     }
   }
   process.stdout.write(`${JSON.stringify(resp)}\n`);

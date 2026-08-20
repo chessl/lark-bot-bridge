@@ -159,9 +159,7 @@ function makeServiceAdapter(platform: PlatformAdapter): ServiceAdapter {
         if (state !== 'not-installed') {
           operation = state === 'running' ? 'stop' : 'disable';
           const stopped =
-            state === 'running'
-              ? platform.stopAndDisableAutostart()
-              : platform.disableAutostart();
+            state === 'running' ? platform.stopAndDisableAutostart() : platform.disableAutostart();
           if (!stopped.ok) return failure(operation, stopped.stderr);
           if (state === 'running' && !(await platform.waitUntilStopped())) return timeoutFailure();
         }

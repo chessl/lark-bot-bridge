@@ -103,7 +103,6 @@ export class FakeAgentAdapter implements AgentAdapter {
     this.#eventRuns = normalizeEventRuns(events);
   }
 
-
   setWaitForExit(result: boolean | readonly boolean[]): void {
     this.#waitForExitResults = normalizeWaitForExitResults(result);
   }

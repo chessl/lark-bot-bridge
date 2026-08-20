@@ -2,8 +2,8 @@ import type { CardActionEvent, LarkChannel, NormalizedMessage } from '@larksuite
 import type { AgentAdapter } from '../agent/types';
 import type { ChatModeCache } from '../bot/chat-mode-cache';
 import type { PendingQueue } from '../bot/pending-queue';
-import { commandSessionCatalogIdentity } from '../bot/session-catalog-identity';
 import type { ScopedRuns } from '../bot/run-flow';
+import { commandSessionCatalogIdentity } from '../bot/session-catalog-identity';
 import { lookupMessageThreadId } from '../bot/thread-id';
 import { type CommandContext, type Controls, runCommandHandler } from '../commands';
 import { log } from '../core/logger';

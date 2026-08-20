@@ -4,8 +4,8 @@ import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
 import { ScopedRuns } from '../../../src/bot/run-flow.js';
 import {
-  createDefaultProfileConfig,
   type AgentKind,
+  createDefaultProfileConfig,
   type ProfileConfig,
 } from '../../../src/config/profile-schema.js';
 import { SessionCatalog } from '../../../src/session/catalog.js';
@@ -218,7 +218,6 @@ describe('agent-aware run-flow resume', () => {
     ).toMatchObject({ sessionId: 'sess-persisted' });
     expect(h.catalog.entries().some((entry) => entry.scopeId === 'comment-run-2')).toBe(false);
   });
-
 });
 
 interface ResumeHarness {

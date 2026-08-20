@@ -5,10 +5,10 @@ import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { DEFAULT_MODEL, normalizeModelSelection, supportedModels } from '../agent/models';
 import type { AgentAdapter } from '../agent/types';
 import { GROUP_MSG_SCOPE, hasGroupMsgScope } from '../bot/app-scope';
-import { createBoundChat, defaultChatName } from '../bot/group';
+import { type CreatedChat, createBoundChat, defaultChatName } from '../bot/group';
 import { fetchKnownChats, type KnownChat } from '../bot/lark-info';
 import { ScopedRunStartFailed, type ScopedRuns, type StartScopedRunResult } from '../bot/run-flow';
-import { requestScopeGrantLink } from '../bot/wizard';
+import { requestScopeGrantLink, type ScopeGrantLink } from '../bot/wizard';
 import {
   accountCurrentCard,
   accountFailureCard,
@@ -23,7 +23,12 @@ import {
   groupMsgScopeGrantCard,
   groupMsgScopeGrantedCard,
 } from '../card/config-card';
-import { forgetManagedCard, sendManagedCard, updateManagedCard } from '../card/managed';
+import {
+  forgetManagedCard,
+  type ManagedCardSendResult,
+  sendManagedCard,
+  updateManagedCard,
+} from '../card/managed';
 import { renderCard } from '../card/run-renderer';
 import {
   finalizeIfRunning,
@@ -327,7 +332,7 @@ async function handleNewChat(rawName: string, ctx: CommandContext): Promise<void
   const sourceCwd = effectiveWorkspaceCwd(ctx);
   const name = rawName || defaultChatName(ctx.agent.displayName);
 
-  let created: Awaited<ReturnType<typeof createBoundChat>>;
+  let created: CreatedChat;
   try {
     created = await createBoundChat({
       channel: ctx.channel,
@@ -1821,7 +1826,7 @@ async function promptGroupMsgScopeIfMissing(ctx: CommandContext): Promise<void> 
   if (has !== false) return;
   log.info('command', 'group-msg-scope-missing', { appId });
 
-  let link: Awaited<ReturnType<typeof requestScopeGrantLink>>;
+  let link: ScopeGrantLink;
   try {
     link = await requestScopeGrantLink({ appId, tenantScopes: [GROUP_MSG_SCOPE] });
   } catch (err) {
@@ -1830,7 +1835,7 @@ async function promptGroupMsgScopeIfMissing(ctx: CommandContext): Promise<void> 
   }
 
   const expireMins = Math.max(1, Math.round(link.expireIn / 60));
-  let sent: Awaited<ReturnType<typeof sendManagedCard>>;
+  let sent: ManagedCardSendResult;
   try {
     sent = await sendManagedCard(
       ctx.channel,

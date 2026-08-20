@@ -1,18 +1,18 @@
 import { mkdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
 import type { CommentEvent, NormalizedMessage } from '@larksuite/channel';
-import { handleCommentMention } from '../../../src/bot/comments';
-import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema';
+import { afterEach, describe, expect, it } from 'vitest';
 import { ActiveRuns } from '../../../src/bot/active-runs';
+import { handleCommentMention } from '../../../src/bot/comments';
 import { ProcessPool } from '../../../src/bot/process-pool';
 import { ScopedRuns } from '../../../src/bot/run-flow';
+import { type CommandContext, type Controls, tryHandleCommand } from '../../../src/commands';
+import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema';
 import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
-import { createFakeChannel, type FakeChannel } from '../../helpers/fake-channel';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
+import { createFakeChannel, type FakeChannel } from '../../helpers/fake-channel';
 import { makeFakeCommentSurface } from '../../helpers/fake-comment-surface';
 import { createTestScopedRuns } from '../../helpers/scoped-runs';
 

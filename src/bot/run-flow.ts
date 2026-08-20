@@ -1,12 +1,10 @@
 import { mkdir } from 'node:fs/promises';
-import { capabilityForProfile, type AgentCapability } from '../agent/capability';
+import { type AgentCapability, capabilityForProfile } from '../agent/capability';
 import { resolveModelArg } from '../agent/models';
 import type { NativeToolProvider } from '../agent/native-tools';
 import type { AgentAdapter, AgentEvent } from '../agent/types';
 import type { ProfileConfig } from '../config/profile-schema';
 import { log } from '../core/logger';
-import type { ActiveRuns } from './active-runs';
-import type { ProcessPool } from './process-pool';
 import type { AccessDecision } from '../policy/access';
 import {
   type AgentAttachment,
@@ -15,14 +13,13 @@ import {
   type RunPolicyReject,
   type ScopeContext,
 } from '../policy/run-policy';
-import {
-  resolveWorkingDirectory,
-  type WorkingDirectoryRejectReason,
-} from '../policy/workspace';
+import { resolveWorkingDirectory, type WorkingDirectoryRejectReason } from '../policy/workspace';
 import { RunRejected, type RunRejectedCode } from '../runtime/errors';
-import { RunExecutor, type RunExecution } from '../runtime/run-executor';
+import { type RunExecution, RunExecutor } from '../runtime/run-executor';
 import type { SessionCatalog } from '../session/catalog';
 import type { WorkspaceStore } from '../workspace/store';
+import type { ActiveRuns } from './active-runs';
+import type { ProcessPool } from './process-pool';
 
 export interface ScopedRunsDeps {
   agent: AgentAdapter;
@@ -209,9 +206,7 @@ export class ScopedRuns {
           })
         : undefined;
     const threadId =
-      catalogEntry && capability.sessionKind === 'codex-thread'
-        ? catalogEntry.threadId
-        : undefined;
+      catalogEntry && capability.sessionKind === 'codex-thread' ? catalogEntry.threadId : undefined;
     const sessionId =
       catalogEntry && capability.sessionKind !== 'codex-thread'
         ? catalogEntry.sessionId
@@ -243,8 +238,7 @@ export class ScopedRuns {
           capability.agentId === 'codex' || capability.agentId === 'omp'
             ? policy.attachments
                 .filter(
-                  (attachment) =>
-                    attachment.kind === 'image' && attachment.decision === 'accepted',
+                  (attachment) => attachment.kind === 'image' && attachment.decision === 'accepted',
                 )
                 .map((attachment) => attachment.path)
                 .filter((path): path is string => Boolean(path))
@@ -261,10 +255,7 @@ export class ScopedRuns {
     } catch (err) {
       sessionScopeRun.release();
       if (!(err instanceof RunRejected)) {
-        throw new ScopedRunStartFailed(
-          { cwdRealpath: workspace.cwdRealpath, runtimeAccess },
-          err,
-        );
+        throw new ScopedRunStartFailed({ cwdRealpath: workspace.cwdRealpath, runtimeAccess }, err);
       }
       return {
         ok: false,
@@ -306,14 +297,7 @@ export class ScopedRuns {
     };
     run = {
       metadata,
-      events: this.observe(
-        execution,
-        sessionScopeId,
-        capability,
-        policy,
-        requestedModel,
-        cleanup,
-      ),
+      events: this.observe(execution, sessionScopeId, capability, policy, requestedModel, cleanup),
       stop,
       wasInterrupted: execution.wasInterrupted,
     };

@@ -58,7 +58,6 @@ export class CodexAdapter implements AgentAdapter {
     this.botIdentity = identity;
   }
 
-
   async checkAvailability(): Promise<AgentAvailability> {
     return checkAgentAvailability({
       agentId: 'codex',
@@ -67,7 +66,6 @@ export class CodexAdapter implements AgentAdapter {
       binaryPath: this.binary,
     });
   }
-
 
   async start(opts: AgentRunOptions): Promise<AgentRun> {
     if (!opts.cwd) {

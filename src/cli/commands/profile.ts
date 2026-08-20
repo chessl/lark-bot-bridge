@@ -16,7 +16,7 @@ import {
 import { resolveAppSecret } from '../../config/secret-resolver';
 import { writeFileAtomic } from '../../platform/atomic-write';
 import { acquireProfileRuntimeLock, checkRuntimeLock } from '../../runtime/locks';
-import { listAllProfiles } from '../../runtime/profile-discovery';
+import { type DiscoveredProfile, listAllProfiles } from '../../runtime/profile-discovery';
 import { resolveProfileRuntime } from '../../runtime/profile-runtime';
 import { readRegistry } from '../../runtime/registry';
 
@@ -47,7 +47,7 @@ export interface ProfileExportOptions extends ProfileCommandOptions {
 
 export async function runProfileList(opts: ProfileCommandOptions = {}): Promise<void> {
   const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
-  let profiles;
+  let profiles: DiscoveredProfile[];
   try {
     profiles = await listAllProfiles(rootDir);
   } catch (err) {

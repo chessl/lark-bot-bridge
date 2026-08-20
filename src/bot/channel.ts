@@ -57,7 +57,7 @@ import { PendingQueue } from './pending-queue';
 import { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
 import { addWorkingReaction, removeReaction } from './reaction';
-import { ScopedRuns, type ScopedRun } from './run-flow';
+import { type ScopedRun, ScopedRuns } from './run-flow';
 import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { lookupMessageThreadId } from './thread-id';
 

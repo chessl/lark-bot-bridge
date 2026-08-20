@@ -1,6 +1,8 @@
 import { detectInstalledAgents } from '../cli/agent-detection';
-import { resolveAppPaths } from '../config/app-paths';
+import { createBootstrapProfileConfig } from '../cli/profile-bootstrap';
+import { type AppPaths, resolveAppPaths } from '../config/app-paths';
 import { setSecret } from '../config/keystore';
+import type { AgentKind, ProfileConfig } from '../config/profile-schema';
 import {
   createRootConfig,
   loadRootConfig,
@@ -9,10 +11,8 @@ import {
   withConfigFileLock,
   writeActiveProfile,
 } from '../config/profile-store';
-import type { AgentKind } from '../config/profile-schema';
-import { secretKeyForApp, type AppConfig, type TenantBrand } from '../config/schema';
+import { type AppConfig, secretKeyForApp, type TenantBrand } from '../config/schema';
 import { buildEncryptedAccountConfig } from '../config/store';
-import { createBootstrapProfileConfig } from '../cli/profile-bootstrap';
 import { validateAppCredentials } from '../utils/feishu-auth';
 import { HttpError } from './http';
 
@@ -114,7 +114,7 @@ export async function writeNewProfile(
   // resolveAppPaths normalizes the profile name; use the canonical form. A bad
   // name (path separators, whitespace, control chars) throws — surface it as a
   // 400 with the real reason instead of a generic 500 "internal error".
-  let appPaths;
+  let appPaths: AppPaths;
   try {
     appPaths = resolveAppPaths({ rootDir, profile: input.profile });
   } catch (err) {
@@ -134,7 +134,7 @@ export async function writeNewProfile(
 
   const encrypted = await encryptAccount(input, appPaths);
 
-  let profileConfig;
+  let profileConfig: ProfileConfig;
   try {
     profileConfig = await createBootstrapProfileConfig({
       agentKind: input.agentKind,

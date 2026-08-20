@@ -1,6 +1,6 @@
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommentEvent, LarkChannel } from '@larksuite/channel';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   AgentAdapter,
   AgentEvent,
@@ -8,8 +8,8 @@ import type {
   AgentRunOptions,
 } from '../../../src/agent/types.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
-import { handleCommentMention } from '../../../src/bot/comments.js';
 import { commentTokenDigest } from '../../../src/bot/comment-resource.js';
+import { handleCommentMention } from '../../../src/bot/comments.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
 import { ScopedRuns } from '../../../src/bot/run-flow.js';
 import {

@@ -38,7 +38,6 @@ export class ClaudeAdapter implements AgentAdapter {
     this.botIdentity = identity;
   }
 
-
   async checkAvailability(): Promise<AgentAvailability> {
     return checkAgentAvailability({
       agentId: 'claude',

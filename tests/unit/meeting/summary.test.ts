@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  MEETING_DEFAULTS,
   createDefaultProfileConfig,
+  MEETING_DEFAULTS,
   type MeetingConfig,
 } from '../../../src/config/profile-schema';
 import type { VcRequestClient } from '../../../src/meeting/api';
@@ -15,7 +15,6 @@ import { MeetingSession } from '../../../src/meeting/session';
 
 const mocks = vi.hoisted(() => ({ start: vi.fn() }));
 
-
 /** A real ProfileConfig — capability resolution reads more than `agentKind`. */
 function profileConfig(meeting: MeetingConfig) {
   const pc = createDefaultProfileConfig({
@@ -25,7 +24,6 @@ function profileConfig(meeting: MeetingConfig) {
   pc.meeting = meeting;
   return pc;
 }
-
 
 const noopClient: VcRequestClient = {
   request: vi.fn(async () => ({ code: 0, data: {} }) as never),
@@ -120,11 +118,15 @@ describe('summarizeEndedMeeting', () => {
 
     expect(mocks.start).toHaveBeenCalledTimes(1);
     expect(d.sent).toHaveLength(1);
-    expect(d.sent[0]?.to).toBe('oc_team');
-    expect(String((d.sent[0]?.input as { markdown: string }).markdown)).toContain(
-      '会议纪要 · 周会',
-    );
-    expect(String((d.sent[0]?.input as { markdown: string }).markdown)).toContain('周五上线');
+    const sent = d.sent[0];
+    expect(sent?.to).toBe('oc_team');
+    if (!sent) throw new Error('expected one sent message');
+    const input = sent.input;
+    if (!input || typeof input !== 'object' || !('markdown' in input)) {
+      throw new Error('expected a markdown message');
+    }
+    expect(String(input.markdown)).toContain('会议纪要 · 周会');
+    expect(String(input.markdown)).toContain('周五上线');
   });
 
   it('falls back to the bot owner DM when there is no origin chat (console join)', async () => {
@@ -265,7 +267,6 @@ describe('answerInMeeting', () => {
     expect(interrupt).toHaveBeenCalledWith('meeting:70001');
     expect(sendMessage).toHaveBeenCalledWith('已中断当前任务。');
   });
-
 });
 
 describe('resolveSummaryTarget', () => {

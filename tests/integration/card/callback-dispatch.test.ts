@@ -209,9 +209,7 @@ async function createHarness(
         workspaces,
         scopedRuns: {
           activeMetadata: (scope: string) =>
-            activeRuns.get(scope)
-              ? { runId: 'run-active', policyFingerprint: 'fp-1' }
-              : undefined,
+            activeRuns.get(scope) ? { runId: 'run-active', policyFingerprint: 'fp-1' } : undefined,
           interrupt: (scope: string) => activeRuns.interrupt(scope),
         } as never,
         agent,

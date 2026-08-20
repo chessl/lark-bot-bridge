@@ -85,9 +85,7 @@ describe('profile-aware service commands', () => {
       stop: vi.fn(
         async (): Promise<ServiceStopResult> => ({ ok: true, previousState: 'inactive' }),
       ),
-      restart: vi.fn(
-        async (): Promise<ServiceRestartResult> => ({ ok: true, action: 'started' }),
-      ),
+      restart: vi.fn(async (): Promise<ServiceRestartResult> => ({ ok: true, action: 'started' })),
       remove: vi.fn(
         async (): Promise<ServiceRemoveResult> => ({
           ok: true,
@@ -209,7 +207,6 @@ describe('profile-aware service commands', () => {
 
     exit.mockRestore();
   });
-
 
   it('allows start to replace the managed daemon that owns the runtime locks', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -415,9 +412,7 @@ describe('profile-aware service commands', () => {
           definitionPath: '/tmp/supervisor',
         }),
       ),
-      stop: vi.fn(
-        async (): Promise<ServiceStopResult> => ({ ok: true, previousState: 'running' }),
-      ),
+      stop: vi.fn(async (): Promise<ServiceStopResult> => ({ ok: true, previousState: 'running' })),
     } as ServiceAdapter;
     mocks.getServiceAdapter.mockImplementation((serviceId: string) =>
       serviceId === 'supervisor'
@@ -556,7 +551,6 @@ describe('profile-aware service commands', () => {
     expect(mocks.adapter.restart).toHaveBeenCalled();
     expect(lines.join('\n')).toContain('✓ 已启动  bot: Restarted Bot');
   });
-
 
   it('retains the corrective start error when restart was never installed', async () => {
     const errors: string[] = [];
@@ -698,9 +692,9 @@ describe('profile-aware service commands', () => {
     await runServiceStatus({ webUi: true });
 
     mocks.readRegistry.mockReset();
-    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
-      { ...online, id: 'after-restart', pid: 8484 },
-    ]);
+    mocks.readRegistry
+      .mockReturnValueOnce([])
+      .mockReturnValue([{ ...online, id: 'after-restart', pid: 8484 }]);
     await runServiceRestart({ webUi: true });
 
     expect(lines.join('\n')).toContain('控制面 supervisor 正在后台运行');

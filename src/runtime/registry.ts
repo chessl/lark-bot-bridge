@@ -202,9 +202,7 @@ export function unregisterSync(
 }
 
 /** Best-effort: try to unlink any leftover tmp file we wrote. */
-export function cleanupTmpFiles(
-  registryFile: string = defaultAppPaths.userRegistryFile,
-): void {
+export function cleanupTmpFiles(registryFile: string = defaultAppPaths.userRegistryFile): void {
   try {
     unlinkSync(`${registryFile}.tmp-${process.pid}`);
   } catch {

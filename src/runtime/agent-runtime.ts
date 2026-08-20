@@ -43,7 +43,6 @@ export function createRuntimeAgent(
   return new ClaudeAdapter();
 }
 
-
 /** Guard: reconnect/restart must not switch a profile's agent kind mid-flight. */
 export function assertReconnectAgentKindUnchanged(
   current: AgentKind | undefined,
