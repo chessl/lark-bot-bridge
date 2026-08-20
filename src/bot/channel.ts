@@ -814,20 +814,6 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const resourceItems = batch.flatMap((m) =>
     m.resources.map((r) => ({ messageId: m.messageId, resource: r })),
   );
-  const attachments = await media.resolve(resourceItems, controls.profileConfig.attachments);
-  if (attachments.length > 0) {
-    log.info('media', 'resolved', { count: attachments.length });
-    for (const attachment of attachments) {
-      log.info('attachment', 'decision', {
-        decision: attachment.decision,
-        kind: attachment.kind,
-        hash: attachment.hash,
-        size: attachment.size,
-        sourceMessageId: attachment.sourceMessageId,
-        reason: attachment.rejectionReason,
-      });
-    }
-  }
 
   // Collect any reply-quote targets in the batch. Dedup so the same target
   // quoted by multiple messages in one batch only fetches once. Filter out
@@ -849,6 +835,26 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         messageId: targetId,
         type: q.rawContentType,
         contentChars: q.content.length,
+      });
+    }
+  }
+
+  resourceItems.push(
+    ...quotes.flatMap((quote) =>
+      quote.resources.map((resource) => ({ messageId: quote.messageId, resource })),
+    ),
+  );
+  const attachments = await media.resolve(resourceItems, controls.profileConfig.attachments);
+  if (attachments.length > 0) {
+    log.info('media', 'resolved', { count: attachments.length });
+    for (const attachment of attachments) {
+      log.info('attachment', 'decision', {
+        decision: attachment.decision,
+        kind: attachment.kind,
+        hash: attachment.hash,
+        size: attachment.size,
+        sourceMessageId: attachment.sourceMessageId,
+        reason: attachment.rejectionReason,
       });
     }
   }

@@ -1,4 +1,9 @@
-import type { ApiMessageItem, LarkChannel, RawMessageEvent } from '@larksuite/channel';
+import type {
+  ApiMessageItem,
+  LarkChannel,
+  RawMessageEvent,
+  ResourceDescriptor,
+} from '@larksuite/channel';
 import { normalize } from '@larksuite/channel';
 import { log } from '../core/logger';
 import { expandInteractiveCard } from './interactive-card';
@@ -18,6 +23,8 @@ export interface QuotedContext {
    * </forwarded_messages>` (capped at 50 items by the SDK). */
   content: string;
   rawContentType: string;
+  /** Direct resources owned by this message; forwarded children keep their own message ids. */
+  resources: ResourceDescriptor[];
 }
 
 /**
@@ -146,6 +153,8 @@ async function normalizeItemToQuoted(
       // — substitute the raw JSON so Claude can still see what was quoted.
       content: expandInteractiveCard(normalized.content, parent.body?.content),
       rawContentType: parent.msg_type ?? 'text',
+      // A forwarded attachment must be downloaded with its child message id, which normalize drops.
+      resources: parent.msg_type === 'merge_forward' ? [] : normalized.resources,
     };
   } catch (err) {
     log.warn('quote', 'normalize-failed', {

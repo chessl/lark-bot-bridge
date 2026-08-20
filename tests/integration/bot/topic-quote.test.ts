@@ -1,12 +1,12 @@
-import type { NormalizedMessage } from '@larksuite/channel';
-import { realpath } from 'node:fs/promises';
+import { realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { NormalizedMessage } from '@larksuite/channel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AgentEvent } from '../../../src/agent/types.js';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
-import type { AgentEvent } from '../../../src/agent/types.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
 
 const sdkMock = vi.hoisted(() => ({
@@ -31,6 +31,10 @@ interface MessageHandlerMap {
   message?: (msg: NormalizedMessage) => Promise<void> | void;
 }
 
+interface QuotedFile {
+  fileKey: string;
+  fileName: string;
+}
 interface FakeLarkChannel {
   sent: Array<{ chatId: string; content: unknown; options: unknown }>;
   streams: Array<{ chatId: string; options: unknown }>;
@@ -53,6 +57,7 @@ interface FakeLarkChannel {
   listChats: ReturnType<typeof vi.fn>;
   fetchRawMessage: ReturnType<typeof vi.fn>;
   recallMessage: ReturnType<typeof vi.fn>;
+  downloadResourceToFile: ReturnType<typeof vi.fn>;
   on(handlers: MessageHandlerMap): void;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
@@ -362,6 +367,38 @@ describe('topic message quote handling', () => {
     );
   });
 
+  it('downloads a reply-quoted file and exposes its local path to the agent', async () => {
+    const h = await createHarness({
+      chatMode: 'group',
+      quotedFiles: {
+        om_zip: { fileKey: 'file_zip', fileName: 'logs.zip' },
+      },
+    });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_zip_reply',
+        rootId: 'om_zip',
+        parentId: 'om_zip',
+        content: '@Bridge 分析附件',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.channel.downloadResourceToFile).toHaveBeenCalledWith(
+      'om_zip',
+      'file_zip',
+      'file',
+      expect.any(String),
+    );
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('"sourceMessageId":"om_zip"');
+    expect(prompt).toMatch(/"path":"[^"]+\.zip"/);
+    expect(prompt).toContain('"decision":"accepted"');
+  });
+
   it('keeps non-root reply quotes in topic chats', async () => {
     const h = await createHarness({
       quotedMessages: {
@@ -416,7 +453,7 @@ describe('merge_forward fetch failure', () => {
     expect(h.channel.streams).toHaveLength(0);
     const hint = h.channel.sent.at(-1);
     expect(hint?.options).toMatchObject({ replyTo: 'om_forward_failed' });
-    expect((hint?.content as { text?: string }).text).toContain('重新转发');
+    expect((hint?.content as { text?: string } | undefined)?.text).toContain('重新转发');
   });
 
   it('still runs when a merge_forward was genuinely empty (not a fetch failure)', async () => {
@@ -444,6 +481,7 @@ async function createHarness(
   options: {
     chatMode?: 'group' | 'topic';
     quotedMessages?: Record<string, string>;
+    quotedFiles?: Record<string, QuotedFile>;
     rawThreadIds?: Record<string, string>;
     threadMessages?: Array<Record<string, unknown>>;
     agentEvents?: AgentEvent[];
@@ -508,6 +546,7 @@ async function startTestBridge(h: {
   agent: FakeAgentAdapter;
   sessions: SessionStore;
   workspaces: WorkspaceStore;
+  tmp: TmpProfile;
   controls: ReturnType<typeof createControls>;
 }): Promise<void> {
   const bridge = await startChannel({
@@ -516,6 +555,12 @@ async function startTestBridge(h: {
     sessions: h.sessions,
     workspaces: h.workspaces,
     controls: h.controls,
+    appPaths: {
+      rootDir: h.tmp.root,
+      secretsFile: join(h.tmp.profile, 'secrets.enc'),
+      keystoreSaltFile: join(h.tmp.profile, '.keystore.salt'),
+      mediaDir: join(h.tmp.profile, 'media'),
+    },
   });
   cleanups.push(() => bridge.disconnect());
 }
@@ -524,6 +569,7 @@ function createFakeLarkChannel(
   options: {
     chatMode?: 'group' | 'topic';
     quotedMessages?: Record<string, string>;
+    quotedFiles?: Record<string, QuotedFile>;
     rawThreadIds?: Record<string, string>;
     threadMessages?: Array<Record<string, unknown>>;
   } = {},
@@ -535,6 +581,7 @@ function createFakeLarkChannel(
   const quotedMessages = options.quotedMessages ?? {
     om_topic_root: 'topic root content',
   };
+  const quotedFiles = options.quotedFiles ?? {};
   const rawThreadIds = options.rawThreadIds ?? {};
   const threadMessages = options.threadMessages ?? [];
   return {
@@ -558,20 +605,30 @@ function createFakeLarkChannel(
     },
     getAppInfo: vi.fn(async () => ({ ownerId: 'ou_owner' })),
     listChats: vi.fn(async () => []),
-    fetchRawMessage: vi.fn(async (messageId: string) => [
-      {
-        message_id: messageId,
-        msg_type: 'text',
-        body: {
-          content: JSON.stringify({
-            text: quotedMessages[messageId] ?? 'quoted content',
-          }),
+    fetchRawMessage: vi.fn(async (messageId: string) => {
+      const file = quotedFiles[messageId];
+      return [
+        {
+          message_id: messageId,
+          msg_type: file ? 'file' : 'text',
+          body: {
+            content: file
+              ? JSON.stringify({ file_key: file.fileKey, file_name: file.fileName })
+              : JSON.stringify({ text: quotedMessages[messageId] ?? 'quoted content' }),
+          },
+          create_time: '1760000000000',
+          sender: { id: 'ou_quote_sender' },
+          ...(rawThreadIds[messageId] ? { thread_id: rawThreadIds[messageId] } : {}),
         },
-        create_time: '1760000000000',
-        sender: { id: 'ou_quote_sender' },
-        ...(rawThreadIds[messageId] ? { thread_id: rawThreadIds[messageId] } : {}),
+      ];
+    }),
+    downloadResourceToFile: vi.fn(
+      async (_messageId: string, _fileKey: string, _type: string, destPath: string) => {
+        const bytes = Buffer.from('zip');
+        await writeFile(destPath, bytes);
+        return { contentType: 'application/zip', bytesWritten: bytes.length };
       },
-    ]),
+    ),
     on(nextHandlers) {
       Object.assign(handlers, nextHandlers);
     },
