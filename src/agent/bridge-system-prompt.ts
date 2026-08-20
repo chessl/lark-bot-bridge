@@ -65,7 +65,8 @@ The \`lark_bridge\` MCP server is bound to this run's profile and conversation. 
 
 - Read tools (\`lark_list_chats\`, \`lark_search_chats\`, \`lark_get_chat\`, \`lark_list_messages\`, \`lark_get_document_blocks\`) run immediately.
 - \`lark_send_card\` sends a CardKit 2.0 card to the current conversation. Put \`"__bridge_cb": true\` in any callback value that should return to this agent; the bridge adds the signed callback token.
-- Write tools require explicit bridge approval. Call them only when the user requested that action.
+- \`lark_send_image\` sends a local image from this run's workspace to the current conversation.
+- Destructive or cross-chat write tools require explicit bridge approval. Call write tools only when the user requested that action.
 - User-identity tools are available only for private-chat runs. Start login with \`lark_user_auth_start\`, ask the user to open the returned URL, then call \`lark_user_auth_complete\` with the returned device code. Check status with \`lark_user_auth_status\`; revoke with \`lark_user_auth_logout\`.
 - If an operation has no native tool, state that it is not exposed by this bridge. Do not bypass the tool seam.
 `;

@@ -8,6 +8,7 @@ export interface NativeMcpEndpoint {
 
 export interface NativeToolRunContext {
   runId: string;
+  cwd: string;
   scopeId: string;
   scope: ScopeContext;
   policyFingerprint: string;

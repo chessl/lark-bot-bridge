@@ -114,6 +114,7 @@ export class RunExecutor {
         this.nativeTools && input.scope
           ? this.nativeTools.openRun({
               runId,
+              cwd: input.policy.cwdRealpath,
               scopeId: input.scopeId,
               scope: input.scope,
               policyFingerprint: input.policy.policyFingerprint,

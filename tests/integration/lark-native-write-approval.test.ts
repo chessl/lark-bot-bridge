@@ -48,6 +48,7 @@ describe('native Lark write approval', () => {
     });
     const endpoint = server.openRun({
       runId: 'run-write',
+      cwd: process.cwd(),
       scopeId: 'p2p:oc_current:ou_user',
       scope: {
         source: 'im',

@@ -85,6 +85,7 @@ describe('RunExecutor', () => {
     expect(opened).toEqual([
       {
         runId: 'run-1',
+        cwd: h.tmp.workspace,
         scopeId: 'scope-1',
         scope,
         policyFingerprint: 'fp',

@@ -9,7 +9,7 @@
 1. Bridge 的 bot 调用统一复用 `channel.rawClient`；`CotClient` 和会议 preflight 不再自行取 tenant token 或启动 `lark-cli`。
 2. Bridge 在同一 Node 进程内提供只绑定 `127.0.0.1` 的 Streamable HTTP MCP endpoint。每个 run 单独签发 bearer token，并绑定 profile、会话和 policy fingerprint。
 3. Claude Code、Codex、OMP 都在启动时获得临时 MCP 配置；token 只在环境变量中传递，不进入 argv、system prompt、session 记录或持久配置。
-4. 常用 bot reads、Docx blocks、CardKit 发送、用户 OAuth 和拉 bot 入群已迁入原生工具。写操作由 bridge 在原飞书会话内发确认卡，签名确认绑定 run/scope/actor 且一次性消费。
+4. 常用 bot reads、Docx blocks、CardKit 发送、工作区图片上传、用户 OAuth 和拉 bot 入群已迁入原生工具。破坏性或跨会话写操作由 bridge 在原飞书会话内发确认卡，签名确认绑定 run/scope/actor 且一次性消费。
 5. 用户 access/refresh token 存在 OS keychain；磁盘只保存 profile-local 元数据。刷新在 profile/app/user 跨进程锁内完成完整的 read-refresh-write。
 6. 原 `src/lark-cli/user-im.ts`、身份策略、启动 preflight、profile projection 和 CLI-specific agent 配置均已删除；runtime 不再依赖 `lark-cli`。
 

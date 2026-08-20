@@ -1,6 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { realpath, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { LarkChannel } from '@larksuite/channel';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -30,6 +32,7 @@ const HOST = '127.0.0.1';
 const BODY_LIMIT = 1024 * 1024;
 const APPROVAL_TIMEOUT_MS = 2 * 60_000;
 const CALLBACK_TTL_MS = 24 * 60 * 60_000;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 interface NativeLarkServerOptions {
   profile: string;
@@ -409,6 +412,32 @@ export class NativeLarkServer implements NativeToolProvider {
         }),
     );
     server.registerTool(
+      'lark_send_image',
+      {
+        description:
+          'Upload and send an agent-created image from the run workspace to the current conversation.',
+        inputSchema: {
+          path: z.string().min(1).max(4096).describe('Absolute or workspace-relative image path.'),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+      },
+      async ({ path }) =>
+        this.toolResult(async () => {
+          const chatId = access.scope.chatId;
+          if (!chatId) throw new Error('Current run is not attached to an IM chat');
+          const imagePath = await workspaceImagePath(access.cwd, path);
+          const result = await this.options.channel.send(
+            chatId,
+            { image: { source: imagePath } },
+            {
+              ...(access.scope.messageId ? { replyTo: access.scope.messageId } : {}),
+              ...(access.scope.threadId && access.scope.messageId ? { replyInThread: true } : {}),
+            },
+          );
+          return { messageId: result.messageId };
+        }),
+    );
+    server.registerTool(
       'lark_add_bot_to_chat',
       {
         description:
@@ -652,6 +681,19 @@ function assertApiResponse(response: { code?: number; msg?: string }, prefix: st
   if (response.code !== undefined && response.code !== 0) {
     throw new Error(`${prefix}: ${response.msg ?? response.code}`);
   }
+}
+
+async function workspaceImagePath(cwd: string, input: string): Promise<string> {
+  const image = await realpath(resolve(cwd, input));
+  const relativePath = relative(cwd, image);
+  if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+    throw new Error('Image must be inside the run workspace');
+  }
+  const info = await stat(image);
+  if (!info.isFile()) throw new Error('Image path must point to a file');
+  if (info.size === 0) throw new Error('Image file is empty');
+  if (info.size > MAX_IMAGE_BYTES) throw new Error('Image exceeds the 10 MB Lark limit');
+  return image;
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {

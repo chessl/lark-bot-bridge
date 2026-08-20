@@ -1,3 +1,6 @@
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { LarkChannel } from '@larksuite/channel';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -7,7 +10,10 @@ import type { ProfileConfig } from '../../src/config/profile-schema';
 import { NativeLarkServer } from '../../src/lark-native/server';
 
 describe('NativeLarkServer', () => {
-  it('authenticates one run and exposes native Lark reads and signed card sends', async () => {
+  it('authenticates one run and exposes native Lark reads, cards, and images', async () => {
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), 'lark-native-server-')));
+    const imagePath = join(workspace, 'chart.png');
+    await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     const send = vi.fn(async () => ({ messageId: 'om_sent' }));
     const getChat = vi.fn(async () => ({ code: 0, data: { chat_id: 'oc_current' } }));
     const listMessages = vi.fn(async () => ({
@@ -41,6 +47,7 @@ describe('NativeLarkServer', () => {
     });
     const endpoint = server.openRun({
       runId: 'run-1',
+      cwd: workspace,
       scopeId: 'p2p:oc_current:ou_user',
       scope: {
         source: 'im',
@@ -73,6 +80,7 @@ describe('NativeLarkServer', () => {
           'lark_user_auth_logout',
           'lark_user_auth_status',
           'lark_send_card',
+          'lark_send_image',
           'lark_add_bot_to_chat',
         ]),
       );
@@ -103,6 +111,20 @@ describe('NativeLarkServer', () => {
         method: 'GET',
         url: '/open-apis/docx/v1/documents/doc_1/blocks',
         params: { document_revision_id: -1, page_size: 50 },
+      });
+      expect(
+        await client.callTool({ name: 'lark_send_image', arguments: { path: 'chart.png' } }),
+      ).toMatchObject({ structuredContent: { messageId: 'om_sent' } });
+      expect(send).toHaveBeenCalledWith(
+        'oc_current',
+        { image: { source: imagePath } },
+        { replyTo: 'om_source' },
+      );
+      expect(
+        await client.callTool({ name: 'lark_send_image', arguments: { path: '/etc/hosts' } }),
+      ).toMatchObject({
+        isError: true,
+        content: [{ text: 'Image must be inside the run workspace' }],
       });
 
       await client.callTool({
@@ -156,6 +178,7 @@ describe('NativeLarkServer', () => {
       ).toBe(401);
     } finally {
       await server.close();
+      await rm(workspace, { recursive: true, force: true });
     }
   });
 });
