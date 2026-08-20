@@ -47,11 +47,10 @@ vi.mock('../../../src/config/profile-store', () => ({
   loadRootConfig: mocks.loadRootConfig,
 }));
 
-vi.mock('../../../src/config/paths', () => ({
-  paths: {
+vi.mock('../../../src/config/app-paths', () => ({
+  defaultAppPaths: {
     rootDir: '/tmp/lark-channel-home',
     configFile: '/tmp/lark-channel-home/config.json',
-    profile: 'claude',
   },
 }));
 
