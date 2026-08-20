@@ -82,12 +82,10 @@ function findOwningService(
     { serviceId: entry.profileName, flag: `--profile ${entry.profileName}` },
   ];
   for (const { serviceId, flag } of candidates) {
-    const adapter = getServiceAdapter(serviceId);
-    if (!adapter?.fileExists() || !adapter.isRunning()) continue;
-    const { pid } = adapter.parseStatus(adapter.describeStatus());
-    if (!pid || Number(pid) !== entry.pid) continue;
+    const status = getServiceAdapter(serviceId)?.status();
+    if (status?.state !== 'running' || !status.pid || Number(status.pid) !== entry.pid) continue;
     return {
-      platformName: adapter.platformName,
+      platformName: status.platformName,
       stopHint: `lark-bot-bridge stop ${flag}`,
       restartHint: `lark-bot-bridge restart ${flag}`,
     };

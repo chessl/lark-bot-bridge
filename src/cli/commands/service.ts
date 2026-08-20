@@ -6,7 +6,9 @@ import { daemonStderrPath, daemonStdoutPath, SUPERVISOR_SERVICE_ID } from '../..
 import {
   getServiceAdapter,
   type ServiceAdapter,
-  type ServiceResult,
+  type ServiceFailure,
+  type ServiceRestartResult,
+  type ServiceStartResult,
 } from '../../daemon/service-adapter';
 import { checkRuntimeLock, type RuntimeLockMeta } from '../../runtime/locks';
 import {
@@ -75,7 +77,7 @@ async function resolveServiceTarget(
 
 /** Whether this platform has a service definition on disk for `serviceId`. */
 function serviceFileExists(serviceId: string): boolean {
-  return getServiceAdapter(serviceId)?.fileExists() ?? false;
+  return getServiceAdapter(serviceId)?.status().state !== 'not-installed';
 }
 
 /** Find the live registry entry (with botName) for a classic profile, if any. */
@@ -178,9 +180,8 @@ async function assertLockNotHeldByAnotherRuntime(
     const lock = await checkRuntimeLock(target);
     if (!lock.locked) return;
 
-    const servicePid = adapter.isRunning()
-      ? adapter.parseStatus(adapter.describeStatus()).pid
-      : undefined;
+    const status = adapter.status();
+    const servicePid = status.state === 'running' ? status.pid : undefined;
     if (servicePid && lock.meta?.pid === Number(servicePid)) return;
 
     console.error(`✗ 当前 ${kind === 'profile' ? 'profile' : 'app'} 已有 bridge 进程占用。`);
@@ -273,9 +274,10 @@ async function waitForServiceConnect(
  * `run` uses. Used by both `start` and `restart`.
  */
 async function reportConnectAfter(
-  verb: 'started' | 'restarted',
+  operation: 'start' | 'restart',
+  target: 'bot' | 'supervisor',
   profile: string,
-  fn: () => ServiceResult,
+  adapter: ServiceAdapter,
 ): Promise<void> {
   const { cfg } = await resolveProfileRuntime({ profile, allowBootstrap: false });
   const appId = cfg.accounts?.app?.id ?? '';
@@ -285,15 +287,28 @@ async function reportConnectAfter(
       .map((e) => e.pid),
   );
 
-  const r = await fn();
-  if (!r.ok) {
-    printServiceFailure(verb, r.stderr);
+  const result: ServiceStartResult | ServiceRestartResult =
+    operation === 'start' ? await adapter.start() : await adapter.restart();
+  if (!result.ok) {
+    printLifecycleFailure(result, operation, target);
     process.exit(1);
   }
 
-  const action = verb === 'started' ? '正在等待 bot 连接...' : '正在等待 bot 重新连接...';
-  console.log(action);
+  if (operation === 'start' && 'replaced' in result && result.replaced) {
+    console.log(
+      target === 'supervisor'
+        ? '检测到 supervisor 服务已在运行,先停掉再重启...'
+        : '检测到旧 bot 实例,先停掉再重启...',
+    );
+    if (result.stopWarning) {
+      const label = target === 'supervisor' ? '旧 supervisor' : '旧实例';
+      console.warn(`⚠ 停止${label}时有警告(继续重启):\n${formatServiceStderr(result.stopWarning)}`);
+    }
+  }
 
+  const verb =
+    operation === 'restart' && 'action' in result ? result.action : ('started' as const);
+  console.log(verb === 'started' ? '正在等待 bot 连接...' : '正在等待 bot 重新连接...');
   const entry = await waitForServiceConnect(appId, profile, beforePids);
   if (entry) {
     const verbZh = verb === 'started' ? '已启动' : '已重启';
@@ -306,6 +321,31 @@ async function reportConnectAfter(
   console.warn(`⚠ 已下发指令,但 30 秒内未观察到 bot 连接成功 (${verb})。`);
   console.warn(`  查看日志: tail -f ${daemonStderrPath(profile)}`);
   console.warn(`              tail -f ${daemonStdoutPath(profile)}`);
+}
+
+function printLifecycleFailure(
+  failure: ServiceFailure,
+  operation: 'start' | 'restart',
+  target: 'bot' | 'supervisor',
+): void {
+  if (failure.reason === 'not-installed') {
+    console.error(
+      target === 'supervisor'
+        ? 'supervisor 还没在后台运行过。请先运行 `start --web-ui` 启动。'
+        : 'bot 还没在后台运行过。请先运行 `start` 启动。',
+    );
+    return;
+  }
+  if (failure.reason === 'stop-timeout') {
+    const label = target === 'supervisor' ? '旧 supervisor 服务' : '旧 bot 实例';
+    const flag = target === 'supervisor' ? ' --web-ui' : '';
+    console.error(`✗ ${label}没有完全停止。请稍后重试,或:`);
+    console.error(`  unregister${flag}  # 强制清除注册`);
+    console.error(`  start${flag}       # 再次启动`);
+    return;
+  }
+  const verb = operation === 'start' || failure.operation === 'start' ? 'started' : 'restarted';
+  printServiceFailure(verb, failure.stderr);
 }
 
 /**
@@ -330,28 +370,7 @@ export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<v
     opts,
   );
   await materializeEnvSecretForService({ profile });
-
-  await adapter.install();
-
-  // If already running, stop first so start operations don't race.
-  if (adapter.isRunning()) {
-    console.log('检测到旧 bot 实例,先停掉再重启...');
-    const r = await adapter.stop();
-    if (!r.ok) {
-      console.warn(`⚠ 停止旧实例时有警告(继续重启):\n${formatServiceStderr(r.stderr)}`);
-    }
-    // Stop is async at the OS level (especially launchd) — wait until it
-    // really takes effect before start, otherwise some platforms refuse.
-    const ok = await adapter.waitUntilStopped();
-    if (!ok) {
-      console.error('✗ 旧 bot 实例没有完全停止。请稍后重试,或:');
-      console.error('  unregister  # 强制清除注册');
-      console.error('  start       # 再次启动');
-      process.exit(1);
-    }
-  }
-
-  await reportConnectAfter('started', profile, adapter.start);
+  await reportConnectAfter('start', 'bot', profile, adapter);
 }
 
 /**
@@ -370,87 +389,47 @@ async function runServiceStartWebUi(opts: ServiceStartOptions): Promise<void> {
   const { profile } = await ensureBridgeConfigured(opts);
   const adapter = requireAdapter('start', SUPERVISOR_SERVICE_ID, WEB_UI_RUN_ARGS);
   await materializeEnvSecretForService({ profile });
-
-  await adapter.install();
-
-  if (adapter.isRunning()) {
-    console.log('检测到 supervisor 服务已在运行,先停掉再重启...');
-    const r = await adapter.stop();
-    if (!r.ok) {
-      console.warn(`⚠ 停止旧 supervisor 时有警告(继续重启):\n${formatServiceStderr(r.stderr)}`);
-    }
-    const ok = await adapter.waitUntilStopped();
-    if (!ok) {
-      console.error('✗ 旧 supervisor 服务没有完全停止。请稍后重试,或:');
-      console.error('  unregister --web-ui  # 强制清除注册');
-      console.error('  start --web-ui       # 再次启动');
-      process.exit(1);
-    }
-  }
-
-  await reportConnectAfter('started', profile, adapter.start);
+  await reportConnectAfter('start', 'supervisor', profile, adapter);
   console.log('  控制台由后台 supervisor 托管；用 `lark-bot-bridge ui` 打开');
 }
 
-/**
- * `bridge stop` — stop AND prevent auto-restart on next boot.
- *
- * Uses stopAndDisableAutostart so the semantics match on both platforms:
- *  - launchd: bootout + `launchctl disable` (bootout alone is session-scoped:
- *    the plist's RunAtLoad would bring the daemon back at the next login)
- *  - systemd: `disable --now` (stop + remove autostart symlinks)
- *
- * If the user just wants to bounce the service (keep autostart),
- * `restart` is the right command.
- */
+/** `bridge stop` — stop now and prevent auto-start after login or reboot. */
 export async function runServiceStop(opts: ServiceProfileOptions = {}): Promise<void> {
   const { serviceId, profile, webUi } = await resolveServiceTarget(opts);
   const adapter = requireAdapter('stop', serviceId);
-  if (!adapter.fileExists()) {
+  const entry = !webUi && profile ? await lookupProfileEntry(profile) : undefined;
+  const result = await adapter.stop();
+  if (!result.ok) {
+    console.error(
+      result.reason === 'stop-timeout'
+        ? '✗ 停止指令已下发,但服务没有在限定时间内停止。'
+        : `✗ 停止失败:\n${formatServiceStderr(result.stderr)}`,
+    );
+    process.exit(1);
+  }
+  if (result.previousState === 'not-installed') {
     console.log(
       webUi ? 'supervisor 还没在后台运行过,无需停止。' : 'bot 还没在后台运行过,无需停止。',
     );
     return;
   }
-  if (!adapter.isRunning()) {
-    // Not running now, but the registration may still carry login-time
-    // autostart (launchd RunAtLoad / systemd WantedBy) — which is exactly how
-    // a "stopped" daemon comes back on its own. Make `stop` mean stopped.
-    const r = await adapter.disableAutostart();
+  if (result.previousState === 'inactive') {
     console.log(webUi ? 'supervisor 当前没在后台运行。' : 'bot 当前没在后台运行。');
-    if (r.ok) console.log('  已关闭开机自启。');
+    console.log('  已关闭开机自启。');
     return;
-  }
-
-  // Snapshot bot info BEFORE stop so the success message can name
-  // exactly which bot got stopped. Reading after would race the
-  // unregisterSync the daemon fires on shutdown. (Classic mode only —
-  // the supervisor hosts many bots, so there's no single name.)
-  const entry = !webUi && profile ? await lookupProfileEntry(profile) : undefined;
-
-  const r = await adapter.stopAndDisableAutostart();
-  if (!r.ok) {
-    console.error(`✗ 停止失败:\n${formatServiceStderr(r.stderr)}`);
-    process.exit(1);
   }
   if (webUi) {
     console.log('✓ 控制面 supervisor 已停止运行');
     console.log('  通过 `start --web-ui` 可再次重启');
     return;
   }
-  if (entry) {
-    console.log(`✓ bot ${entry.botName} (${entry.appId}) 已停止运行`);
-  } else {
-    console.log('✓ bot 已停止运行');
-  }
+  console.log(entry ? `✓ bot ${entry.botName} (${entry.appId}) 已停止运行` : '✓ bot 已停止运行');
   console.log('  通过 `start` 可再次重启');
 }
 
 /**
- * `bridge restart` — bounce the running daemon in place.
- *
- * If the service is not running (stopped or never started), behaves like
- * `start` and goes through the full install + start path.
+ * `bridge restart` — restart a running daemon or start an installed inactive
+ * daemon. A never-installed daemon retains the corrective `start` error.
  */
 export async function runServiceRestart(opts: ServiceProfileOptions = {}): Promise<void> {
   const { serviceId, webUi } = await resolveServiceTarget(opts);
@@ -459,62 +438,51 @@ export async function runServiceRestart(opts: ServiceProfileOptions = {}): Promi
     serviceId,
     webUi ? WEB_UI_RUN_ARGS : classicRunArgs(serviceId),
   );
-  if (!adapter.fileExists()) {
-    console.error(
-      webUi
-        ? 'supervisor 还没在后台运行过。请先运行 `start --web-ui` 启动。'
-        : 'bot 还没在后台运行过。请先运行 `start` 启动。',
-    );
-    process.exit(1);
-  }
-  // Health-check waits on a profile connecting: classic → the service's own
-  // profile; web-ui → whatever the supervisor auto-starts (the active profile).
   const waitProfile = webUi ? await resolveServiceProfile(undefined) : serviceId;
-  if (adapter.isRunning()) {
-    await reportConnectAfter('restarted', waitProfile, adapter.restart);
-    return;
-  }
-  await reportConnectAfter('started', waitProfile, adapter.start);
+  await reportConnectAfter('restart', webUi ? 'supervisor' : 'bot', waitProfile, adapter);
 }
 
 /** `bridge status` — report whether the daemon is running, with pid + log paths. */
 export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promise<void> {
   const { serviceId, profile, webUi } = await resolveServiceTarget(opts);
   const adapter = requireAdapter('status', serviceId);
+  const status = adapter.status();
   const startHint = webUi ? '`start --web-ui`' : '`start`';
   const label = webUi ? '控制面 supervisor' : 'bot';
-  if (!adapter.fileExists()) {
+  if (status.state === 'not-installed') {
     console.log(`${label} 当前没在后台运行(从未启动过)`);
     console.log(`  通过 ${startHint} 启动`);
     return;
   }
-  if (!adapter.isRunning()) {
+  if (status.state === 'inactive') {
     console.log(`${label} 当前没在后台运行`);
     console.log(`  通过 ${startHint} 重新启动`);
+    console.log(`  服务定义: ${status.definitionPath}`);
+    if (status.lastExitCode && status.lastExitCode !== '-1') {
+      console.log(`  上次退出码: ${status.lastExitCode}`);
+    }
     return;
   }
 
   const entry = !webUi && profile ? await lookupProfileEntry(profile) : undefined;
-
-  const { pid, lastExit } = adapter.parseStatus(adapter.describeStatus());
-
   if (webUi) {
     console.log('✓ 控制面 supervisor 正在后台运行');
     const online = readRegistry().filter((e) => Boolean(e.botName));
-    if (online.length) {
-      console.log(`  在线 bot: ${online.map((e) => e.botName).join('、')}`);
-    }
+    if (online.length) console.log(`  在线 bot: ${online.map((e) => e.botName).join('、')}`);
   } else if (entry) {
     console.log(`✓ bot ${entry.botName} (${entry.appId}) 正在后台运行`);
   } else {
     console.log('✓ bot 正在后台运行');
   }
-  if (pid) console.log(`  进程 ID: ${pid}`);
+  if (status.pid) console.log(`  进程 ID: ${status.pid}`);
+  console.log(`  服务: ${status.platformName}`);
+  console.log(`  定义: ${status.definitionPath}`);
   console.log('  日志:');
   console.log(`    ${daemonStdoutPath(serviceId)}`);
   console.log(`    ${daemonStderrPath(serviceId)}`);
-  // -1 is launchd's "no meaningful exit recorded" marker; hide it.
-  if (lastExit && lastExit !== '-1') console.log(`  上次退出码: ${lastExit}`);
+  if (status.lastExitCode && status.lastExitCode !== '-1') {
+    console.log(`  上次退出码: ${status.lastExitCode}`);
+  }
 }
 
 /**
@@ -528,19 +496,20 @@ export async function runServiceUnregister(opts: ServiceProfileOptions = {}): Pr
   const { serviceId, webUi } = await resolveServiceTarget(opts);
   const adapter = requireAdapter('unregister', serviceId);
   const label = webUi ? 'supervisor' : 'bot';
-  if (!adapter.fileExists()) {
+  const result = await adapter.remove();
+  if (!result.ok) {
+    console.error(
+      result.reason === 'stop-timeout'
+        ? `✗ ${label} 没有在限定时间内停止,未清除注册。`
+        : `✗ 清理 ${label} 失败:\n${formatServiceStderr(result.stderr)}`,
+    );
+    process.exit(1);
+  }
+  if (!result.removed) {
     console.log(`${label} 还没在后台运行过,无需清理。`);
     return;
   }
-  if (adapter.isRunning()) {
-    const r = await adapter.stopAndDisableAutostart();
-    if (!r.ok) {
-      console.warn(`⚠ 停止 ${label} 时有警告(继续清理):\n${formatServiceStderr(r.stderr)}`);
-    } else {
-      console.log(`✓ 已停止 ${label}`);
-    }
-  }
-  await adapter.deleteFile();
+  if (result.previousState === 'running') console.log(`✓ 已停止 ${label}`);
   console.log('✓ 已清除后台运行注册');
   console.log(`  (配置 / 日志 / 会话保留在 ${paths.rootDir})`);
 }

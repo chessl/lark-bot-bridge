@@ -56,28 +56,27 @@ vi.mock('../../../src/daemon/paths', () => ({
   SUPERVISOR_SERVICE_ID: 'supervisor',
 }));
 
-const { runServiceStart, runServiceStatus, runServiceStop, runServiceUnregister } = await import(
-  '../../../src/cli/commands/service'
-);
+const {
+  runServiceRestart,
+  runServiceStart,
+  runServiceStatus,
+  runServiceStop,
+  runServiceUnregister,
+} = await import('../../../src/cli/commands/service');
 
 describe('profile-aware service commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.adapter = {
-      platformName: 'mock',
-      fileExists: vi.fn(() => true),
-      isRunning: vi.fn(() => false),
-      servicePath: vi.fn(() => '/tmp/service'),
-      install: vi.fn(async () => {}),
-      start: vi.fn(() => ({ ok: true, stderr: '' })),
-      stop: vi.fn(() => ({ ok: true, stderr: '' })),
-      stopAndDisableAutostart: vi.fn(() => ({ ok: true, stderr: '' })),
-      disableAutostart: vi.fn(() => ({ ok: true, stderr: '' })),
-      restart: vi.fn(() => ({ ok: true, stderr: '' })),
-      waitUntilStopped: vi.fn(async () => true),
-      deleteFile: vi.fn(async () => {}),
-      describeStatus: vi.fn(() => ''),
-      parseStatus: vi.fn(() => ({})),
+      status: vi.fn(() => ({
+        state: 'inactive',
+        platformName: 'mock',
+        definitionPath: '/tmp/service',
+      })),
+      start: vi.fn(async () => ({ ok: true, replaced: false })),
+      stop: vi.fn(async () => ({ ok: true, previousState: 'inactive' })),
+      restart: vi.fn(async () => ({ ok: true, action: 'started' })),
+      remove: vi.fn(async () => ({ ok: true, removed: true, previousState: 'inactive' })),
     };
     mocks.getServiceAdapter.mockReturnValue(mocks.adapter);
     mocks.materializeEnvSecretForService.mockResolvedValue(false);
@@ -148,7 +147,6 @@ describe('profile-aware service commands', () => {
       }),
     );
     expect(mocks.materializeEnvSecretForService).toHaveBeenCalledWith({ profile: 'codex-dev' });
-    expect(mocks.adapter.install).toHaveBeenCalled();
     expect(mocks.adapter.start).toHaveBeenCalled();
     expect(lines).toContain(
       '✓ 已启动  bot: Codex Bot (cli_codex)  agent: Codex CLI (codex)  进程: p1',
@@ -187,7 +185,6 @@ describe('profile-aware service commands', () => {
 
     await expect(runServiceStart({ profile: 'codex-dev' })).rejects.toThrow('exit:1');
 
-    expect(mocks.adapter.install).not.toHaveBeenCalled();
     expect(mocks.adapter.start).not.toHaveBeenCalled();
     expect(errors.join('\n')).toContain('当前 profile 已有 bridge 进程占用');
     expect(errors.join('\n')).toContain('pid=2468');
@@ -195,6 +192,43 @@ describe('profile-aware service commands', () => {
     exit.mockRestore();
   });
 
+
+  it('allows start to replace the managed daemon that owns the runtime locks', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    mocks.adapter.status = vi.fn(() => ({
+      state: 'running',
+      pid: '2468',
+      platformName: 'mock',
+      definitionPath: '/tmp/service',
+    }));
+    mocks.adapter.start = vi.fn(async () => ({ ok: true, replaced: true }));
+    mocks.checkRuntimeLock.mockResolvedValue({
+      locked: true,
+      meta: {
+        kind: 'profile',
+        target: '/tmp/lark-channel-home/registry/locks/profile/codex-dev.lock',
+        profile: 'codex-dev',
+        agentKind: 'codex',
+        pid: 2468,
+        startedAt: '2026-05-26T10:50:33.082Z',
+      },
+    });
+    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
+      processEntry({
+        id: 'replacement',
+        pid: 2469,
+        appId: 'cli_codex',
+        profileName: 'codex-dev',
+        agentKind: 'codex',
+        botName: 'Codex Bot',
+      }),
+    ]);
+
+    await runServiceStart({ profile: 'codex-dev' });
+
+    expect(mocks.adapter.start).toHaveBeenCalled();
+    expect(mocks.stopProcessEntry).not.toHaveBeenCalled();
+  });
   it('stops a foreground lock holder and continues service start after interactive confirmation', async () => {
     const lines: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((line: string) => {
@@ -229,7 +263,6 @@ describe('profile-aware service commands', () => {
     });
 
     expect(mocks.stopProcessEntry).toHaveBeenCalledWith({ pid: 2468 });
-    expect(mocks.adapter.install).toHaveBeenCalled();
     expect(mocks.adapter.start).toHaveBeenCalled();
     expect(lines).toContain('✓ 已停止 pid 2468');
   });
@@ -257,7 +290,6 @@ describe('profile-aware service commands', () => {
 
     await expect(runServiceStart({ profile: 'codex-dev' })).rejects.toThrow('exit:1');
 
-    expect(mocks.adapter.install).not.toHaveBeenCalled();
     expect(mocks.adapter.start).not.toHaveBeenCalled();
     expect(errors.join('\n')).toContain('当前 app 已有 bridge 进程占用');
     expect(errors.join('\n')).toContain('app=cli_codex');
@@ -321,13 +353,16 @@ describe('profile-aware service commands', () => {
     });
     expect(mocks.getServiceAdapter).toHaveBeenCalledWith('claude', ['run', '--profile', 'claude']);
     expect(mocks.materializeEnvSecretForService).toHaveBeenCalledWith({ profile: 'claude' });
-    expect(mocks.adapter.install).toHaveBeenCalled();
     expect(mocks.adapter.start).toHaveBeenCalled();
   });
 
   it('uses the active profile when --profile is omitted and fails if none exists', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    (mocks.adapter.fileExists as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    mocks.adapter.status = vi.fn(() => ({
+      state: 'not-installed',
+      platformName: 'mock',
+      definitionPath: '/tmp/service',
+    }));
 
     await runServiceStatus();
     // Lifecycle commands (status/stop/restart/unregister) don't install, so
@@ -346,11 +381,27 @@ describe('profile-aware service commands', () => {
     });
     // Machine installed via `start --web-ui`: only the supervisor service
     // exists on disk, and it is the process hosting profile codex-dev.
-    const supervisor = { ...mocks.adapter, isRunning: vi.fn(() => true) } as ServiceAdapter;
+    const supervisor = {
+      ...mocks.adapter,
+      status: vi.fn(() => ({
+        state: 'running',
+        pid: '12345',
+        platformName: 'mock',
+        definitionPath: '/tmp/supervisor',
+      })),
+      stop: vi.fn(async () => ({ ok: true, previousState: 'running' })),
+    } as ServiceAdapter;
     mocks.getServiceAdapter.mockImplementation((serviceId: string) =>
       serviceId === 'supervisor'
         ? supervisor
-        : { ...mocks.adapter, fileExists: vi.fn(() => false) },
+        : {
+            ...mocks.adapter,
+            status: vi.fn(() => ({
+              state: 'not-installed',
+              platformName: 'mock',
+              definitionPath: '/tmp/service',
+            })),
+          },
     );
     mocks.readRegistry.mockReturnValue([]);
 
@@ -358,7 +409,7 @@ describe('profile-aware service commands', () => {
 
     // Must act on the supervisor service, not silently no-op on a
     // per-profile service that was never installed.
-    expect(supervisor.stopAndDisableAutostart).toHaveBeenCalled();
+    expect(supervisor.stop).toHaveBeenCalled();
     expect(lines.join('\n')).toContain('已指向控制面 supervisor 服务');
     expect(lines).toContain('✓ 控制面 supervisor 已停止运行');
   });
@@ -369,12 +420,9 @@ describe('profile-aware service commands', () => {
       lines.push(line);
     });
 
-    // fileExists=true, isRunning=false — nothing to kill, but the login-time
-    // autostart is still armed and would bring the daemon back by itself.
     await runServiceStop({ profile: 'codex-dev' });
 
-    expect(mocks.adapter.disableAutostart).toHaveBeenCalled();
-    expect(mocks.adapter.stopAndDisableAutostart).not.toHaveBeenCalled();
+    expect(mocks.adapter.stop).toHaveBeenCalled();
     expect(lines).toContain('  已关闭开机自启。');
   });
 
@@ -383,16 +431,31 @@ describe('profile-aware service commands', () => {
     vi.spyOn(console, 'log').mockImplementation((line: string) => {
       lines.push(line);
     });
-    const supervisor = { ...mocks.adapter, isRunning: vi.fn(() => true) } as ServiceAdapter;
-    const classic = { ...mocks.adapter, fileExists: vi.fn(() => false) } as ServiceAdapter;
+    const supervisor = {
+      ...mocks.adapter,
+      status: vi.fn(() => ({
+        state: 'running',
+        platformName: 'mock',
+        definitionPath: '/tmp/supervisor',
+      })),
+    } as ServiceAdapter;
+    const classic = {
+      ...mocks.adapter,
+      status: vi.fn(() => ({
+        state: 'not-installed',
+        platformName: 'mock',
+        definitionPath: '/tmp/service',
+      })),
+      stop: vi.fn(async () => ({ ok: true, previousState: 'not-installed' })),
+    } as ServiceAdapter;
     mocks.getServiceAdapter.mockImplementation((serviceId: string) =>
       serviceId === 'supervisor' ? supervisor : classic,
     );
 
     await runServiceStop({ profile: 'codex-dev' });
 
-    expect(supervisor.stopAndDisableAutostart).not.toHaveBeenCalled();
-    expect(classic.stopAndDisableAutostart).not.toHaveBeenCalled();
+    expect(supervisor.stop).not.toHaveBeenCalled();
+    expect(classic.stop).toHaveBeenCalled();
     expect(lines).toContain('bot 还没在后台运行过,无需停止。');
   });
 
@@ -411,9 +474,188 @@ describe('profile-aware service commands', () => {
     await runServiceUnregister({ profile: 'codex-dev' });
 
     expect(mocks.getServiceAdapter).toHaveBeenCalledWith('codex-dev', undefined);
-    expect(mocks.adapter.deleteFile).toHaveBeenCalled();
+    expect(mocks.adapter.remove).toHaveBeenCalled();
     expect(lines).toContain('✓ 已清除后台运行注册');
     expect(lines).toContain('  (配置 / 日志 / 会话保留在 /tmp/lark-channel-home)');
+  });
+
+  it('runs the supervisor start lifecycle and preserves connection reporting', async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
+    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
+      processEntry({
+        id: 'supervised',
+        pid: 5252,
+        appId: 'cli_codex',
+        profileName: 'codex-dev',
+        agentKind: 'codex',
+        botName: 'Supervisor Bot',
+      }),
+    ]);
+
+    await runServiceStart({ webUi: true });
+
+    expect(mocks.getServiceAdapter).toHaveBeenCalledWith('supervisor', ['run', '--web-ui']);
+    expect(mocks.adapter.start).toHaveBeenCalled();
+    expect(lines.join('\n')).toContain('Supervisor Bot');
+    expect(lines.join('\n')).toContain('控制台由后台 supervisor 托管');
+  });
+
+  it('starts an installed inactive classic daemon through restart', async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
+    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
+      processEntry({
+        id: 'restarted',
+        pid: 6262,
+        appId: 'cli_codex',
+        profileName: 'codex-dev',
+        agentKind: 'codex',
+        botName: 'Restarted Bot',
+      }),
+    ]);
+
+    await runServiceRestart({ profile: 'codex-dev' });
+
+    expect(mocks.adapter.restart).toHaveBeenCalled();
+    expect(lines.join('\n')).toContain('✓ 已启动  bot: Restarted Bot');
+  });
+
+
+  it('retains the corrective start error when restart was never installed', async () => {
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((line?: unknown) => errors.push(String(line)));
+    const exit = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`exit:${code}`);
+    });
+    mocks.adapter.restart = vi.fn(async () => ({
+      ok: false,
+      reason: 'not-installed',
+      operation: 'restart',
+      stderr: '',
+    }));
+    mocks.readRegistry.mockReturnValue([]);
+
+    await expect(runServiceRestart({ profile: 'codex-dev' })).rejects.toThrow('exit:1');
+
+    expect(errors.join('\n')).toContain('请先运行 `start`');
+    exit.mockRestore();
+  });
+  it('reports a bounded stop timeout without duplicating stop polling', async () => {
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((line?: unknown) => errors.push(String(line)));
+    const exit = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`exit:${code}`);
+    });
+    mocks.adapter.stop = vi.fn(async () => ({
+      ok: false,
+      reason: 'stop-timeout',
+      operation: 'stop',
+      stderr: '',
+    }));
+
+    await expect(runServiceStop({ profile: 'codex-dev' })).rejects.toThrow('exit:1');
+
+    expect(mocks.adapter.stop).toHaveBeenCalledOnce();
+    expect(errors.join('\n')).toContain('限定时间内停止');
+    exit.mockRestore();
+  });
+
+  it('surfaces a structured platform failure from start', async () => {
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((line?: unknown) => errors.push(String(line)));
+    const exit = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`exit:${code}`);
+    });
+    mocks.adapter.start = vi.fn(async () => ({
+      ok: false,
+      reason: 'platform',
+      operation: 'start',
+      stderr: 'service manager unavailable',
+    }));
+    mocks.readRegistry.mockReturnValue([]);
+
+    await expect(runServiceStart({ profile: 'codex-dev' })).rejects.toThrow('exit:1');
+
+    expect(errors.join('\n')).toContain('service manager unavailable');
+    exit.mockRestore();
+  });
+
+  it('makes repeated supervisor removal observable and idempotent', async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
+    const remove = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, removed: true, previousState: 'running' })
+      .mockResolvedValueOnce({ ok: true, removed: false, previousState: 'not-installed' });
+    mocks.adapter.remove = remove;
+
+    await runServiceUnregister({ webUi: true });
+    await runServiceUnregister({ webUi: true });
+
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(lines).toContain('✓ 已清除后台运行注册');
+    expect(lines).toContain('supervisor 还没在后台运行过,无需清理。');
+  });
+
+  it('reports and stops a running classic daemon through structured outcomes', async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
+    mocks.adapter.status = vi.fn(() => ({
+      state: 'running',
+      pid: '7373',
+      lastExitCode: '0',
+      platformName: 'mock',
+      definitionPath: '/tmp/service',
+    }));
+    mocks.adapter.stop = vi.fn(async () => ({ ok: true, previousState: 'running' }));
+    mocks.readRegistry.mockReturnValue([
+      processEntry({
+        pid: 7373,
+        appId: 'cli_codex',
+        profileName: 'codex-dev',
+        botName: 'Classic Bot',
+      }),
+    ]);
+
+    await runServiceStatus({ profile: 'codex-dev' });
+    await runServiceStop({ profile: 'codex-dev' });
+
+    expect(lines.join('\n')).toContain('Classic Bot (cli_codex) 正在后台运行');
+    expect(lines.join('\n')).toContain('进程 ID: 7373');
+    expect(lines.join('\n')).toContain('✓ bot Classic Bot (cli_codex) 已停止运行');
+  });
+
+  it('reports and restarts a running supervisor through structured outcomes', async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
+    mocks.adapter.status = vi.fn(() => ({
+      state: 'running',
+      pid: '8383',
+      platformName: 'mock',
+      definitionPath: '/tmp/supervisor',
+    }));
+    mocks.adapter.restart = vi.fn(async () => ({ ok: true, action: 'restarted' }));
+    const online = processEntry({
+      id: 'before-restart',
+      pid: 8383,
+      appId: 'cli_codex',
+      profileName: 'codex-dev',
+      botName: 'Supervisor Bot',
+    });
+    mocks.readRegistry.mockReturnValue([online]);
+
+    await runServiceStatus({ webUi: true });
+
+    mocks.readRegistry.mockReset();
+    mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
+      { ...online, id: 'after-restart', pid: 8484 },
+    ]);
+    await runServiceRestart({ webUi: true });
+
+    expect(lines.join('\n')).toContain('控制面 supervisor 正在后台运行');
+    expect(lines.join('\n')).toContain('✓ 已重启  bot: Supervisor Bot');
+    expect(mocks.adapter.restart).toHaveBeenCalled();
   });
 });
 
