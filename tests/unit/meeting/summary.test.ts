@@ -1,16 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  MEETING_DEFAULTS,
+  createDefaultProfileConfig,
+  type MeetingConfig,
+} from '../../../src/config/profile-schema';
+import type { VcRequestClient } from '../../../src/meeting/api';
+import {
+  answerInMeeting,
+  attachMeetingAgent,
+  resolveSummaryTarget,
+  summarizeEndedMeeting,
+} from '../../../src/meeting/orchestrator';
+import { MeetingSession } from '../../../src/meeting/session';
 
-const mocks = vi.hoisted(() => ({ startRunFlow: vi.fn() }));
+const mocks = vi.hoisted(() => ({ start: vi.fn() }));
 
-vi.mock('../../../src/bot/run-flow', () => ({ startRunFlow: mocks.startRunFlow }));
-
-const { summarizeEndedMeeting, resolveSummaryTarget } = await import(
-  '../../../src/meeting/orchestrator'
-);
-const { MeetingSession } = await import('../../../src/meeting/session');
-const { MEETING_DEFAULTS, createDefaultProfileConfig } = await import(
-  '../../../src/config/profile-schema'
-);
 
 /** A real ProfileConfig — capability resolution reads more than `agentKind`. */
 function profileConfig(meeting: MeetingConfig) {
@@ -22,8 +26,6 @@ function profileConfig(meeting: MeetingConfig) {
   return pc;
 }
 
-import type { MeetingConfig } from '../../../src/config/profile-schema';
-import type { VcRequestClient } from '../../../src/meeting/api';
 
 const noopClient: VcRequestClient = {
   request: vi.fn(async () => ({ code: 0, data: {} }) as never),
@@ -33,16 +35,22 @@ const noopClient: VcRequestClient = {
 function fakeRun(text: string) {
   return {
     ok: true as const,
-    execution: {
+    run: {
+      metadata: {
+        runId: 'run-1',
+        scopeId: 'meeting:70001',
+        cwdRealpath: '/repo',
+        policyFingerprint: 'policy',
+      },
       events: {
         async *[Symbol.asyncIterator]() {
           yield { type: 'text', delta: text };
           yield { type: 'done' };
         },
       },
+      stop: vi.fn(),
+      wasInterrupted: () => false,
     },
-    policy: {},
-    cwdRealpath: '/repo',
   };
 }
 
@@ -84,10 +92,7 @@ function deps(config: MeetingConfig, originChatId?: string, botOwnerId?: string)
         profileConfig: profileConfig(config),
         ...(botOwnerId ? { botOwnerId } : {}),
       },
-      executor: {},
-      activeRuns: { interrupt: vi.fn() },
-      sessions: {},
-      workspaces: {},
+      scopedRuns: { start: mocks.start, interrupt: vi.fn() },
     } as never,
   };
 }
@@ -98,14 +103,14 @@ function cfg(over: Partial<MeetingConfig> = {}): MeetingConfig {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.startRunFlow.mockResolvedValue(fakeRun('讨论了发布计划；结论：周五上线。'));
+  mocks.start.mockResolvedValue(fakeRun('讨论了发布计划；结论：周五上线。'));
 });
 
 describe('summarizeEndedMeeting', () => {
   it('does nothing when summaryOnEnd is off', async () => {
     const d = deps(cfg({ summaryOnEnd: false }), 'oc_team');
     await summarizeEndedMeeting(d.args);
-    expect(mocks.startRunFlow).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
     expect(d.sent).toHaveLength(0);
   });
 
@@ -113,7 +118,7 @@ describe('summarizeEndedMeeting', () => {
     const d = deps(cfg({ summaryOnEnd: true }), 'oc_team');
     await summarizeEndedMeeting(d.args);
 
-    expect(mocks.startRunFlow).toHaveBeenCalledTimes(1);
+    expect(mocks.start).toHaveBeenCalledTimes(1);
     expect(d.sent).toHaveLength(1);
     expect(d.sent[0]?.to).toBe('oc_team');
     expect(String((d.sent[0]?.input as { markdown: string }).markdown)).toContain(
@@ -143,7 +148,7 @@ describe('summarizeEndedMeeting', () => {
   it('skips when there is nowhere to send it', async () => {
     const d = deps(cfg({ summaryOnEnd: true }));
     await summarizeEndedMeeting(d.args);
-    expect(mocks.startRunFlow).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
     expect(d.sent).toHaveLength(0);
   });
 
@@ -166,13 +171,10 @@ describe('summarizeEndedMeeting', () => {
         }),
       },
       controls: { profile: 'claude', profileConfig: profileConfig(config) },
-      executor: {},
-      activeRuns: { interrupt: vi.fn() },
-      sessions: {},
-      workspaces: {},
+      scopedRuns: { start: mocks.start, interrupt: vi.fn() },
     } as never);
 
-    expect(mocks.startRunFlow).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
     expect(sent).toHaveLength(0);
   });
 
@@ -182,6 +184,88 @@ describe('summarizeEndedMeeting', () => {
     await summarizeEndedMeeting(d.args);
     expect(d.sent).toHaveLength(1);
   });
+});
+
+describe('answerInMeeting', () => {
+  it('uses meeting access and returns collected answer only to the caller', async () => {
+    const d = deps(cfg(), 'oc_team', 'ou_owner');
+
+    const answer = await answerInMeeting(d.args, '发布了吗？', { deliver: 'caller' });
+
+    expect(answer).toContain('周五上线');
+    expect(mocks.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scopeId: 'meeting:70001',
+        scope: expect.objectContaining({ source: 'meeting', actorId: 'ou_owner' }),
+        access: { ok: true, reason: 'allowed-chat' },
+        attachments: [],
+      }),
+    );
+    expect(d.sent).toHaveLength(0);
+  });
+
+  it('keeps meeting-specific busy guidance and the trigger the asker used', async () => {
+    mocks.start.mockResolvedValue({
+      ok: false,
+      rejectReason: {
+        code: 'run-already-active',
+        userVisible: 'generic busy',
+      },
+    });
+    const d = deps(cfg(), 'oc_team');
+
+    const answer = await answerInMeeting(d.args, '再试一次', {
+      deliver: 'caller',
+      usedPrefix: '@助手',
+    });
+
+    expect(answer).toBe('上一个任务还在执行。发「@助手 stop」可以中断它，然后再问我。');
+  });
+
+  it('returns scoped rejection errors for meeting callers', async () => {
+    mocks.start.mockResolvedValue({
+      ok: false,
+      rejectReason: {
+        code: 'pool-full',
+        userVisible: '当前无法发起运行，请稍后重试。',
+      },
+    });
+    const d = deps(cfg(), 'oc_team');
+
+    await expect(answerInMeeting(d.args, '再试一次', { deliver: 'caller' })).resolves.toBe(
+      '当前无法发起运行，请稍后重试。',
+    );
+  });
+  it('presents in-meeting interruption immediately through the scoped seam', () => {
+    let onChat: ((event: unknown) => void) | undefined;
+    const sendMessage = vi.fn(async () => {});
+    const interrupt = vi.fn(() => true);
+    const config = cfg({ trigger: '@bot' });
+    attachMeetingAgent({
+      session: {
+        meetingId: '70001',
+        on: vi.fn((_kind, handler) => {
+          onChat = handler;
+          return () => {};
+        }),
+        sendMessage,
+      },
+      channel: { botIdentity: { name: 'bot' } },
+      controls: { profile: 'claude', profileConfig: profileConfig(config) },
+      scopedRuns: { interrupt },
+    } as never);
+
+    onChat?.({
+      kind: 'chat',
+      content: '@bot stop',
+      messageType: 1,
+      from: { name: '甲' },
+    });
+
+    expect(interrupt).toHaveBeenCalledWith('meeting:70001');
+    expect(sendMessage).toHaveBeenCalledWith('已中断当前任务。');
+  });
+
 });
 
 describe('resolveSummaryTarget', () => {

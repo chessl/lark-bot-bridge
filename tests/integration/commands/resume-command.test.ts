@@ -320,6 +320,10 @@ async function createHarness(
       sessionCatalog: catalog,
       workspaces,
       activeRuns,
+      scopedRuns: {
+        activeMetadata: () => undefined,
+        interrupt: (scope: string) => activeRuns.interrupt(scope),
+      } as never,
       agent,
       controls,
       pending,

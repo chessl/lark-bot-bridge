@@ -5,6 +5,7 @@ import type { ChatModeCache } from '../bot/chat-mode-cache';
 import type { PendingQueue } from '../bot/pending-queue';
 import type { ProcessPool } from '../bot/process-pool';
 import { commandSessionCatalogIdentity } from '../bot/session-catalog-identity';
+import type { ScopedRuns } from '../bot/run-flow';
 import { lookupMessageThreadId } from '../bot/thread-id';
 import { type CommandContext, type Controls, runCommandHandler } from '../commands';
 import { log } from '../core/logger';
@@ -34,12 +35,11 @@ export interface CardDispatchDeps {
   agent: AgentAdapter;
   processPool?: ProcessPool;
   runExecutor?: RunExecutor;
+  scopedRuns: ScopedRuns;
   controls: Controls;
   pending: PendingQueue;
   chatModeCache: ChatModeCache;
   callbackAuth?: CallbackAuth;
-  callbackPolicyFingerprint?: string;
-  callbackPolicyFingerprintForScope?: (scope: string) => string | undefined;
   nativeApproval?: {
     resolveApproval(input: {
       id: string;
@@ -113,6 +113,7 @@ export async function handleCardAction(deps: CardDispatchDeps): Promise<void> {
       agent: deps.agent,
       processPool: deps.processPool,
       runExecutor: deps.runExecutor,
+      scopedRuns: deps.scopedRuns,
       controls: deps.controls,
       formValue,
       fromCardAction: true,
@@ -215,20 +216,19 @@ function verifyBridgeToken(
   action: string,
 ): boolean {
   const token = typeof payload.bridge_token === 'string' ? payload.bridge_token : '';
-  const active = deps.activeRuns.get(scope);
+  const active = deps.scopedRuns.activeMetadata(scope);
   if (!deps.callbackAuth || !token || !active) {
     log.info('cardAction', 'skip-callback-auth-missing', { scope, action });
     log.warn('callback', 'denied', { scope, action, reason: 'missing-token-or-run' });
     return false;
   }
   const result = deps.callbackAuth.verify(token, {
-    runId: active.run.runId,
+    runId: active.runId,
     scope,
     chatId: deps.evt.chatId,
     operatorOpenId: deps.evt.operator.openId,
     action,
-    policyFingerprint:
-      deps.callbackPolicyFingerprintForScope?.(scope) ?? deps.callbackPolicyFingerprint ?? '',
+    policyFingerprint: active.policyFingerprint,
   });
   if (!result.ok) {
     log.info('cardAction', 'skip-callback-auth-failed', {

@@ -1,7 +1,6 @@
 import type { LarkChannel, LarkChannelOptions, NormalizedMessage } from '@larksuite/channel';
 import { createLarkChannel } from '@larksuite/channel';
-import { capabilityForProfile } from '../agent/capability';
-import { modelLabel, normalizeModelSelection, resolveModelArg } from '../agent/models';
+import { modelLabel, normalizeModelSelection } from '../agent/models';
 import {
   type BridgePromptInteractiveCard,
   type BridgePromptMention,
@@ -49,7 +48,7 @@ import { RunExecutor } from '../runtime/run-executor';
 import type { SessionCatalog } from '../session/catalog';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
-import { ActiveRuns, type RunHandle } from './active-runs';
+import { ActiveRuns } from './active-runs';
 import { type ChatMode, ChatModeCache } from './chat-mode-cache';
 import { handleCommentMention } from './comments';
 import { CotClient, CotPublisher, finalAnswerOnlyState, withCotEvents } from './cot';
@@ -59,7 +58,7 @@ import { PendingQueue } from './pending-queue';
 import { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
 import { addWorkingReaction, removeReaction } from './reaction';
-import { recordRunSessionEvent, startRunFlow } from './run-flow';
+import { ScopedRuns, type ScopedRun } from './run-flow';
 import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { lookupMessageThreadId } from './thread-id';
 
@@ -196,7 +195,6 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         nonceStore: callbackNonceStore,
       })
     : undefined;
-  const activePolicyFingerprints = new Map<string, string>();
   // Per-scope record of the model used on the last run, so a `/config` model
   // switch can inject a one-time "model changed" note into the next (resumed)
   // prompt. In-memory only: on restart the first run re-seeds silently.
@@ -261,6 +259,14 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     profileConfig: () => controls.profileConfig,
   });
   const executor = new RunExecutor({ agent, pool, activeRuns, nativeTools: nativeServer });
+  const scopedRuns = new ScopedRuns({
+    executor,
+    ...(sessionCatalog ? { sessionCatalog } : {}),
+    workspaces,
+    profile: controls.profile,
+    profileConfig: () => controls.profileConfig,
+    stopGraceMs: () => getAgentStopGraceMs(controls.cfg),
+  });
   const media = new MediaCache(channel, deps.appPaths?.mediaDir);
 
   // Pending → run handoff: while a run is active on a chat, block its pending
@@ -297,16 +303,14 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         }
         await runAgentBatch({
           channel,
-          executor,
+          scopedRuns,
           sessions,
           sessionCatalog,
-          workspaces,
           media,
           batch,
           controls,
           cotClient,
           callbackAuth,
-          activePolicyFingerprints,
           lastRunModelByScope,
           scope,
           mode,
@@ -339,6 +343,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           chatModeCache,
           logThreadModeOverride,
           executor,
+          scopedRuns,
           pool,
         }),
       ).catch((err) => log.fail('intake', err));
@@ -358,11 +363,11 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           agent,
           processPool: pool,
           runExecutor: executor,
+          scopedRuns,
           controls,
           pending,
           chatModeCache,
           callbackAuth,
-          callbackPolicyFingerprintForScope: (scope) => activePolicyFingerprints.get(scope),
           nativeApproval: nativeServer,
         });
       }).catch((err) => log.fail('cardAction', err));
@@ -434,22 +439,14 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           session,
           channel,
           controls,
-          executor,
-          activeRuns,
-          sessions,
-          ...(sessionCatalog ? { sessionCatalog } : {}),
-          workspaces,
+          scopedRuns,
         }).catch((err) => log.warn('meeting', 'summary-failed', { err: String(err) })),
       onSession: (session) =>
         attachMeetingAgent({
           session,
           channel,
           controls,
-          executor,
-          activeRuns,
-          sessions,
-          ...(sessionCatalog ? { sessionCatalog } : {}),
-          workspaces,
+          scopedRuns,
         }),
     });
     meetingManager.attachPush();
@@ -610,6 +607,7 @@ interface IntakeDeps {
   chatModeCache: ChatModeCache;
   logThreadModeOverride: LogThreadModeOverride;
   executor: RunExecutor;
+  scopedRuns: ScopedRuns;
   pool: ProcessPool;
 }
 
@@ -633,6 +631,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     chatModeCache,
     logThreadModeOverride,
     executor,
+    scopedRuns,
     pool,
   } = deps;
   const preview = msg.content.length > 80 ? `${msg.content.slice(0, 80)}…` : msg.content;
@@ -758,6 +757,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
       access: accessDecision,
     }),
     runExecutor: executor,
+    scopedRuns,
     processPool: pool,
     controls,
   });
@@ -773,16 +773,14 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
 
 interface RunBatchDeps {
   channel: LarkChannel;
-  executor: RunExecutor;
+  scopedRuns: ScopedRuns;
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
-  workspaces: WorkspaceStore;
   media: MediaCache;
   batch: NormalizedMessage[];
   controls: Controls;
   cotClient: CotClient;
   callbackAuth?: CallbackAuth;
-  activePolicyFingerprints: Map<string, string>;
   lastRunModelByScope: Map<string, string>;
   scope: string;
   mode: ChatMode;
@@ -791,16 +789,14 @@ interface RunBatchDeps {
 async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const {
     channel,
-    executor,
+    scopedRuns,
     sessions,
     sessionCatalog,
-    workspaces,
     media,
     batch,
     controls,
     cotClient,
     callbackAuth,
-    activePolicyFingerprints,
     lastRunModelByScope,
     scope,
     mode,
@@ -891,12 +887,11 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // the (now-switched) agent its model changed — otherwise it keeps echoing
   // the previously-announced model. Only fires when a prior model was seen
   // for this scope (never on the first run) and the selection actually
-  // changed. `requestedModel` (the `--model` value, or undefined for default)
-  // is reused below to log requested-vs-actual against the init event.
+  // changed. The scoped-run seam owns translating this preference into the
+  // adapter's model argument.
   const agentKind = controls.profileConfig.agentKind;
   const modelPref = controls.profileConfig.preferences.model;
   const modelSelection = normalizeModelSelection(agentKind, modelPref);
-  const requestedModel = resolveModelArg(agentKind, modelPref);
   const prevModel = lastRunModelByScope.get(scope);
   const modelSwitched = prevModel !== undefined && prevModel !== modelSelection;
   lastRunModelByScope.set(scope, modelSelection);
@@ -950,27 +945,12 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     actorId: firstMsg.senderId,
     ...(threadId ? { threadId } : {}),
   };
-  const capability = capabilityForProfile(controls.profileConfig);
-  const flow = await startRunFlow({
+  const flow = await scopedRuns.start({
     scopeId: scope,
     scope: scopeContext,
     prompt,
     attachments: attachments.map(toPolicyAttachment),
     access: accessDecision,
-    capability,
-    profileConfig: controls.profileConfig,
-    sessionCatalog,
-    workspaces,
-    executor,
-    now: Date.now(),
-    stopGraceMs: getAgentStopGraceMs(controls.cfg),
-    allowUserIdentity: controls.profileConfig.mode === 'personal' && firstMsg.chatType === 'p2p',
-    observability: {
-      profile: controls.profile,
-      agent: capability.agentId,
-      source: 'im',
-      stage: 'submit',
-    },
   });
   if (!flow.ok) {
     log.info('run-flow', 'rejected', { scope, code: flow.rejectReason.code });
@@ -983,40 +963,13 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     return;
   }
 
-  const { execution, cwdRealpath: cwd } = flow;
-  activePolicyFingerprints.set(scope, flow.policy.policyFingerprint);
-  const handle = execution.handle;
-  const eventStream = execution.events;
-  if (flow.resumeFrom) {
-    log.info('session', 'resume', { sessionId: flow.resumeFrom, cwd });
+  const { run } = flow;
+  const { cwdRealpath: cwd, resumeFrom, policyFingerprint } = run.metadata;
+  if (resumeFrom) {
+    log.info('session', 'resume', { sessionId: resumeFrom, cwd });
   } else {
     log.info('session', 'fresh', { cwd });
   }
-  const recordSession = (evt: AgentEvent): void => {
-    recordRunSessionEvent({
-      scopeId: scope,
-      sessionCatalog,
-      capability,
-      policy: flow.policy,
-      event: evt,
-    });
-    if (evt.type === 'system' && evt.sessionId) {
-      log.info('session', 'set', { sessionId: evt.sessionId });
-    }
-    // Ground truth for "which model is actually running": claude reports the
-    // model it loaded in its init event. Logging requested-vs-actual reveals
-    // whether the --model pin took effect or claude silently fell back (e.g.
-    // an id this claude build/account doesn't recognize).
-    if (evt.type === 'system' && evt.model) {
-      log.info('session', 'model', {
-        requested: requestedModel ?? 'default',
-        actual: evt.model,
-      });
-    }
-    if (evt.type === 'system' && evt.threadId) {
-      log.info('session', 'set-thread', { threadId: evt.threadId });
-    }
-  };
 
   // Resolve idle-timeout for this run: scope override (on SessionEntry) wins
   // over global default (preferences). 0 / undefined = no watchdog.
@@ -1046,12 +999,12 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     ? {
         signCallback: (action: string) =>
           callbackAuth.sign({
-            runId: execution.runId,
+            runId: run.metadata.runId,
             scope,
             chatId,
             operatorOpenId: firstMsg.senderId,
             action,
-            policyFingerprint: flow.policy.policyFingerprint,
+            policyFingerprint,
             ttlMs: 24 * 60 * 60 * 1000,
           }),
       }
@@ -1074,18 +1027,17 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         // topic; message_cot has no thread_id receive type, so origin is the
         // only lever we have (see CotClient.create).
         originMessageId: lastMsg.messageId,
-        runId: execution.runId,
+        runId: run.metadata.runId,
         scope,
         inputPreview: lastMsg.content,
       });
       await cotPublisher.start();
       if (!cotPublisher.disabled) {
         const finalState = await processAgentStream(
-          handle,
-          withCotEvents(eventStream, cotPublisher, { detail: cotMessages }),
+          run,
+          withCotEvents(run.events, cotPublisher, { detail: cotMessages }),
           scope,
           idleTimeoutMs,
-          recordSession,
           async () => {},
         );
         if (cotPublisher.degradedReason) {
@@ -1136,11 +1088,10 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         ),
       );
       const renderDone = processAgentStream(
-        handle,
-        eventStream,
+        run,
+        run.events,
         scope,
         idleTimeoutMs,
-        recordSession,
         async (state) => {
           latestState = state;
           if (shouldOpenProgressStream(filterForPrefs(state))) progress.ensureOpen();
@@ -1201,11 +1152,10 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         ),
       );
       const renderDone = processAgentStream(
-        handle,
-        eventStream,
+        run,
+        run.events,
         scope,
         idleTimeoutMs,
-        recordSession,
         async (state) => {
           latestState = state;
           if (shouldOpenProgressStream(filterForPrefs(state))) progress.ensureOpen();
@@ -1249,11 +1199,10 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       // the run, then post the final rendered text once as a plain markdown
       // (msg_type=post) message — no card, no streaming, no typewriter.
       const finalState = await processAgentStream(
-        handle,
-        eventStream,
+        run,
+        run.events,
         scope,
         idleTimeoutMs,
-        recordSession,
         async () => {},
       );
       await sendFinalReply({
@@ -1272,7 +1221,6 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   } catch (err) {
     log.fail('stream', err);
   } finally {
-    activePolicyFingerprints.delete(scope);
     scheduleWorkingReactionCleanup(channel, lastMsg.messageId, reactionPromise);
   }
 }
@@ -1527,11 +1475,10 @@ function outboundLogFields(
  * the only difference between the two is what `flush` does with the state.
  */
 async function processAgentStream(
-  handle: RunHandle,
+  run: ScopedRun,
   events: AsyncIterable<AgentEvent>,
   scope: string,
   idleTimeoutMs: number | undefined,
-  recordSession: (event: AgentEvent) => void,
   flush: (state: RunState) => Promise<void>,
 ): Promise<RunState> {
   let state: RunState = initialState;
@@ -1557,9 +1504,8 @@ async function processAgentStream(
     if (inFlightTools.size > 0) return;
     timer = setTimeout(() => {
       idleFired = true;
-      handle.interrupted = true;
       log.warn('agent', 'idle-timeout', { scope, idleTimeoutMs });
-      void handle.run.stop().catch(() => {
+      void run.stop().catch(() => {
         /* stop errors are non-fatal */
       });
     }, idleTimeoutMs);
@@ -1568,7 +1514,7 @@ async function processAgentStream(
 
   try {
     for await (const evt of events) {
-      if (handle.interrupted) break;
+      if (run.wasInterrupted()) break;
 
       // Track tool flight before re-arming the idle timer so the arm step
       // sees the correct set size. tool_use opens a window; tool_result
@@ -1585,10 +1531,7 @@ async function processAgentStream(
       }
       armOrPauseIdle();
 
-      if (evt.type === 'system') {
-        recordSession(evt);
-        continue;
-      }
+      if (evt.type === 'system') continue;
       if (evt.type === 'usage') {
         const { costUsd, inputTokens, outputTokens } = evt;
         if (costUsd !== undefined || inputTokens !== undefined || outputTokens !== undefined) {
@@ -1624,17 +1567,19 @@ async function processAgentStream(
   if (state.terminal === 'running') {
     if (idleFired) {
       state = markIdleTimeout(state, Math.round(idleTimeoutMs! / 60_000));
-    } else if (handle.interrupted) {
+    } else if (run.wasInterrupted()) {
       state = markInterrupted(state);
     } else {
       state = finalizeIfRunning(state);
     }
   }
-  log.info('card', 'final', { scope, terminal: state.terminal, interrupted: handle.interrupted });
+  log.info('card', 'final', {
+    scope,
+    terminal: state.terminal,
+    interrupted: run.wasInterrupted(),
+  });
   await flush(state);
-  if (handle.interrupted) {
-    await handle.run.stop();
-  }
+  if (run.wasInterrupted()) await run.stop();
   return state;
 }
 

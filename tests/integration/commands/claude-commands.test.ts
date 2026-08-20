@@ -26,6 +26,7 @@ interface Harness {
   activeRuns: ActiveRuns;
   agent: ReturnType<typeof createFakeAgent>;
   controls: Controls;
+  scopedInterrupt(scope: string): boolean;
   cleanup(): Promise<void>;
   run(content: string): Promise<boolean>;
 }
@@ -156,18 +157,14 @@ describe('Claude slash command visible behavior', () => {
     expect(lastMarkdown(h.channel)).toContain('用法:`/timeout <1-120>`');
   });
 
-  it('handles /stop without sending a new reply', async () => {
+  it('routes current IM /stop through the scoped-run seam without replying', async () => {
     const h = await createHarness();
-    const activeRun = (await h.agent.start({
-      runId: 'run-active',
-      prompt: 'running',
-    })) as FakeAgentRun;
-    h.activeRuns.register('chat-1', activeRun);
+    vi.mocked(h.scopedInterrupt).mockReturnValue(true);
 
     await expect(h.run('/stop')).resolves.toBe(true);
 
     expect(h.channel.sent).toEqual([]);
-    expect(activeRun.stopped).toBe(true);
+    expect(h.scopedInterrupt).toHaveBeenCalledWith('chat-1');
   });
 
   it('lets admins stop and configure comment scopes explicitly', async () => {
@@ -243,6 +240,7 @@ async function createHarness(): Promise<Harness> {
     cfg: profileConfig,
     processId: 'proc-1',
   } satisfies Controls;
+  const scopedInterrupt = vi.fn((_scope: string) => false);
 
   const run = (content: string): Promise<boolean> =>
     tryHandleCommand({
@@ -254,6 +252,7 @@ async function createHarness(): Promise<Harness> {
       workspaces,
       agent,
       activeRuns,
+      scopedRuns: { interrupt: scopedInterrupt } as never,
       controls,
     });
 
@@ -263,7 +262,18 @@ async function createHarness(): Promise<Harness> {
   };
   cleanups.push(cleanup);
 
-  return { tmp, channel, sessions, workspaces, activeRuns, agent, controls, cleanup, run };
+  return {
+    tmp,
+    channel,
+    sessions,
+    workspaces,
+    activeRuns,
+    agent,
+    controls,
+    scopedInterrupt,
+    cleanup,
+    run,
+  };
 }
 
 function appConfig(defaultWorkspace: string): ProfileConfig {

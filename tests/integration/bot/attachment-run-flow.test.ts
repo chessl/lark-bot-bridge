@@ -1,10 +1,9 @@
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { codexCapability } from '../../../src/agent/capability.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
-import { startRunFlow } from '../../../src/bot/run-flow.js';
+import { ScopedRuns } from '../../../src/bot/run-flow.js';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
@@ -21,7 +20,7 @@ describe('attachment run flow', () => {
   it('passes accepted image attachment paths to Codex adapter image args only', async () => {
     const h = await createHarness();
 
-    const result = await startRunFlow({
+    const result = await h.scopedRuns.start({
       scopeId: 'chat-1',
       scope: { source: 'im', chatId: 'chat-1', actorId: 'ou_user' },
       prompt: 'inspect attachments',
@@ -47,11 +46,6 @@ describe('attachment run flow', () => {
         },
       ],
       access: { ok: true, reason: 'allowed-user' },
-      capability: codexCapability(h.profileConfig),
-      profileConfig: h.profileConfig,
-      workspaces: h.workspaces,
-      executor: h.executor,
-      now: 1000,
     });
 
     expect(result.ok).toBe(true);
@@ -64,7 +58,7 @@ describe('attachment run flow', () => {
 async function createHarness(): Promise<{
   tmp: TmpProfile;
   agent: FakeAgentAdapter;
-  executor: RunExecutor;
+  scopedRuns: ScopedRuns;
   workspaces: WorkspaceStore;
   profileConfig: ReturnType<typeof createDefaultProfileConfig>;
 }> {
@@ -104,7 +98,13 @@ async function createHarness(): Promise<{
   return {
     tmp,
     agent,
-    executor,
+    scopedRuns: new ScopedRuns({
+      executor,
+      workspaces,
+      profile: 'codex',
+      profileConfig: () => profileConfig,
+      now: () => 1000,
+    }),
     workspaces,
     profileConfig: {
       ...profileConfig,

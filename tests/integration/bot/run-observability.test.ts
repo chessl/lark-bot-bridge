@@ -2,10 +2,9 @@ import { readFile } from 'node:fs/promises';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { claudeCapability } from '../../../src/agent/capability';
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { ProcessPool } from '../../../src/bot/process-pool';
-import { startRunFlow } from '../../../src/bot/run-flow';
+import { ScopedRuns } from '../../../src/bot/run-flow';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { closeLogger, configureLogger, flushLogger } from '../../../src/core/logger';
 import { RunExecutor } from '../../../src/runtime/run-executor';
@@ -26,28 +25,17 @@ describe('bot run observability', () => {
     const workspaceRealpath = await realpath(h.tmp.workspace);
     h.workspaces.setCwd('chat-1', workspaceRealpath);
 
-    const result = await startRunFlow({
+    const result = await h.scopedRuns.start({
       scopeId: 'chat-1',
       scope: { source: 'im', chatId: 'chat-1', actorId: 'ou_user' },
       prompt: 'hello',
       attachments: [],
       access: { ok: true, reason: 'allowed-user' },
-      capability: claudeCapability(h.profileConfig),
-      profileConfig: h.profileConfig,
-      workspaces: h.workspaces,
-      executor: h.executor,
-      now: 1_700_000_000_000,
-      observability: {
-        profile: 'claude',
-        agent: 'claude',
-        source: 'im',
-        stage: 'submit',
-      },
     });
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('expected run flow to start');
-    await collect(result.execution.events);
+    await collect(result.run.events);
     await flushLogger();
 
     const started = (await readLogLines(h.logsDir)).find(
@@ -67,7 +55,7 @@ async function createHarness(): Promise<{
   tmp: TmpProfile;
   logsDir: string;
   agent: FakeAgentAdapter;
-  executor: RunExecutor;
+  scopedRuns: ScopedRuns;
   workspaces: WorkspaceStore;
   profileConfig: ReturnType<typeof createDefaultProfileConfig>;
 }> {
@@ -114,7 +102,13 @@ async function createHarness(): Promise<{
     tmp,
     logsDir,
     agent,
-    executor,
+    scopedRuns: new ScopedRuns({
+      executor,
+      workspaces,
+      profile: 'claude',
+      profileConfig: () => profileConfig,
+      now: () => 1_700_000_000_000,
+    }),
     workspaces,
     profileConfig,
   };

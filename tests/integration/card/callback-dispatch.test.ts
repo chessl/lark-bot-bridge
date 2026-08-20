@@ -208,12 +208,18 @@ async function createHarness(
         sessions,
         workspaces,
         activeRuns,
+        scopedRuns: {
+          activeMetadata: (scope: string) =>
+            activeRuns.get(scope)
+              ? { runId: 'run-active', policyFingerprint: 'fp-1' }
+              : undefined,
+          interrupt: (scope: string) => activeRuns.interrupt(scope),
+        } as never,
         agent,
         controls,
         pending,
         chatModeCache,
         ...(opts.callbackAuth === false ? {} : { callbackAuth: auth }),
-        callbackPolicyFingerprint: 'fp-1',
       }),
   };
 }

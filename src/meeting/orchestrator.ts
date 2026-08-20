@@ -1,15 +1,9 @@
 import type { LarkChannel } from '@larksuite/channel';
-import { capabilityForProfile } from '../agent/capability';
 import type { AgentEvent } from '../agent/types';
-import type { ActiveRuns } from '../bot/active-runs';
-import { startRunFlow } from '../bot/run-flow';
+import type { ScopedRuns } from '../bot/run-flow';
 import type { Controls } from '../commands';
 import type { MeetingSummaryTarget } from '../config/profile-schema';
 import { log } from '../core/logger';
-import type { RunExecutor } from '../runtime/run-executor';
-import type { SessionCatalog } from '../session/catalog';
-import type { SessionStore } from '../session/store';
-import type { WorkspaceStore } from '../workspace/store';
 import { describeMeetingError } from './manager';
 import type { MeetingSession } from './session';
 import type { ChatEvent, MeetingEvent } from './types';
@@ -28,12 +22,7 @@ export interface MeetingAgentDeps {
   session: MeetingSession;
   channel: LarkChannel;
   controls: Controls;
-  executor: RunExecutor;
-  /** Needed to interrupt this meeting's run from inside the meeting. */
-  activeRuns: ActiveRuns;
-  sessions: SessionStore;
-  sessionCatalog?: SessionCatalog;
-  workspaces: WorkspaceStore;
+  scopedRuns: ScopedRuns;
 }
 
 /** Scope id for a meeting's agent session — one conversation per meeting. */
@@ -104,7 +93,7 @@ export function attachMeetingAgent(deps: MeetingAgentDeps): void {
     );
 
     if (STOP_WORDS.has(question.toLowerCase())) {
-      const stopped = deps.activeRuns.interrupt(meetingScopeId(session.meetingId));
+      const stopped = deps.scopedRuns.interrupt(meetingScopeId(session.meetingId));
       void session
         .sendMessage(stopped ? '已中断当前任务。' : '当前没有正在执行的任务。')
         .catch((err) => log.warn('meeting', 'stop-reply-failed', { err: String(err) }));
@@ -294,8 +283,7 @@ async function runMeetingAgent(
 ): Promise<string> {
   const { session, controls } = deps;
   const scopeId = meetingScopeId(session.meetingId);
-  const capability = capabilityForProfile(controls.profileConfig);
-  const result = await startRunFlow({
+  const result = await deps.scopedRuns.start({
     scopeId,
     scope: {
       source: 'meeting',
@@ -307,18 +295,6 @@ async function runMeetingAgent(
     // Meeting content is already gated by "the bot was invited into the
     // meeting"; the per-chat allowlist doesn't apply here.
     access: { ok: true, reason: 'allowed-chat' },
-    capability,
-    profileConfig: controls.profileConfig,
-    ...(deps.sessionCatalog ? { sessionCatalog: deps.sessionCatalog } : {}),
-    workspaces: deps.workspaces,
-    executor: deps.executor,
-    now: Date.now(),
-    observability: {
-      profile: controls.profile,
-      agent: capability.agentId,
-      source: 'meeting',
-      stage: 'submit',
-    },
   });
 
   if (!result.ok) {
@@ -344,7 +320,7 @@ async function runMeetingAgent(
   }
 
   let answer = '';
-  for await (const event of result.execution.events) {
+  for await (const event of result.run.events) {
     const chunk = textOf(event);
     if (chunk) answer += chunk;
     if (event.type === 'error') {

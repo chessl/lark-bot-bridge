@@ -10,6 +10,7 @@ import { GROUP_MSG_SCOPE, hasGroupMsgScope } from '../bot/app-scope';
 import { createBoundChat, defaultChatName } from '../bot/group';
 import { fetchKnownChats, type KnownChat } from '../bot/lark-info';
 import type { ProcessPool } from '../bot/process-pool';
+import type { ScopedRuns } from '../bot/run-flow';
 import { requestScopeGrantLink } from '../bot/wizard';
 import {
   accountCurrentCard,
@@ -128,6 +129,7 @@ export interface CommandContext {
   activeRuns: ActiveRuns;
   processPool?: ProcessPool;
   runExecutor?: RunExecutor;
+  scopedRuns?: ScopedRuns;
   controls: Controls;
   codexHistoryProvider?: (
     options: ListCodexThreadHistoryOptions,
@@ -309,6 +311,11 @@ function isAbsoluteOrTilde(p: string): boolean {
   return isAbsolute(p) || p === '~' || p.startsWith('~/');
 }
 
+function interruptRun(ctx: CommandContext, scope = ctx.scope): boolean {
+  if (ctx.scopedRuns?.interrupt(scope)) return true;
+  return ctx.activeRuns.interrupt(scope);
+}
+
 async function handleNew(args: string, ctx: CommandContext): Promise<void> {
   const trimmed = args.trim();
 
@@ -318,7 +325,7 @@ async function handleNew(args: string, ctx: CommandContext): Promise<void> {
     return handleNewChat(rawName, ctx);
   }
 
-  const wasRunning = ctx.activeRuns.interrupt(ctx.scope);
+  const wasRunning = interruptRun(ctx);
   if (ctx.sessionCatalog && ctx.sessionCatalogIdentity) {
     ctx.sessionCatalog.archiveActive({
       ...ctx.sessionCatalogIdentity,
@@ -380,7 +387,7 @@ async function handleCd(args: string, ctx: CommandContext): Promise<void> {
     await reply(ctx, workspace.userVisible);
     return;
   }
-  ctx.activeRuns.interrupt(ctx.scope);
+  interruptRun(ctx);
   ctx.workspaces.setCwd(ctx.scope, workspace.cwdRealpath);
   await reply(ctx, `✓ 已切换 cwd 到 \`${workspace.cwdRealpath}\`\n（session 已重置）`);
 }
@@ -441,7 +448,7 @@ async function handleWsUse(name: string, ctx: CommandContext): Promise<void> {
     await reply(ctx, workspace.userVisible);
     return;
   }
-  ctx.activeRuns.interrupt(ctx.scope);
+  interruptRun(ctx);
   ctx.workspaces.setCwd(ctx.scope, workspace.cwdRealpath);
   await reply(ctx, `✓ 已切换到 \`${name}\` (${workspace.cwdRealpath})\n（session 已重置）`);
 }
@@ -586,7 +593,7 @@ async function applyResume(candidate: string, ctx: CommandContext): Promise<void
     await reply(ctx, '当前上下文不可恢复这个会话，请先用 `/resume` 重新生成恢复候选。');
     return;
   }
-  ctx.activeRuns.interrupt(ctx.scope);
+  interruptRun(ctx);
   ctx.sessionCatalog.upsertActive({
     ...identity,
     ...(identity.agentId === 'codex'
@@ -750,7 +757,7 @@ async function handleStop(args: string, ctx: CommandContext): Promise<void> {
     return;
   }
   const scope = targetScope || ctx.scope;
-  const ok = ctx.activeRuns.interrupt(scope);
+  const ok = interruptRun(ctx, scope);
   log.info('command', 'stop', {
     scope,
     targeted: Boolean(targetScope),
@@ -1991,7 +1998,7 @@ async function handleMeeting(args: string, ctx: CommandContext): Promise<void> {
         await reply(ctx, picked.message);
         return;
       }
-      const stopped = ctx.activeRuns.interrupt(meetingScopeId(picked.session.meetingId));
+      const stopped = ctx.scopedRuns?.interrupt(meetingScopeId(picked.session.meetingId));
       await reply(ctx, stopped ? '✅ 已中断该会议的当前任务。' : '该会议当前没有正在执行的任务。');
       return;
     }
@@ -2013,8 +2020,8 @@ async function handleMeeting(args: string, ctx: CommandContext): Promise<void> {
         await reply(ctx, '用法：`/meeting ask <问题>`');
         return;
       }
-      if (!ctx.runExecutor) {
-        await reply(ctx, '当前上下文无法执行 agent（缺少 run executor）。');
+      if (!ctx.scopedRuns) {
+        await reply(ctx, '当前上下文无法执行 agent（缺少 scoped run）。');
         return;
       }
       await reply(ctx, sub === 'notes' ? '正在总结会议…' : '正在思考…');
@@ -2024,11 +2031,7 @@ async function handleMeeting(args: string, ctx: CommandContext): Promise<void> {
             session,
             channel: ctx.channel,
             controls: ctx.controls,
-            executor: ctx.runExecutor,
-            activeRuns: ctx.activeRuns,
-            sessions: ctx.sessions,
-            ...(ctx.sessionCatalog ? { sessionCatalog: ctx.sessionCatalog } : {}),
-            workspaces: ctx.workspaces,
+            scopedRuns: ctx.scopedRuns,
           },
           question,
           // Typed privately -> answer only to the caller. Broadcasting a

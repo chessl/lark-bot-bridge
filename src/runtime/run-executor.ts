@@ -170,28 +170,29 @@ export class RunExecutor {
         err instanceof Error ? err.message : 'another run is already active for this scope',
       );
     }
-    let cleaned = false;
-    const cleanup = async (waitForExit: boolean): Promise<void> => {
-      if (cleaned) return;
-      cleaned = true;
-      this.activeRuns.unregister(input.scopeId, run);
-      release();
-      await this.nativeTools?.closeRun(runId);
-      if (waitForExit) {
-        const exited = await run.waitForExit(this.postDoneExitGraceMs);
-        if (!exited) {
-          log.warn('run', 'post-done-exit-timeout', {
-            ...dimensions,
-            graceMs: this.postDoneExitGraceMs,
-          });
-          await run.stop().catch((err) => {
-            log.warn('run', 'post-done-stop-failed', {
+    let cleanupPromise: Promise<void> | undefined;
+    const cleanup = (waitForExit: boolean): Promise<void> => {
+      cleanupPromise ??= (async () => {
+        this.activeRuns.unregister(input.scopeId, run);
+        release();
+        await this.nativeTools?.closeRun(runId);
+        if (waitForExit) {
+          const exited = await run.waitForExit(this.postDoneExitGraceMs);
+          if (!exited) {
+            log.warn('run', 'post-done-exit-timeout', {
               ...dimensions,
-              err: err instanceof Error ? err.message : String(err),
+              graceMs: this.postDoneExitGraceMs,
             });
-          });
+            await run.stop().catch((err) => {
+              log.warn('run', 'post-done-stop-failed', {
+                ...dimensions,
+                err: err instanceof Error ? err.message : String(err),
+              });
+            });
+          }
         }
-      }
+      })();
+      return cleanupPromise;
     };
     const events = observeRunEvents(run.events, {
       dimensions,
@@ -208,9 +209,12 @@ export class RunExecutor {
       events,
       stop: async () => {
         handle.interrupted = true;
-        await run.stop();
-        await run.waitForExit(this.postDoneExitGraceMs);
-        await cleanup(false);
+        try {
+          await run.stop();
+          await run.waitForExit(this.postDoneExitGraceMs);
+        } finally {
+          await cleanup(false);
+        }
       },
     };
   }
