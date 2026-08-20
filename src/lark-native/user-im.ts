@@ -62,7 +62,6 @@ interface StoredToken {
   expiresAt: number;
   refreshExpiresAt: number;
   scopes: string[];
-  grantedAt: number;
 }
 
 interface UserMetadata {
@@ -71,13 +70,11 @@ interface UserMetadata {
   openId: string;
   userName: string;
   scopes: string[];
-  grantedAt: number;
 }
 
 interface DeviceState {
   profile: string;
   appId: string;
-  tenant: TenantBrand;
   scopes: string[];
   expiresAt: number;
 }
@@ -149,7 +146,6 @@ export async function startDeviceLogin(
   deviceStates.set(deviceCode, {
     profile: native.profile,
     appId: native.appId,
-    tenant: native.tenant,
     scopes: requestedScopes,
     expiresAt: Date.now() + expiresIn * 1000,
   });
@@ -217,7 +213,6 @@ export async function completeDeviceLogin(
         (stringField(response, 'refresh_token') ? 7 * 24 * 3600 : 7200)) *
         1000,
     scopes: grantedScopes,
-    grantedAt: now,
   };
   const metadata: UserMetadata = {
     version: 1,
@@ -225,7 +220,6 @@ export async function completeDeviceLogin(
     openId: identity.openId,
     userName: identity.name,
     scopes: grantedScopes,
-    grantedAt: now,
   };
   await withConfigFileLock(native.authLockTarget, async () => {
     const previous = await readMetadata(native.authFile);
@@ -451,8 +445,7 @@ async function readMetadata(path: string): Promise<UserMetadata | undefined> {
       typeof value.openId !== 'string' ||
       typeof value.userName !== 'string' ||
       !Array.isArray(value.scopes) ||
-      !value.scopes.every((scope) => typeof scope === 'string') ||
-      typeof value.grantedAt !== 'number'
+      !value.scopes.every((scope) => typeof scope === 'string')
     ) {
       return undefined;
     }
@@ -476,8 +469,7 @@ function parseStoredToken(raw: string | undefined): StoredToken | undefined {
       typeof value.expiresAt !== 'number' ||
       typeof value.refreshExpiresAt !== 'number' ||
       !Array.isArray(value.scopes) ||
-      !value.scopes.every((scope) => typeof scope === 'string') ||
-      typeof value.grantedAt !== 'number'
+      !value.scopes.every((scope) => typeof scope === 'string')
     ) {
       return undefined;
     }

@@ -39,10 +39,6 @@ interface NativeLarkServerOptions {
   profileConfig: () => ProfileConfig;
 }
 
-interface RunAccess extends NativeToolRunContext {
-  token: string;
-}
-
 interface SessionEntry {
   runId: string;
   server: McpServer;
@@ -57,8 +53,8 @@ interface PendingApproval {
 }
 
 export class NativeLarkServer implements NativeToolProvider {
-  private readonly runsByToken = new Map<string, RunAccess>();
-  private readonly tokensByRun = new Map<string, Set<string>>();
+  private readonly runsByToken = new Map<string, NativeToolRunContext>();
+  private readonly tokensByRun = new Map<string, string>();
   private readonly sessions = new Map<string, SessionEntry>();
   private readonly approvals = new Map<string, PendingApproval>();
   private port = 0;
@@ -93,11 +89,8 @@ export class NativeLarkServer implements NativeToolProvider {
 
   openRun(context: NativeToolRunContext): NativeMcpEndpoint {
     const token = randomBytes(32).toString('base64url');
-    const access: RunAccess = { ...context, token };
-    this.runsByToken.set(token, access);
-    const tokens = this.tokensByRun.get(context.runId) ?? new Set<string>();
-    tokens.add(token);
-    this.tokensByRun.set(context.runId, tokens);
+    this.runsByToken.set(token, context);
+    this.tokensByRun.set(context.runId, token);
     return {
       name: 'lark_bridge',
       url: `http://${HOST}:${this.port}/mcp`,
@@ -106,7 +99,8 @@ export class NativeLarkServer implements NativeToolProvider {
   }
 
   async closeRun(runId: string): Promise<void> {
-    for (const token of this.tokensByRun.get(runId) ?? []) this.runsByToken.delete(token);
+    const token = this.tokensByRun.get(runId);
+    if (token) this.runsByToken.delete(token);
     this.tokensByRun.delete(runId);
     for (const pending of this.approvals.values()) {
       if (pending.runId === runId) pending.finish(false);
@@ -185,13 +179,13 @@ export class NativeLarkServer implements NativeToolProvider {
     await session.transport.handleRequest(request, response, body);
   }
 
-  private authenticate(request: IncomingMessage): RunAccess | undefined {
+  private authenticate(request: IncomingMessage): NativeToolRunContext | undefined {
     const authorization = header(request, 'authorization');
     if (!authorization?.startsWith('Bearer ')) return undefined;
     return this.runsByToken.get(authorization.slice('Bearer '.length));
   }
 
-  private createProtocolServer(access: RunAccess): McpServer {
+  private createProtocolServer(access: NativeToolRunContext): McpServer {
     const server = new McpServer({ name: 'lark-bot-bridge', version: '1.0.0' });
     server.registerTool(
       'lark_list_chats',
@@ -453,7 +447,7 @@ export class NativeLarkServer implements NativeToolProvider {
     };
   }
 
-  private requireUserIdentity(access: RunAccess): void {
+  private requireUserIdentity(access: NativeToolRunContext): void {
     if (
       !access.allowUserIdentity ||
       access.scope.source !== 'im' ||
@@ -464,7 +458,7 @@ export class NativeLarkServer implements NativeToolProvider {
     }
   }
 
-  private signAgentCallbacks(value: unknown, access: RunAccess): unknown {
+  private signAgentCallbacks(value: unknown, access: NativeToolRunContext): unknown {
     if (Array.isArray(value)) return value.map((item) => this.signAgentCallbacks(item, access));
     if (!value || typeof value !== 'object') return value;
     const source = value as Record<string, unknown>;
@@ -490,7 +484,7 @@ export class NativeLarkServer implements NativeToolProvider {
   }
 
   private async requestApproval(
-    access: RunAccess,
+    access: NativeToolRunContext,
     summary: string,
     signal: AbortSignal,
   ): Promise<boolean> {

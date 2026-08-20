@@ -5,7 +5,6 @@ import { spawnProcess } from '../platform/spawn';
 const SERVICE = 'lark-bot-bridge';
 const TIMEOUT_MS = 15_000;
 
-const DARWIN_VALUE_PREFIX = 'lark-bot-bridge-base64:';
 const DARWIN_CHUNK_PREFIX = 'lark-bot-bridge-chunks:';
 const DARWIN_CHUNK_SIZE = 3_000;
 
@@ -52,7 +51,7 @@ async function getDarwinCredential(account: string): Promise<string | undefined>
   const value = await readDarwinPassword(key);
   if (!value) return undefined;
   const manifest = parseDarwinManifest(value);
-  if (!manifest) return decodeDarwinValue(value);
+  if (!manifest) return value;
   const chunks: string[] = [];
   for (let index = 0; index < manifest.chunks; index++) {
     const chunk = await readDarwinPassword(darwinChunkAccount(key, manifest.generation, index));
@@ -145,12 +144,6 @@ function parseDarwinManifest(value: string | undefined): DarwinManifest | undefi
   } catch {
     return undefined;
   }
-}
-
-function decodeDarwinValue(value: string): string {
-  return value.startsWith(DARWIN_VALUE_PREFIX)
-    ? Buffer.from(value.slice(DARWIN_VALUE_PREFIX.length), 'base64').toString()
-    : value;
 }
 
 interface ProcessResult {
