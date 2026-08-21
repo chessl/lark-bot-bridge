@@ -28,6 +28,8 @@
   ],
   "scripts": {
     "dev": "tsup --watch",
+    "run": "pnpm build && node bin/lark-bot-bridge.mjs run",
+    "start": "pnpm build && node bin/lark-bot-bridge.mjs start",
     "build:web": "vite build web",
     "build": "pnpm build:web && tsup",
     "typecheck": "tsc --noEmit && tsc -p web/tsconfig.json --noEmit",
