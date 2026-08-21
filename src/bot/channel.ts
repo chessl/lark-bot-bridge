@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import type { LarkChannel, LarkChannelOptions, NormalizedMessage } from '@larksuite/channel';
 import { createLarkChannel } from '@larksuite/channel';
 import { modelLabel, normalizeModelSelection } from '../agent/models';
@@ -190,7 +191,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   await callbackNonceStore?.load();
   const callbackAuth = callbackNonceStore
     ? new CallbackAuth({
-        keys: [{ version: 1, secret: appSecret }],
+        secret: appSecret,
         nonceStore: callbackNonceStore,
       })
     : undefined;
@@ -1692,10 +1693,6 @@ function scheduleWorkingReactionCleanup(
     if (!settled.ok || !settled.reactionId) return;
     await removeReaction(channel, messageId, settled.reactionId);
   })();
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildPrompt(

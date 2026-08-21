@@ -6,12 +6,10 @@ import {
   agentKindFromString,
   formatRootConfig,
   loadRootConfig,
-  readActiveProfile,
   removeProfile,
   runtimeProfileConfig,
   saveRootConfig,
   withConfigFileLock,
-  writeActiveProfile,
 } from '../../config/profile-store';
 import { resolveAppSecret } from '../../config/secret-resolver';
 import { writeFileAtomic } from '../../platform/atomic-write';
@@ -146,7 +144,6 @@ export async function runProfileUse(name: string, opts: ProfileCommandOptions = 
     if (!root?.profiles[name]) throw new Error(`profile not found: ${name}`);
     root.activeProfile = name;
     await saveRootConfig(root, configFile);
-    await writeActiveProfile(rootDir, name);
   });
   console.log(`已切换到 profile: ${name}`);
 }
@@ -165,14 +162,10 @@ export async function runProfileRemove(
     if (!root) throw new Error('config not initialized');
     const profile = root.profiles[name];
     if (!profile) throw new Error(`profile not found: ${name}`);
-    const activeProfile = await readActiveProfile(rootDir);
-    if (activeProfile) {
-      if (!root.profiles[activeProfile]) {
-        throw new Error(
-          `active profile not found: ${activeProfile}; run profile use <name> to repair`,
-        );
-      }
-      root.activeProfile = activeProfile;
+    if (root.activeProfile && !root.profiles[root.activeProfile]) {
+      throw new Error(
+        `active profile not found: ${root.activeProfile}; run profile use <name> to repair`,
+      );
     }
     const profilePaths = resolveAppPaths({ rootDir, profile: name });
     const profileLock = await checkRuntimeLock(profilePaths.profileLockFile);
@@ -189,17 +182,14 @@ export async function runProfileRemove(
       try {
         if (Object.keys(result.root.profiles).length === 0) {
           await rm(configFile, { force: true });
-          await rm(resolveAppPaths({ rootDir }).activeProfileFile, { force: true });
         } else {
           await saveRootConfig(result.root, configFile);
-          await writeActiveProfile(rootDir, result.root.activeProfile);
         }
       } catch (err) {
         if (result.restore) {
           try {
             await result.restore();
             await saveRootConfig(root, configFile);
-            await writeActiveProfile(rootDir, root.activeProfile);
           } catch (restoreErr) {
             throw new Error(
               `profile remove failed after moving ${name}; state is at ${result.archivedTo}. ` +
@@ -246,7 +236,6 @@ export async function runProfileExport(
   const exported: RootConfig = {
     schemaVersion: 2,
     activeProfile: name,
-    preferences: {},
     ...(opts.includeSecrets && root.secrets ? { secrets: cloneJson(root.secrets) } : {}),
     profiles: {
       [name]: profile,

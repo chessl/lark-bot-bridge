@@ -13,7 +13,6 @@ import { dirname, extname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { log } from '../../core/logger';
-import { withResolvers } from '../../platform/promise';
 import { mergeProcessEnv, type SpawnedProcessByStdio, spawnProcess } from '../../platform/spawn';
 import { SpawnFailed } from '../../runtime/errors';
 import { buildBridgeSystemPrompt } from '../bridge-system-prompt';
@@ -414,7 +413,7 @@ function writeSystemPromptFile(content: string): { path: string; cleanup: () => 
 
 function waitForExit(child: OmpChild, timeoutMs: number): Promise<boolean> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
-  const { promise, resolve } = withResolvers<boolean>();
+  const { promise, resolve } = Promise.withResolvers<boolean>();
   const onExit = (): void => {
     clearTimeout(timer);
     resolve(true);
@@ -429,7 +428,7 @@ function waitForExit(child: OmpChild, timeoutMs: number): Promise<boolean> {
 
 function waitForExitCode(child: OmpChild): Promise<number | null> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
-  const { promise, resolve } = withResolvers<number | null>();
+  const { promise, resolve } = Promise.withResolvers<number | null>();
   child.once('exit', resolve);
   return promise;
 }

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { withResolvers } from '../platform/promise';
 import { spawnProcess } from '../platform/spawn';
 
 const SERVICE = 'lark-bot-bridge';
@@ -156,7 +155,7 @@ function run(command: string, args: string[], stdin?: string): Promise<ProcessRe
   if (process.platform !== 'darwin' && process.platform !== 'linux') {
     return Promise.reject(new Error(`OS keychain is unsupported on ${process.platform}`));
   }
-  const { promise, resolve, reject } = withResolvers<ProcessResult>();
+  const { promise, resolve, reject } = Promise.withResolvers<ProcessResult>();
   const child = spawnProcess(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';

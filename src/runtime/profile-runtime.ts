@@ -20,7 +20,6 @@ import {
   readActiveProfile,
   runtimeProfileConfig,
   saveRootConfig,
-  writeActiveProfile,
 } from '../config/profile-store';
 import type { AppConfig, SecretInput, TenantBrand } from '../config/schema';
 import { isSecretRef, secretKeyForApp } from '../config/schema';
@@ -143,7 +142,6 @@ export async function resolveProfileRuntime(
   });
   const root = createRootConfig(profile, profileConfig, encrypted.secrets);
   await saveRootConfig(root, configPath);
-  await writeActiveProfile(appPaths.rootDir, profile);
   console.log(`配置已保存到 ${configPath}\n`);
   return { cfg: runtimeProfileConfig(root, profile), profileConfig, configPath, appPaths, profile };
 }

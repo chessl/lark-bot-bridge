@@ -356,7 +356,7 @@ describe('profile runtime resolver', () => {
     expect(saved.profiles['codex-dev']?.codex?.ignoreUserConfig).toBe(true);
   });
 
-  it('lets an explicit profile override active-profile', async () => {
+  it('lets an explicit profile override the active profile', async () => {
     const root = await tmpRoot();
     await writeProfileRoot(root, 'codex-dev', {
       claude: createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } }),
@@ -404,7 +404,7 @@ describe('profile runtime resolver', () => {
     expect(message).toContain('remove profile codex');
   });
 
-  it('fails when active-profile points at a missing profile instead of falling back', async () => {
+  it('fails when the active profile is missing instead of falling back', async () => {
     const root = await tmpRoot();
     await writeProfileRoot(root, 'missing-profile', {
       claude: createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } }),
@@ -458,7 +458,6 @@ describe('profile runtime resolver', () => {
     expect(runtime.profileConfig.agentKind).toBe('claude');
     expect(runtime.profileConfig.workspaces.default).toBe(workspaceRealpath);
     expect(saved.activeProfile).toBe('codex-dev');
-    await expect(readFile(join(root, 'active-profile'), 'utf8')).resolves.toBe('codex-dev\n');
     expect(saved.profiles['codex-dev']?.agentKind).toBe('codex');
     expect(saved.profiles['claude-work']?.agentKind).toBe('claude');
     expect(saved.profiles['claude-work']?.accounts.app.id).toBe('cli_claude_work');
@@ -553,7 +552,6 @@ async function writeProfileRoot(
       {
         schemaVersion: 2,
         activeProfile,
-        preferences: {},
         ...extra,
         profiles,
       },
@@ -561,7 +559,6 @@ async function writeProfileRoot(
       2,
     )}\n`,
   );
-  await writeFile(join(root, 'active-profile'), `${activeProfile}\n`);
 }
 
 async function withTty<T>(stdinTTY: boolean, stdoutTTY: boolean, fn: () => Promise<T>): Promise<T> {

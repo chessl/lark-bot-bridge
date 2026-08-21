@@ -2,21 +2,21 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveAppPaths } from '../../../src/config/app-paths';
-import { clearKeystoreDerivedKeyCache, setSecret } from '../../../src/config/keystore';
-import {
-  createDefaultProfileConfig,
-  type AgentKind,
-  type RootConfig,
-} from '../../../src/config/profile-schema';
-import { secretKeyForApp } from '../../../src/config/schema';
 import {
   runProfileCreate,
   runProfileExport,
   runProfileRemove,
 } from '../../../src/cli/commands/profile';
-import type { ProcessEntry } from '../../../src/runtime/registry';
+import { resolveAppPaths } from '../../../src/config/app-paths';
+import { clearKeystoreDerivedKeyCache, setSecret } from '../../../src/config/keystore';
+import {
+  type AgentKind,
+  createDefaultProfileConfig,
+  type RootConfig,
+} from '../../../src/config/profile-schema';
+import { secretKeyForApp } from '../../../src/config/schema';
 import { withProfileAndAppLocks } from '../../../src/runtime/locks';
+import type { ProcessEntry } from '../../../src/runtime/registry';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
 
 const auth = vi.hoisted(() => ({
@@ -101,14 +101,12 @@ describe('profile retention and export', () => {
     const config = await readRoot(root);
     expect(config.activeProfile).toBe('claude');
     expect(config.profiles['codex-dev']).toBeUndefined();
-    await expect(readFile(join(root, 'active-profile'), 'utf8')).resolves.toBe('claude\n');
     await expect(stat(join(root, '.trash', 'codex-dev-20260525T123456Z'))).resolves.toBeDefined();
   });
 
-  it('refuses removal when active-profile points at a missing profile', async () => {
+  it('refuses removal when the active profile is missing', async () => {
     const root = await makeRoot();
-    await writeProfiles(root, 'claude', ['claude', 'codex-dev']);
-    await writeFile(join(root, 'active-profile'), 'missing\n', 'utf8');
+    await writeProfiles(root, 'missing', ['claude', 'codex-dev']);
 
     await expect(runProfileRemove('codex-dev', { rootDir: root })).rejects.toThrow(
       /active profile not found: missing/,
@@ -126,7 +124,6 @@ describe('profile retention and export', () => {
       await runProfileRemove('codex', { rootDir: root });
 
       await expect(stat(join(root, 'config.json'))).rejects.toMatchObject({ code: 'ENOENT' });
-      await expect(stat(join(root, 'active-profile'))).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(stat(join(root, 'profiles', 'codex'))).rejects.toMatchObject({ code: 'ENOENT' });
       await runProfileCreate('codex', {
         rootDir: root,
@@ -289,11 +286,9 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
   const config: RootConfig = {
     schemaVersion: 2,
     activeProfile,
-    preferences: {},
     profiles,
   };
   await writeJson(join(root, 'config.json'), config);
-  await writeFile(join(root, 'active-profile'), `${activeProfile}\n`, 'utf8');
 }
 
 async function readRoot(root: string): Promise<RootConfig> {

@@ -47,7 +47,6 @@ describe('native user identity', () => {
       {
         schemaVersion: 2,
         activeProfile: 'default',
-        preferences: {},
         profiles: {
           default: createDefaultProfileConfig({
             agentKind: 'claude',

@@ -1,14 +1,8 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { CallbackNonceStore } from './callback-store';
 
-export interface CallbackKey {
-  version: number;
-  secret: string;
-  retired?: boolean;
-}
-
 export interface CallbackAuthOptions {
-  keys: CallbackKey[];
+  secret: string;
   nonceStore: CallbackNonceStore;
   now?: () => number;
   createNonce?: () => string;
@@ -42,41 +36,31 @@ export interface CallbackPayload {
   exp: number;
   fp: string;
   n: string;
-  kv: number;
 }
 
 export type CallbackVerifyResult =
   | { ok: true; payload: CallbackPayload }
   | {
       ok: false;
-      reason:
-        | 'malformed'
-        | 'unknown-key'
-        | 'bad-signature'
-        | 'expired'
-        | 'context-mismatch'
-        | 'nonce-replay'
-        | 'nonce-revoked';
+      reason: 'malformed' | 'bad-signature' | 'expired' | 'context-mismatch' | 'nonce-replay';
     };
 
 const PREFIX = 'bridge_cb.v1';
 
 export class CallbackAuth {
-  private readonly keys: CallbackKey[];
+  private readonly secret: string;
   private readonly nonceStore: CallbackNonceStore;
   private readonly now: () => number;
   private readonly createNonce: () => string;
 
   constructor(options: CallbackAuthOptions) {
-    this.keys = [...options.keys].sort((a, b) => a.version - b.version);
-    if (this.keys.length === 0) throw new Error('at least one callback key is required');
+    this.secret = options.secret;
     this.nonceStore = options.nonceStore;
     this.now = options.now ?? Date.now;
     this.createNonce = options.createNonce ?? (() => randomBytes(16).toString('base64url'));
   }
 
   sign(input: CallbackSignInput): string {
-    const key = this.signingKey();
     const payload: CallbackPayload = {
       r: input.runId,
       s: input.scope,
@@ -86,10 +70,9 @@ export class CallbackAuth {
       exp: this.now() + input.ttlMs,
       fp: input.policyFingerprint,
       n: this.createNonce(),
-      kv: key.version,
     };
     const encoded = encodeJson(payload);
-    return `${PREFIX}.${encoded}.${sign(encoded, key.secret)}`;
+    return `${PREFIX}.${encoded}.${sign(encoded, this.secret)}`;
   }
 
   verify(token: string, expected: CallbackVerifyExpected): CallbackVerifyResult {
@@ -103,9 +86,7 @@ export class CallbackAuth {
 
     const payload = decodePayload(encodedPayload);
     if (!payload) return { ok: false, reason: 'malformed' };
-    const key = this.keys.find((candidate) => candidate.version === payload.kv);
-    if (!key) return { ok: false, reason: 'unknown-key' };
-    if (!signatureMatches(signature, sign(encodedPayload, key.secret))) {
+    if (!signatureMatches(signature, sign(encodedPayload, this.secret))) {
       return { ok: false, reason: 'bad-signature' };
     }
     if (payload.exp <= this.now()) return { ok: false, reason: 'expired' };
@@ -113,20 +94,10 @@ export class CallbackAuth {
       return { ok: false, reason: 'context-mismatch' };
     }
 
-    const nonceState = this.nonceStore.state(payload.n);
-    if (nonceState === 'revoked') return { ok: false, reason: 'nonce-revoked' };
-    if (nonceState === 'used') return { ok: false, reason: 'nonce-replay' };
     if (!this.nonceStore.consume(payload.n)) {
       return { ok: false, reason: 'nonce-replay' };
     }
     return { ok: true, payload };
-  }
-
-  private signingKey(): CallbackKey {
-    const active = this.keys.filter((key) => !key.retired);
-    const key = active.at(-1);
-    if (!key) throw new Error('no active callback signing key');
-    return key;
   }
 }
 
@@ -158,8 +129,7 @@ function decodePayload(encoded: string): CallbackPayload | undefined {
       typeof raw.a !== 'string' ||
       typeof raw.exp !== 'number' ||
       typeof raw.fp !== 'string' ||
-      typeof raw.n !== 'string' ||
-      typeof raw.kv !== 'number'
+      typeof raw.n !== 'string'
     ) {
       return undefined;
     }
@@ -172,7 +142,6 @@ function decodePayload(encoded: string): CallbackPayload | undefined {
       exp: raw.exp,
       fp: raw.fp,
       n: raw.n,
-      kv: raw.kv,
     };
   } catch {
     return undefined;

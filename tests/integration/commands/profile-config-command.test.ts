@@ -221,7 +221,6 @@ async function writeRoot(
   const root: RootConfig = {
     schemaVersion: 2,
     activeProfile: 'claude',
-    preferences: {},
     profiles: {
       claude: createDefaultProfileConfig({
         agentKind: 'claude',
@@ -245,7 +244,6 @@ async function writeRoot(
     ...preferences,
   };
   await writeJson(resolveAppPaths({ rootDir }).configFile, root);
-  await writeFile(join(rootDir, 'active-profile'), 'claude\n', 'utf8');
   return root;
 }
 

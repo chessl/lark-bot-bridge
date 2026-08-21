@@ -29,7 +29,6 @@ function normalizeRootConfig(root: RootConfig): RootConfig {
   return {
     schemaVersion: 2,
     activeProfile: root.activeProfile,
-    preferences: {},
     ...(root.secrets ? { secrets: root.secrets } : {}),
     profiles,
   };
@@ -45,7 +44,6 @@ export function formatRootConfig(root: RootConfig): string {
 
 type StoredProfileConfig = Pick<
   ProfileConfig,
-  | 'schemaVersion'
   | 'agentKind'
   | 'mode'
   | 'accounts'
@@ -60,8 +58,7 @@ type StoredProfileConfig = Pick<
   | 'meeting'
 >;
 
-type StoredRootConfig = Omit<RootConfig, 'preferences' | 'profiles'> & {
-  preferences: Record<string, never>;
+type StoredRootConfig = Omit<RootConfig, 'profiles'> & {
   profiles: Record<string, StoredProfileConfig>;
 };
 
@@ -73,7 +70,6 @@ function serializeRootConfig(root: RootConfig): StoredRootConfig {
   return {
     schemaVersion: 2,
     activeProfile: root.activeProfile,
-    preferences: {},
     ...(root.secrets ? { secrets: root.secrets } : {}),
     profiles,
   };
@@ -81,7 +77,6 @@ function serializeRootConfig(root: RootConfig): StoredRootConfig {
 
 function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
   return {
-    schemaVersion: profile.schemaVersion,
     agentKind: profile.agentKind,
     mode: profile.mode,
     accounts: profile.accounts,
@@ -120,21 +115,8 @@ export async function withConfigFileLock<T>(configPath: string, fn: () => Promis
 }
 
 export async function readActiveProfile(rootDir?: string): Promise<string | undefined> {
-  const activeProfileFile = resolveAppPaths({ rootDir }).activeProfileFile;
-  try {
-    const text = await readFile(activeProfileFile, 'utf8');
-    const profile = text.trim();
-    return profile || undefined;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw err;
-  }
-}
-
-export async function writeActiveProfile(rootDir: string, profile: string): Promise<void> {
-  await writeFileAtomic(resolveAppPaths({ rootDir }).activeProfileFile, `${profile}\n`, {
-    mode: 0o600,
-  });
+  const root = await loadRootConfig(resolveAppPaths({ rootDir }).configFile);
+  return root?.activeProfile || undefined;
 }
 
 export function runtimeProfileConfig(root: RootConfig, profile: string): AppConfig & ProfileConfig {
@@ -156,7 +138,6 @@ export function createRootConfig(
   return {
     schemaVersion: 2,
     activeProfile: profile,
-    preferences: {},
     ...(secrets ? { secrets } : {}),
     profiles: {
       [profile]: {

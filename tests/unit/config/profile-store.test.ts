@@ -98,7 +98,7 @@ describe('profile store canonical serialization', () => {
     expect(saved.schemaVersion).toBe(2);
     expect(saved.activeProfile).toBe('codex');
     expect(saved.secrets).toEqual(rootSecrets);
-    expect(saved.preferences).toEqual({});
+    expect(saved).not.toHaveProperty('preferences');
     expect(saved).not.toHaveProperty('extra');
 
     const savedProfile = saved.profiles.codex;
@@ -134,7 +134,6 @@ describe('profile store canonical serialization', () => {
       {
         schemaVersion: 2,
         activeProfile: 'codex',
-        preferences: {},
         profiles: { codex: profile },
       },
       configPath,
@@ -160,7 +159,6 @@ describe('profile store canonical serialization', () => {
       {
         schemaVersion: 2,
         activeProfile: 'claude',
-        preferences: {},
         profiles: { claude: profile },
       },
       configPath,
@@ -185,7 +183,6 @@ describe('profile store canonical serialization', () => {
       {
         schemaVersion: 2,
         activeProfile: 'claude',
-        preferences: {},
         profiles: { claude: profile },
       },
       configPath,
@@ -222,7 +219,6 @@ describe('profile store canonical serialization', () => {
       {
         schemaVersion: 2,
         activeProfile: 'claude',
-        preferences: {},
         profiles: { claude: profile },
       },
       configPath,

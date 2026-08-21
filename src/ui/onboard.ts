@@ -6,10 +6,8 @@ import type { AgentKind, ProfileConfig } from '../config/profile-schema';
 import {
   createRootConfig,
   loadRootConfig,
-  readActiveProfile,
   saveRootConfig,
   withConfigFileLock,
-  writeActiveProfile,
 } from '../config/profile-store';
 import { type AppConfig, secretKeyForApp, type TenantBrand } from '../config/schema';
 import { buildEncryptedAccountConfig } from '../config/store';
@@ -30,7 +28,7 @@ export async function onboardState(rootDir?: string): Promise<OnboardState> {
   const detected = await detectInstalledAgents().catch(() => []);
   return {
     hasConfig: Boolean(root),
-    activeProfile: await readActiveProfile(rootDir),
+    activeProfile: root?.activeProfile || undefined,
     profiles: root ? Object.keys(root.profiles) : [],
     detectedAgents: detected.map((d) => d.kind),
   };
@@ -161,11 +159,11 @@ export async function writeNewProfile(
     if (root.profiles[profile]) {
       throw new HttpError(409, `profile 已存在：${profile}，请换个名字`);
     }
+    root.activeProfile = profile;
     root.profiles[profile] = { ...profileConfig, secrets: undefined };
     if (!root.secrets && encrypted.secrets) root.secrets = encrypted.secrets;
     await saveRootConfig(root, appPaths.configFile);
   });
-  await writeActiveProfile(appPaths.rootDir, profile);
 
   return { profile };
 }

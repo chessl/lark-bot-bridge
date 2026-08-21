@@ -2,13 +2,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runProfileList, runProfileUse } from '../../../src/cli/commands/profile';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import {
-  createDefaultProfileConfig,
   type AgentKind,
+  createDefaultProfileConfig,
   type RootConfig,
 } from '../../../src/config/profile-schema';
-import { runProfileList, runProfileUse } from '../../../src/cli/commands/profile';
 import type { ProcessEntry } from '../../../src/runtime/registry';
 
 const roots: string[] = [];
@@ -74,7 +74,6 @@ describe('profile management commands', () => {
     await runProfileUse('codex-dev', { rootDir: root });
 
     const rootConfig = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as RootConfig;
-    await expect(readFile(join(root, 'active-profile'), 'utf8')).resolves.toBe('codex-dev\n');
     expect(rootConfig.activeProfile).toBe('codex-dev');
     expect(await readFile(registryFile, 'utf8')).toBe(beforeRegistry);
   });
@@ -100,11 +99,9 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
   const config: RootConfig = {
     schemaVersion: 2,
     activeProfile,
-    preferences: {},
     profiles,
   };
   await writeFile(join(root, 'config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');
-  await writeFile(join(root, 'active-profile'), `${activeProfile}\n`, 'utf8');
 }
 
 function processEntry(overrides: Partial<ProcessEntry>): ProcessEntry {

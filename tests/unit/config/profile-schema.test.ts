@@ -24,13 +24,11 @@ describe('profile schema', () => {
     expect(team.mode).toBe('team');
 
     const missing = normalizeProfileConfig({
-      schemaVersion: 2,
       agentKind: 'claude',
       accounts: { app },
     });
     expect(missing.mode).toBe('personal');
     const bogus = normalizeProfileConfig({
-      schemaVersion: 2,
       agentKind: 'claude',
       mode: 'nonsense',
       accounts: { app },
@@ -41,7 +39,6 @@ describe('profile schema', () => {
   it('requires codex configuration when agentKind is codex', () => {
     expect(() =>
       normalizeProfileConfig({
-        schemaVersion: 2,
         agentKind: 'codex',
         accounts: { app },
       }),
@@ -51,7 +48,6 @@ describe('profile schema', () => {
   it('requires and normalizes OMP configuration when agentKind is omp', () => {
     expect(() =>
       normalizeProfileConfig({
-        schemaVersion: 2,
         agentKind: 'omp',
         accounts: { app },
       }),
@@ -67,7 +63,6 @@ describe('profile schema', () => {
 
   it('keeps access at profile top level', () => {
     const cfg = normalizeProfileConfig({
-      schemaVersion: 2,
       agentKind: 'claude',
       accounts: { app },
       preferences: {
@@ -114,7 +109,6 @@ describe('profile schema', () => {
 
   it('normalizes Codex binary metadata and user-home defaults', () => {
     const cfg = normalizeProfileConfig({
-      schemaVersion: 2,
       agentKind: 'codex',
       accounts: { app },
       codex: {
@@ -142,7 +136,6 @@ describe('profile schema', () => {
 
   it('preserves explicit Codex home isolation when configured', () => {
     const cfg = normalizeProfileConfig({
-      schemaVersion: 2,
       agentKind: 'codex',
       accounts: { app },
       codex: {
@@ -182,7 +175,6 @@ describe('profile schema', () => {
   it('rejects permission defaults that exceed max access', () => {
     expect(() =>
       normalizeProfileConfig({
-        schemaVersion: 2,
         agentKind: 'claude',
         accounts: { app },
         permissions: {
@@ -195,7 +187,6 @@ describe('profile schema', () => {
 
   it('uses Claude permissionMode override when deriving Claude runtime permissions', () => {
     const cfg = normalizeProfileConfig({
-      schemaVersion: 2,
       agentKind: 'claude',
       accounts: { app },
       permissions: {
@@ -219,7 +210,6 @@ describe('profile schema', () => {
   it('rejects Claude permission overrides wider than max access', () => {
     expect(() =>
       normalizeProfileConfig({
-        schemaVersion: 2,
         agentKind: 'claude',
         accounts: { app },
         permissions: {
@@ -234,7 +224,6 @@ describe('profile schema', () => {
 
   it('does not let Claude override exceed the current access at runtime mapping time', () => {
     const cfg = normalizeProfileConfig({
-      schemaVersion: 2,
       agentKind: 'claude',
       accounts: { app },
       permissions: {
@@ -252,7 +241,6 @@ describe('profile schema', () => {
   it('rejects array-shaped permissions config', () => {
     expect(() =>
       normalizeProfileConfig({
-        schemaVersion: 2,
         agentKind: 'claude',
         accounts: { app },
         permissions: [],
@@ -263,7 +251,6 @@ describe('profile schema', () => {
   it('rejects array-shaped Claude permissions config', () => {
     expect(() =>
       normalizeProfileConfig({
-        schemaVersion: 2,
         agentKind: 'claude',
         accounts: { app },
         permissions: {
@@ -275,7 +262,6 @@ describe('profile schema', () => {
 
   it('clamps default access from full defaults when only canonical max access is explicit', () => {
     const cfg = normalizeProfileConfig({
-      schemaVersion: 2,
       agentKind: 'claude',
       accounts: { app },
       permissions: {

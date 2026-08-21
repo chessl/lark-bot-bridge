@@ -86,7 +86,6 @@ describe('checkMeetingPreflight', () => {
       {
         schemaVersion: 2,
         activeProfile: 'claude',
-        preferences: {},
         profiles: {
           claude: createDefaultProfileConfig({
             agentKind: 'claude',

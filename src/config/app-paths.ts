@@ -15,7 +15,6 @@ export interface AppPaths {
   codexHomeDir: string;
   defaultWorkspaceDir: string;
   configFile: string;
-  activeProfileFile: string;
   sessionsFile: string;
   sessionCatalogFile: string;
   workspacesFile: string;
@@ -69,7 +68,6 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
     codexHomeDir: join(profileDir, 'codex-home'),
     defaultWorkspaceDir: join(`${rootDir}-workspaces`, profile, 'default'),
     configFile: join(rootDir, 'config.json'),
-    activeProfileFile: join(rootDir, 'active-profile'),
     sessionsFile,
     sessionCatalogFile: `${sessionsFile}.catalog.json`,
     workspacesFile: join(profileDir, 'workspaces.json'),

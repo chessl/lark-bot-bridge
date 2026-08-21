@@ -165,7 +165,7 @@ async function createHarness(
   } satisfies Controls;
   let nonce = 'nonce-stop';
   const auth = new CallbackAuth({
-    keys: [{ version: 1, secret: 'secret-1' }],
+    secret: 'secret-1',
     nonceStore: store,
     now: () => 1000,
     createNonce: () => nonce,

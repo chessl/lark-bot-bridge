@@ -7,7 +7,6 @@ import { ActiveRuns } from '../../../src/bot/active-runs';
 import { ProcessPool } from '../../../src/bot/process-pool';
 import { type ScopedRunStartFailed, ScopedRuns } from '../../../src/bot/run-flow';
 import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema';
-import { withResolvers } from '../../../src/platform/promise';
 import { SpawnFailed } from '../../../src/runtime/errors';
 import { SessionCatalog } from '../../../src/session/catalog';
 import { WorkspaceStore } from '../../../src/workspace/store';
@@ -548,8 +547,8 @@ class ThrowingAgent extends FakeAgentAdapter {
 }
 
 class DelayedStartAgent extends FakeAgentAdapter {
-  private readonly called = withResolvers<void>();
-  private readonly release = withResolvers<void>();
+  private readonly called = Promise.withResolvers<void>();
+  private readonly release = Promise.withResolvers<void>();
   readonly startCalled = this.called.promise;
 
   override async start(opts: AgentRunOptions): Promise<AgentRun> {

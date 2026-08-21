@@ -1,12 +1,7 @@
 import { resolveAppPaths } from '../config/app-paths';
-import {
-  loadRootConfig,
-  saveRootConfig,
-  withConfigFileLock,
-  writeActiveProfile,
-} from '../config/profile-store';
-import { listAllProfiles } from '../runtime/profile-discovery';
 import type { AgentKind } from '../config/profile-schema';
+import { loadRootConfig, saveRootConfig, withConfigFileLock } from '../config/profile-store';
+import { listAllProfiles } from '../runtime/profile-discovery';
 import { HttpError } from './http';
 import type { UiSupervisor } from './types';
 
@@ -71,6 +66,5 @@ export async function activateProfile(
     root.activeProfile = name;
     await saveRootConfig(root, appPaths.configFile);
   });
-  await writeActiveProfile(appPaths.rootDir, name);
   return { ok: true, active: name };
 }

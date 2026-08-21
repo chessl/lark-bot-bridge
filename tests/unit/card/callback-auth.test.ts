@@ -83,7 +83,7 @@ describe('CallbackAuth', () => {
     const reloadedStore = new CallbackNonceStore(h.storePath);
     await reloadedStore.load();
     const reloaded = new CallbackAuth({
-      keys: [{ version: 1, secret: 'secret-1' }],
+      secret: 'secret-1',
       nonceStore: reloadedStore,
       now: () => h.now(),
       createNonce: () => 'unused',
@@ -91,42 +91,6 @@ describe('CallbackAuth', () => {
     expect(reloaded.verify(token, baseExpected())).toMatchObject({
       ok: false,
       reason: 'nonce-replay',
-    });
-  });
-
-  it('verifies retired keys but signs with the newest active key', async () => {
-    const h = await harness({
-      keys: [
-        { version: 1, secret: 'old-secret', retired: true },
-        { version: 2, secret: 'new-secret' },
-      ],
-    });
-
-    const token = h.auth.sign(baseSignInput());
-    expect(
-      JSON.parse(Buffer.from(token.split('.')[2]!, 'base64url').toString('utf8')),
-    ).toMatchObject({
-      kv: 2,
-    });
-    expect(h.auth.verify(token, baseExpected())).toMatchObject({ ok: true });
-
-    const old = new CallbackAuth({
-      keys: [{ version: 1, secret: 'old-secret' }],
-      nonceStore: new CallbackNonceStore(await path()),
-      now: () => h.now(),
-      createNonce: () => 'old-nonce',
-    }).sign(baseSignInput());
-    expect(h.auth.verify(old, baseExpected())).toMatchObject({ ok: true });
-  });
-
-  it('rejects force-revoked nonces', async () => {
-    const h = await harness({ nonce: 'nonce-revoke' });
-    const token = h.auth.sign(baseSignInput());
-    h.store.revoke('nonce-revoke');
-
-    expect(h.auth.verify(token, baseExpected())).toMatchObject({
-      ok: false,
-      reason: 'nonce-revoked',
     });
   });
 });
@@ -154,19 +118,13 @@ function baseExpected() {
   };
 }
 
-async function harness(
-  options: {
-    now?: number;
-    nonce?: string;
-    keys?: Array<{ version: number; secret: string; retired?: boolean }>;
-  } = {},
-) {
+async function harness(options: { now?: number; nonce?: string } = {}) {
   let now = options.now ?? 1000;
   const storePath = await path();
   const store = new CallbackNonceStore(storePath);
   cleanups.push(() => store.flush());
   const auth = new CallbackAuth({
-    keys: options.keys ?? [{ version: 1, secret: 'secret-1' }],
+    secret: 'secret-1',
     nonceStore: store,
     now: () => now,
     createNonce: () => options.nonce ?? 'nonce-1',

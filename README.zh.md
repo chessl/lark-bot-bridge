@@ -225,7 +225,6 @@ OMP profile 当前必须使用 `defaultAccess: "full"`，因为 OMP RPC 尚未�
 | 路径 | 内容 |
 |---|---|
 | `~/.lark-bot-bridge/config.json` | root config，包含 profiles 和 active profile |
-| `~/.lark-bot-bridge/active-profile` | 最近选择的 profile |
 | `~/.lark-bot-bridge/profiles/<profile>/sessions.json` | 会话状态 |
 | `~/.lark-bot-bridge/profiles/<profile>/sessions.json.catalog.json` | agent-aware 会话索引 |
 | `~/.lark-bot-bridge/profiles/<profile>/workspaces.json` | 当前和命名工作空间绑定 |

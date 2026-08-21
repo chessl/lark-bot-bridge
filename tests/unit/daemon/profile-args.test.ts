@@ -38,7 +38,7 @@ describe('profile-scoped daemon paths and arguments', () => {
     };
 
     // Classic per-profile service pins --profile so the daemon always runs THIS
-    // profile regardless of active-profile changes.
+    // profile regardless of active profile changes.
     expect(buildPlist(inputs)).toContain('<string>run</string>');
     expect(buildPlist(inputs)).toContain('<string>--profile</string>');
     expect(buildPlist(inputs)).toContain('<string>codex-dev</string>');

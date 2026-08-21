@@ -4,13 +4,13 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runProfileCreate } from '../../../src/cli/commands/profile';
 import { resolveAppPaths } from '../../../src/config/app-paths';
+import { getSecret } from '../../../src/config/keystore';
 import {
-  createDefaultProfileConfig,
   type AgentKind,
+  createDefaultProfileConfig,
   type RootConfig,
 } from '../../../src/config/profile-schema';
 import { loadRootConfig } from '../../../src/config/profile-store';
-import { getSecret } from '../../../src/config/keystore';
 import { secretKeyForApp } from '../../../src/config/schema';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
 
@@ -57,7 +57,6 @@ describe('profile create command', () => {
       'feishu',
     );
     expect(saved.activeProfile).toBe('codex-dev');
-    await expect(readFile(join(root, 'active-profile'), 'utf8')).resolves.toBe('codex-dev\n');
     expect(saved.profiles['codex-dev']?.agentKind).toBe('codex');
     expect(saved.profiles['claude-work']?.agentKind).toBe('claude');
     expect(saved.profiles['claude-work']?.workspaces.default).toBe(workspaceRealpath);
@@ -200,11 +199,9 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
   const config: RootConfig = {
     schemaVersion: 2,
     activeProfile,
-    preferences: {},
     profiles,
   };
   await writeJson(join(root, 'config.json'), config);
-  await writeFile(join(root, 'active-profile'), `${activeProfile}\n`, 'utf8');
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {

@@ -8,7 +8,6 @@ import {
   loadRootConfig,
   runtimeProfileConfig,
   saveRootConfig,
-  writeActiveProfile,
 } from '../../../src/config/profile-store';
 import { startUiServer } from '../../../src/ui/server';
 import type { UiServerHandle, UiSupervisor } from '../../../src/ui/types';
@@ -100,7 +99,6 @@ beforeEach(async () => {
     accounts: { app: { ...app, id: 'cli_work' } },
   });
   await saveRootConfig(rc, configPath);
-  await writeActiveProfile(rootDir, 'claude');
 
   online = new Map();
   online.set('claude', await makeControls('claude')); // claude online, work offline

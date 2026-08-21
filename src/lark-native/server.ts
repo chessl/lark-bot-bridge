@@ -16,7 +16,6 @@ import type {
 import type { CallbackAuth } from '../card/callback-auth';
 import type { ProfileConfig } from '../config/profile-schema';
 import { log } from '../core/logger';
-import { withResolvers } from '../platform/promise';
 import {
   ADD_BOT_SCOPES,
   addBotToChat,
@@ -77,7 +76,7 @@ export class NativeLarkServer implements NativeToolProvider {
       });
     });
     instance = new NativeLarkServer(options, httpServer);
-    const { promise, resolve, reject } = withResolvers<void>();
+    const { promise, resolve, reject } = Promise.withResolvers<void>();
     httpServer.once('error', reject);
     httpServer.listen(0, HOST, resolve);
     await promise;
@@ -132,7 +131,7 @@ export class NativeLarkServer implements NativeToolProvider {
 
   async close(): Promise<void> {
     await Promise.allSettled([...this.tokensByRun.keys()].map((runId) => this.closeRun(runId)));
-    const { promise, resolve } = withResolvers<void>();
+    const { promise, resolve } = Promise.withResolvers<void>();
     this.httpServer.close(() => resolve());
     await promise;
   }
@@ -533,7 +532,7 @@ export class NativeLarkServer implements NativeToolProvider {
         policyFingerprint: access.policyFingerprint,
         ttlMs: APPROVAL_TIMEOUT_MS,
       });
-    const { promise, resolve } = withResolvers<boolean>();
+    const { promise, resolve } = Promise.withResolvers<boolean>();
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
     const finish = (approved: boolean) => {

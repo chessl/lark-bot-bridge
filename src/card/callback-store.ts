@@ -2,11 +2,9 @@ import { readFile } from 'node:fs/promises';
 import { log } from '../core/logger';
 import { writeFileAtomic } from '../platform/atomic-write';
 
-type NonceState = 'used' | 'revoked';
-
 export class CallbackNonceStore {
   private readonly path: string;
-  private readonly nonces = new Map<string, NonceState>();
+  private readonly nonces = new Set<string>();
   private saving: Promise<void> = Promise.resolve();
 
   constructor(path: string) {
@@ -19,7 +17,7 @@ export class CallbackNonceStore {
       if (!raw || typeof raw !== 'object') return;
       this.nonces.clear();
       for (const [nonce, state] of Object.entries(raw as Record<string, unknown>)) {
-        if (state === 'used' || state === 'revoked') this.nonces.set(nonce, state);
+        if (state === 'used' || state === 'revoked') this.nonces.add(nonce);
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
@@ -27,20 +25,11 @@ export class CallbackNonceStore {
     }
   }
 
-  state(nonce: string): NonceState | undefined {
-    return this.nonces.get(nonce);
-  }
-
   consume(nonce: string): boolean {
     if (this.nonces.has(nonce)) return false;
-    this.nonces.set(nonce, 'used');
+    this.nonces.add(nonce);
     this.schedulePersist();
     return true;
-  }
-
-  revoke(nonce: string): void {
-    this.nonces.set(nonce, 'revoked');
-    this.schedulePersist();
   }
 
   async flush(): Promise<void> {
@@ -52,7 +41,7 @@ export class CallbackNonceStore {
       .then(async () => {
         await writeFileAtomic(
           this.path,
-          `${JSON.stringify(Object.fromEntries(this.nonces), null, 2)}\n`,
+          `${JSON.stringify(Object.fromEntries([...this.nonces].map((nonce) => [nonce, 'used'])), null, 2)}\n`,
           { mode: 0o600 },
         );
       })

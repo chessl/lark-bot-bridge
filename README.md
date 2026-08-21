@@ -225,7 +225,6 @@ OMP profiles currently require `defaultAccess: "full"` because OMP RPC does not 
 | Path | Content |
 |---|---|
 | `~/.lark-bot-bridge/config.json` | Root config with profiles and active profile |
-| `~/.lark-bot-bridge/active-profile` | Last selected profile |
 | `~/.lark-bot-bridge/profiles/<profile>/sessions.json` | Session state |
 | `~/.lark-bot-bridge/profiles/<profile>/sessions.json.catalog.json` | Agent-aware session catalog |
 | `~/.lark-bot-bridge/profiles/<profile>/workspaces.json` | Current and named workspace bindings |

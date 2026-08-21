@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  createDefaultProfileConfig,
   type AgentKind,
+  createDefaultProfileConfig,
   type RootConfig,
 } from '../../../src/config/profile-schema';
 import { listAllProfiles } from '../../../src/runtime/profile-discovery';
@@ -25,14 +25,13 @@ describe('listAllProfiles', () => {
   it('lists profiles from root config with active profile first and others sorted', async () => {
     const root = await makeRoot();
     await writeRootConfig(root, {
-      activeProfile: 'claude',
+      activeProfile: 'codex-dev',
       profiles: {
         zeta: profile('claude', 'cli_zeta'),
         claude: profile('claude', 'cli_claude'),
         'codex-dev': profile('codex', 'cli_codex'),
       },
     });
-    await writeFile(join(root, 'active-profile'), 'codex-dev\n', 'utf8');
     await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
     await mkdir(join(root, 'profiles', 'codex-dev'), { recursive: true });
     await mkdir(join(root, 'profiles', 'zeta'), { recursive: true });
@@ -47,15 +46,14 @@ describe('listAllProfiles', () => {
     });
   });
 
-  it('fails when active-profile points at a missing profile', async () => {
+  it('fails when the active profile is missing', async () => {
     const root = await makeRoot();
     await writeRootConfig(root, {
-      activeProfile: 'claude',
+      activeProfile: 'missing',
       profiles: {
         claude: profile('claude', 'cli_claude'),
       },
     });
-    await writeFile(join(root, 'active-profile'), 'missing\n', 'utf8');
     await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
 
     await expect(listAllProfiles(root)).rejects.toThrow('active profile not found: missing');
@@ -135,7 +133,6 @@ async function writeRootConfig(
 ): Promise<void> {
   const config: RootConfig = {
     schemaVersion: 2,
-    preferences: {},
     ...overrides,
   };
   await writeFile(join(root, 'config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');

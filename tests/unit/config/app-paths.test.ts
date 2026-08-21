@@ -43,7 +43,6 @@ describe('resolveAppPaths', () => {
     expect(paths.profilesDir).toBe(join(root, 'profiles'));
     expect(paths.trashDir).toBe(join(root, '.trash'));
     expect(paths.configFile).toBe(join(root, 'config.json'));
-    expect(paths.activeProfileFile).toBe(join(root, 'active-profile'));
     expect(paths.registryDir).toBe(join(root, 'registry'));
     expect(paths.userRegistryFile).toBe(join(root, 'registry', 'processes.json'));
     expect(paths.userLockDir).toBe(join(root, 'registry', 'locks'));

@@ -2,6 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  removeAppSecret,
+  resolveSecretAcrossProfiles,
+  setAppSecret,
+} from '../../../src/cli/commands/secrets';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import {
   clearKeystoreDerivedKeyCache,
@@ -10,16 +15,11 @@ import {
   setSecret,
 } from '../../../src/config/keystore';
 import {
-  createDefaultProfileConfig,
   type AgentKind,
+  createDefaultProfileConfig,
   type RootConfig,
 } from '../../../src/config/profile-schema';
 import { secretKeyForApp } from '../../../src/config/schema';
-import {
-  removeAppSecret,
-  resolveSecretAcrossProfiles,
-  setAppSecret,
-} from '../../../src/cli/commands/secrets';
 
 const roots: string[] = [];
 
@@ -145,9 +145,7 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
   const config: RootConfig = {
     schemaVersion: 2,
     activeProfile,
-    preferences: {},
     profiles,
   };
   await writeFile(join(root, 'config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');
-  await writeFile(join(root, 'active-profile'), `${activeProfile}\n`, 'utf8');
 }

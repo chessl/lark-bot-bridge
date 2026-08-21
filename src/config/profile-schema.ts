@@ -106,7 +106,6 @@ export interface MeetingConfig {
 export type ProfileMode = 'personal' | 'team';
 
 export interface ProfileConfig {
-  schemaVersion: 2;
   agentKind: AgentKind;
   /** Deployment mode switch. Default 'personal'. See {@link ProfileMode}. */
   mode: ProfileMode;
@@ -130,7 +129,6 @@ export interface ProfileConfig {
 export interface RootConfig {
   schemaVersion: 2;
   activeProfile: string;
-  preferences: Record<string, never>;
   secrets?: SecretsConfig;
   profiles: Record<string, ProfileConfig>;
 }
@@ -151,10 +149,7 @@ export interface CreateDefaultProfileConfigInput {
 }
 
 export function createDefaultProfileConfig(input: CreateDefaultProfileConfigInput): ProfileConfig {
-  return normalizeProfileConfig({
-    schemaVersion: 2,
-    ...input,
-  });
+  return normalizeProfileConfig(input);
 }
 
 export function normalizeProfileConfig(input: unknown): ProfileConfig {
@@ -162,7 +157,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     throw new Error('profile config must be an object');
   }
   const raw = input as {
-    schemaVersion?: unknown;
     agentKind?: unknown;
     mode?: unknown;
     accounts?: unknown;
@@ -179,9 +173,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     meeting?: unknown;
   };
 
-  if (raw.schemaVersion !== 2) {
-    throw new Error('profile schemaVersion must be 2');
-  }
   if (raw.agentKind !== 'claude' && raw.agentKind !== 'codex' && raw.agentKind !== 'omp') {
     throw new Error('agentKind must be claude, codex, or omp');
   }
@@ -200,7 +191,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   const meeting = normalizeMeeting(raw.meeting);
 
   return {
-    schemaVersion: 2,
     agentKind: raw.agentKind,
     mode: raw.mode === 'team' ? 'team' : 'personal',
     accounts,

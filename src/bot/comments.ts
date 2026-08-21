@@ -1,19 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
-import type { CommentEvent, LarkChannel } from '@larksuite/channel';
+import type { CommentEvent, CommentTarget, LarkChannel } from '@larksuite/channel';
 import type { AgentEvent } from '../agent/types';
 import type { Controls } from '../commands';
 import { resolveAppPaths } from '../config/app-paths';
 import { log } from '../core/logger';
 import type { ScopeContext } from '../policy/run-policy';
 import type { SessionStore } from '../session/store';
-import {
-  commentDocumentScopeId,
-  commentScopeId,
-  commentTokenDigest,
-  type ResolvedCommentTarget,
-  resolveCommentTarget,
-} from './comment-resource';
+import { commentDocumentScopeId, commentScopeId, commentTokenDigest } from './comment-resource';
 import type { RunFlowRejectCode, ScopedRuns } from './run-flow';
 
 export { commentDocumentScopeId, commentScopeId } from './comment-resource';
@@ -102,7 +96,7 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
     });
     return;
   }
-  const target = await resolveCommentTarget(channel, evt);
+  const target = await channel.comments.resolveTarget(evt.fileToken, evt.fileType);
   if (!target) {
     log.info('comment', 'skip', {
       reason: 'unsupported-target',
@@ -295,7 +289,7 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
   }
 }
 
-export type ResolvedTarget = ResolvedCommentTarget;
+export type ResolvedTarget = CommentTarget;
 
 async function fetchCommentContext(
   channel: LarkChannel,
