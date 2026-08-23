@@ -74,7 +74,7 @@ describe('OmpRpcTranslator', () => {
     ]);
   });
 
-  it('uses completed assistant text only when that message had no streamed deltas', () => {
+  it('publishes only complete assistant messages after their role is known', () => {
     const translator = new OmpRpcTranslator();
     expect(translate(translator, { type: 'message_start' })).toEqual([]);
     expect(
@@ -82,13 +82,13 @@ describe('OmpRpcTranslator', () => {
         type: 'message_update',
         assistantMessageEvent: { type: 'text_delta', delta: 'streamed' },
       }),
-    ).toEqual([{ type: 'text', delta: 'streamed' }]);
+    ).toEqual([]);
     expect(
       translate(translator, {
         type: 'message_end',
         message: { role: 'assistant', content: [{ type: 'text', text: 'streamed' }] },
       }),
-    ).toEqual([]);
+    ).toEqual([{ type: 'final_text', content: 'streamed' }]);
 
     expect(translate(translator, { type: 'message_start' })).toEqual([]);
     expect(
@@ -96,7 +96,50 @@ describe('OmpRpcTranslator', () => {
         type: 'message_end',
         message: { role: 'assistant', content: [{ type: 'text', text: 'final only' }] },
       }),
-    ).toEqual([{ type: 'text', delta: 'final only' }]);
+    ).toEqual([{ type: 'final_text', content: 'final only' }]);
+  });
+
+  it('discards thinking deltas and strips raw lifecycle metadata', () => {
+    const translator = new OmpRpcTranslator();
+    expect(
+      translate(translator, {
+        type: 'message_update',
+        assistantMessageEvent: { type: 'thinking_delta', delta: 'SECRET_THINKING' },
+      }),
+    ).toEqual([]);
+    expect(
+      translate(translator, {
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'approved reasoning' }],
+        },
+      }),
+    ).toEqual([{ type: 'reasoning', content: 'approved reasoning' }]);
+    expect(
+      translate(translator, {
+        type: 'auto_retry_start',
+        attempt: 2,
+        maxAttempts: 3,
+        delayMs: 1500,
+        errorMessage: 'SECRET_ERROR',
+      }),
+    ).toEqual([{ type: 'retry_start', attempt: 2, maxAttempts: 3, delayMs: 1500 }]);
+    expect(
+      translate(translator, {
+        type: 'retry_fallback_applied',
+        from: 'SECRET_PROVIDER',
+        to: 'SECRET_MODEL',
+        role: 'SECRET_ROLE',
+      }),
+    ).toEqual([{ type: 'fallback_start' }]);
+    expect(
+      translate(translator, {
+        type: 'auto_compaction_start',
+        reason: 'SECRET_REASON',
+        content: 'SECRET_CONTENT',
+      }),
+    ).toEqual([{ type: 'compaction_start' }]);
   });
 
   it('finishes a local-only prompt and surfaces prompt failures', () => {

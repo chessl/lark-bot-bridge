@@ -5,9 +5,45 @@ export type AgentEvent =
   | { type: 'system'; sessionId?: string; cwd?: string; model?: string }
   | { type: 'text'; delta: string }
   | { type: 'final_text'; content: string }
+  | { type: 'reasoning'; content: string }
   | { type: 'thinking'; delta: string }
-  | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; id: string; output: string; isError: boolean }
+  | {
+      type: 'tool_use';
+      id: string;
+      name: string;
+      input: unknown;
+      command?: string;
+      path?: string;
+      query?: string;
+    }
+  | {
+      type: 'tool_result';
+      id: string;
+      output: string;
+      isError: boolean;
+      result?: unknown;
+      error?: string;
+    }
+  | {
+      type: 'retry_start';
+      attempt?: number;
+      maxAttempts?: number;
+      delayMs?: number;
+      error?: string;
+      metadata?: unknown;
+    }
+  | { type: 'retry_end'; error?: string; metadata?: unknown }
+  | {
+      type: 'fallback_start';
+      provider?: string;
+      model?: string;
+      role?: string;
+      reason?: string;
+      metadata?: unknown;
+    }
+  | { type: 'fallback_end'; provider?: string; model?: string; role?: string; metadata?: unknown }
+  | { type: 'compaction_start'; content?: string; reason?: string; metadata?: unknown }
+  | { type: 'compaction_end'; error?: string; content?: string; metadata?: unknown }
   | {
       type: 'usage';
       inputTokens?: number;
@@ -22,7 +58,6 @@ export type AgentEvent =
       terminationReason: 'normal' | 'interrupted' | 'timeout';
     }
   | { type: 'error'; message: string; terminationReason: 'failed' | 'interrupted' | 'timeout' };
-
 export interface AgentRunOptions {
   runId: string;
   prompt: string;

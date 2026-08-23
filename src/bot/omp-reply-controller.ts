@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
-import { renderCard } from '../card/run-renderer';
+import { renderOmpReplyCard } from '../card/omp-reply-renderer';
 import type { RunState } from '../card/run-state';
 
 export type OmpReplyTarget =
@@ -110,7 +110,7 @@ export class OmpReplyController {
 
 function renderManagedCard(state: RunState): object {
   return {
-    ...renderCard(state),
+    ...renderOmpReplyCard(state),
     config: {
       update_multi: true,
       width_mode: 'default',

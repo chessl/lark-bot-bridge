@@ -78,7 +78,7 @@ export class OmpRpcFrameDecoder {
 
 export class OmpRpcTranslator {
   private sessionId: string | undefined;
-  private sawTextInMessage = false;
+  private assistantDraft = '';
   private terminal = false;
 
   terminalEmitted(): boolean {
@@ -96,7 +96,7 @@ export class OmpRpcTranslator {
     }
 
     if (rpcFrame.type === 'message_start') {
-      this.sawTextInMessage = false;
+      this.assistantDraft = '';
       return;
     }
 
@@ -108,11 +108,10 @@ export class OmpRpcTranslator {
           : undefined;
       const delta = stringField(update, 'delta');
       if (update?.type === 'text_delta' && delta !== undefined) {
-        this.sawTextInMessage = true;
-        yield { type: 'text', delta };
-      } else if (update?.type === 'thinking_delta' && delta !== undefined) {
-        yield { type: 'thinking', delta };
+        this.assistantDraft += delta;
       }
+      // thinking_delta is deliberately discarded. Only complete, structured
+      // reasoning content from message_end is eligible for user projection.
       return;
     }
 
@@ -122,16 +121,16 @@ export class OmpRpcTranslator {
         rawMessage && typeof rawMessage === 'object' && !Array.isArray(rawMessage)
           ? (rawMessage as Record<string, unknown>)
           : undefined;
-      if (!this.sawTextInMessage && message?.role === 'assistant') {
-        const text = assistantText(message.content);
-        if (text) {
-          this.sawTextInMessage = true;
-          yield { type: 'text', delta: text };
+      if (message?.role === 'assistant') {
+        const text = assistantText(message.content) || this.assistantDraft;
+        if (text) yield { type: 'final_text', content: text };
+        for (const content of explicitReasoning(message.content)) {
+          yield { type: 'reasoning', content };
         }
       }
       const usage = usageEvent(message?.usage);
       if (usage) yield usage;
-      this.sawTextInMessage = false;
+      this.assistantDraft = '';
       return;
     }
 
@@ -159,6 +158,41 @@ export class OmpRpcTranslator {
           isError: rpcFrame.isError === true || rpcFrame.error === true,
         };
       }
+      return;
+    }
+
+    if (rpcFrame.type === 'auto_retry_start') {
+      yield {
+        type: 'retry_start',
+        attempt: numberField(rpcFrame, 'attempt'),
+        maxAttempts: numberField(rpcFrame, 'maxAttempts'),
+        delayMs: numberField(rpcFrame, 'delayMs'),
+      };
+      return;
+    }
+
+    if (rpcFrame.type === 'auto_retry_end') {
+      yield { type: 'retry_end' };
+      return;
+    }
+
+    if (rpcFrame.type === 'retry_fallback_applied') {
+      yield { type: 'fallback_start' };
+      return;
+    }
+
+    if (rpcFrame.type === 'retry_fallback_succeeded') {
+      yield { type: 'fallback_end' };
+      return;
+    }
+
+    if (rpcFrame.type === 'auto_compaction_start') {
+      yield { type: 'compaction_start' };
+      return;
+    }
+
+    if (rpcFrame.type === 'auto_compaction_end') {
+      yield { type: 'compaction_end' };
       return;
     }
 
@@ -280,6 +314,17 @@ function assistantText(value: unknown): string {
       return stringField(content, 'text') ?? '';
     })
     .join('');
+}
+
+function explicitReasoning(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((part) => {
+    if (!part || typeof part !== 'object' || Array.isArray(part)) return [];
+    const content = part as Record<string, unknown>;
+    if (content.type !== 'thinking') return [];
+    const reasoning = stringField(content, 'thinking');
+    return reasoning ? [reasoning] : [];
+  });
 }
 
 function resultText(value: unknown): string {

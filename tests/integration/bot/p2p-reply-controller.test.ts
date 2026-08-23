@@ -124,6 +124,184 @@ describe('P2P OMP Reply', () => {
     );
   });
 
+  it('projects ordered progress without disclosing hidden OMP fields', async () => {
+    const hidden = [
+      'SECRET_THINKING',
+      'SECRET_TOOL_INPUT',
+      'SECRET_COMMAND',
+      'SECRET_PATH',
+      'SECRET_QUERY',
+      'SECRET_TOOL_OUTPUT',
+      'SECRET_TOOL_RESULT',
+      'SECRET_TOOL_ERROR',
+      'SECRET_RETRY_ERROR',
+      'SECRET_RETRY_METADATA',
+      'SECRET_FALLBACK_PROVIDER',
+      'SECRET_FALLBACK_MODEL',
+      'SECRET_FALLBACK_ROLE',
+      'SECRET_FALLBACK_REASON',
+      'SECRET_FALLBACK_METADATA',
+      'SECRET_COMPACTION_CONTENT',
+      'SECRET_COMPACTION_REASON',
+      'SECRET_COMPACTION_METADATA',
+      'SECRET_COMPACTION_ERROR',
+      'SECRET_ORPHAN_OUTPUT',
+    ];
+    const h = await createHarness({
+      events: [
+        { type: 'thinking', delta: hidden[0] ?? '' },
+        {
+          type: 'retry_start',
+          attempt: 2,
+          maxAttempts: 3,
+          delayMs: 1500,
+          error: hidden[8],
+          metadata: hidden[9],
+        },
+        {
+          type: 'fallback_start',
+          provider: hidden[10],
+          model: hidden[11],
+          role: hidden[12],
+          reason: hidden[13],
+          metadata: hidden[14],
+        },
+        {
+          type: 'compaction_start',
+          content: hidden[15],
+          reason: hidden[16],
+          metadata: hidden[17],
+        },
+        { type: 'compaction_end', error: hidden[18] },
+        { type: 'fallback_end', provider: hidden[10], model: hidden[11], role: hidden[12] },
+        { type: 'retry_end', error: hidden[8] },
+        {
+          type: 'tool_result',
+          id: 'missing-tool',
+          output: hidden[19] ?? '',
+          isError: true,
+        },
+        { type: 'final_text', content: 'INTERMEDIATE_ASSISTANT' },
+        {
+          type: 'tool_use',
+          id: 'tool-1',
+          name: 'Bash',
+          input: {
+            arguments: hidden[1],
+            command: hidden[2],
+            path: hidden[3],
+            query: hidden[4],
+          },
+          command: hidden[2],
+          path: hidden[3],
+          query: hidden[4],
+        },
+        {
+          type: 'tool_use',
+          id: 'tool-1',
+          name: 'Bash',
+          input: { input: hidden[1] },
+        },
+        {
+          type: 'tool_result',
+          id: 'tool-1',
+          output: hidden[5] ?? '',
+          result: hidden[6],
+          error: hidden[7],
+          isError: false,
+        },
+        { type: 'reasoning', content: 'EXPLICIT_RPC_REASONING' },
+        { type: 'final_text', content: 'FIRST_ASSISTANT' },
+        { type: 'final_text', content: 'SECOND_ASSISTANT' },
+        { type: 'final_text', content: 'SAFE_FINAL_REPLY' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_safe_progress', 'run'));
+    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+
+    const payloads = [
+      ...h.channel.createdCards,
+      ...h.channel.updates.map((update) => update.card),
+    ].map((card) => JSON.stringify(card));
+    const outbound = payloads.join('\n');
+    for (const secret of hidden) expect(outbound).not.toContain(secret);
+    expect(outbound).toContain('INTERMEDIATE\\\\_ASSISTANT');
+    expect(outbound).toContain('EXPLICIT\\\\_RPC\\\\_REASONING');
+    expect(outbound).toContain('FIRST\\\\_ASSISTANT');
+    expect(outbound).toContain('SECOND\\\\_ASSISTANT');
+    expect(outbound).toContain('SAFE_FINAL_REPLY');
+    expect(outbound).toContain('等待重试（2/3，1.5s）');
+    expect(outbound).toContain('正在切换备用模型');
+    expect(outbound).toContain('正在整理上下文');
+    expect(payloads.filter((payload) => payload.includes('等待重试（2/3，1.5s）')).length).toBe(2);
+    expect(payloads.filter((payload) => payload.includes('正在切换备用模型')).length).toBe(2);
+
+    const running = h.channel.updates.findLast((update) =>
+      JSON.stringify(update.card).includes('"content":"运行中"'),
+    )?.card;
+    const elements = cardElements(running);
+    expect(elements[0]).toMatchObject({
+      tag: 'collapsible_panel',
+      element_id: 'reasoning',
+      expanded: true,
+      header: {
+        icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined' },
+        icon_position: 'right',
+      },
+    });
+    expect(elements[0]).not.toHaveProperty('border');
+    expect(elements[1]).toMatchObject({ element_id: 'answer' });
+    expect(elements.at(-1)).toMatchObject({
+      tag: 'collapsible_panel',
+      element_id: 'tools',
+      expanded: true,
+    });
+    expect(elements.at(-1)).not.toHaveProperty('border');
+    expect(JSON.stringify(elements.at(-1))).toContain('调用工具 1 次');
+    expect(JSON.stringify(elements.at(-1))).toContain('运行操作');
+    expect(JSON.stringify(elements.at(-1))).toContain('执行');
+    expect(JSON.stringify(elements.at(-1))).toContain('完成');
+  });
+
+  it('retains newest bounded progress while preserving cumulative totals', async () => {
+    const events: FakeAgentEvents = [
+      ...Array.from({ length: 13 }, (_, index) => ({
+        type: 'reasoning' as const,
+        content: `REASON_${String(index + 1).padStart(2, '0')}_END`,
+      })),
+      { type: 'reasoning', content: 'X'.repeat(650) },
+      { type: 'tool_use', id: 'tool-01', name: 'Read', input: {} },
+      ...Array.from({ length: 20 }, (_, index) => ({
+        type: 'tool_use' as const,
+        id: `tool-${String(index + 2).padStart(2, '0')}`,
+        name: 'Bash',
+        input: {},
+      })),
+      { type: 'done', terminationReason: 'normal' },
+    ];
+    const h = await createHarness({ events });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_bounded_progress', 'run'));
+    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+
+    const running = h.channel.updates.findLast((update) =>
+      JSON.stringify(update.card).includes('"content":"运行中"'),
+    )?.card;
+    const outbound = JSON.stringify(running);
+    expect(outbound).not.toContain('REASON\\\\_01\\\\_END');
+    expect(outbound).not.toContain('REASON\\\\_02\\\\_END');
+    expect(outbound).toContain('REASON\\\\_03\\\\_END');
+    expect(outbound).toContain('中间过程（14 条）');
+    expect(outbound).toContain(`${'X'.repeat(599)}…`);
+    expect(outbound).not.toContain('读取信息');
+    expect(outbound.match(/运行操作/g)).toHaveLength(20);
+    expect(outbound).toContain('调用工具 21 次');
+  });
+
   it('fails closed when the initial IM Reply result is ambiguous', async () => {
     const h = await createHarness({
       events: [
@@ -379,6 +557,17 @@ function closeSettings(input: unknown): string {
   const data = input.data;
   if (!data || typeof data !== 'object' || !('settings' in data)) return '';
   return typeof data.settings === 'string' ? data.settings : '';
+}
+
+function cardElements(card: object | undefined): object[] {
+  if (!card || !('body' in card)) return [];
+  const body = card.body;
+  if (!body || typeof body !== 'object' || !('elements' in body) || !Array.isArray(body.elements)) {
+    return [];
+  }
+  return body.elements.filter(
+    (element): element is object => element !== null && typeof element === 'object',
+  );
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
