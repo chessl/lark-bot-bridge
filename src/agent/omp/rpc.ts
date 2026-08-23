@@ -1,3 +1,4 @@
+import { log } from '../../core/logger';
 import type { AgentEvent } from '../types';
 
 const DEFAULT_MAX_REASSEMBLED_BYTES = 64 * 1024 * 1024;
@@ -79,6 +80,7 @@ export class OmpRpcFrameDecoder {
 export class OmpRpcTranslator {
   private sessionId: string | undefined;
   private assistantDraft = '';
+  private commandOutput = '';
   private terminal = false;
 
   terminalEmitted(): boolean {
@@ -86,9 +88,22 @@ export class OmpRpcTranslator {
   }
 
   *translate(frame: unknown): Generator<AgentEvent> {
-    if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return;
+    if (this.terminal) {
+      log.info('agent', 'rpc-frame-ignored', {
+        reason: 'post-terminal',
+        type: frameType(frame),
+      });
+      return;
+    }
+    if (!frame || typeof frame !== 'object' || Array.isArray(frame)) {
+      log.warn('agent', 'rpc-frame-ignored', { reason: 'malformed' });
+      return;
+    }
     const rpcFrame = frame as Record<string, unknown>;
-    if (typeof rpcFrame.type !== 'string') return;
+    if (typeof rpcFrame.type !== 'string') {
+      log.warn('agent', 'rpc-frame-ignored', { reason: 'malformed' });
+      return;
+    }
 
     if (rpcFrame.type === 'response') {
       yield* this.translateResponse(rpcFrame);
@@ -144,6 +159,11 @@ export class OmpRpcTranslator {
           name,
           input: rpcFrame.args ?? rpcFrame.arguments ?? {},
         };
+      } else {
+        log.warn('agent', 'rpc-frame-ignored', {
+          reason: 'malformed',
+          type: rpcFrame.type,
+        });
       }
       return;
     }
@@ -157,6 +177,11 @@ export class OmpRpcTranslator {
           output: resultText(rpcFrame.result ?? rpcFrame.output),
           isError: rpcFrame.isError === true || rpcFrame.error === true,
         };
+      } else {
+        log.warn('agent', 'rpc-frame-ignored', {
+          reason: 'malformed',
+          type: rpcFrame.type,
+        });
       }
       return;
     }
@@ -197,24 +222,28 @@ export class OmpRpcTranslator {
     }
 
     if (rpcFrame.type === 'command_output') {
-      const text = resultText(rpcFrame.output ?? rpcFrame.content ?? rpcFrame.message);
-      if (text) {
-        yield { type: 'text', delta: text };
-      }
+      this.commandOutput += resultText(rpcFrame.output ?? rpcFrame.content ?? rpcFrame.message);
       return;
     }
 
-    if (rpcFrame.type === 'prompt_result' && rpcFrame.agentInvoked === false) {
-      yield* this.finish();
+    if (rpcFrame.type === 'prompt_result') {
+      if (rpcFrame.agentInvoked === false) yield* this.finish(false);
       return;
     }
 
     if (rpcFrame.type === 'agent_end') {
       const usage = usageEvent(rpcFrame.usage);
       if (usage) yield usage;
-      if (rpcFrame.isTerminal !== false) yield* this.finish();
+      if (rpcFrame.isTerminal !== false) yield* this.finish(true);
       return;
     }
+
+    if (rpcFrame.type === 'agent_start') return;
+
+    log.warn('agent', 'rpc-frame-ignored', {
+      reason: 'unknown',
+      type: rpcFrame.type,
+    });
   }
 
   *fail(
@@ -268,20 +297,29 @@ export class OmpRpcTranslator {
         !Array.isArray(rawData) &&
         (rawData as Record<string, unknown>).agentInvoked === false
       ) {
-        yield* this.finish();
+        yield* this.finish(false);
       }
     }
   }
 
-  private *finish(): Generator<AgentEvent> {
+  private *finish(agentInvoked: boolean): Generator<AgentEvent> {
     if (this.terminal) return;
     this.terminal = true;
+    const localOutput = agentInvoked ? '' : this.commandOutput;
+    this.commandOutput = '';
+    if (localOutput) yield { type: 'text', delta: localOutput };
     yield {
       type: 'done',
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),
       terminationReason: 'normal',
     };
   }
+}
+
+function frameType(frame: unknown): string {
+  if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return 'malformed';
+  const type = (frame as Record<string, unknown>).type;
+  return typeof type === 'string' ? type : 'malformed';
 }
 
 function usageEvent(value: unknown): Extract<AgentEvent, { type: 'usage' }> | undefined {

@@ -1,11 +1,12 @@
 import type { AgentEvent } from '../agent/types';
+import { log } from '../core/logger';
 
 const MAX_REASONING = 12;
 const MAX_REASONING_CHARS = 600;
 const MAX_TOOLS = 20;
 const MAX_TOOL_LABEL_CHARS = 80;
 
-export type ToolStatus = 'running' | 'done' | 'error';
+export type ToolStatus = 'running' | 'done' | 'error' | 'unfinished';
 export type ToolAction = '读取' | '搜索' | '执行' | '修改' | '协作';
 
 export interface ToolEntry {
@@ -59,7 +60,13 @@ export const initialState: RunState = {
 };
 
 export function reduce(state: RunState, evt: AgentEvent): RunState {
-  if (state.terminal !== 'running') return state;
+  if (state.terminal !== 'running') {
+    return ignoreEvent(
+      state,
+      evt,
+      evt.type === 'done' || evt.type === 'error' ? 'duplicate-terminal' : 'post-terminal',
+    );
+  }
 
   switch (evt.type) {
     case 'text':
@@ -138,7 +145,7 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
 
     default: {
       const _exhaustive: never = evt;
-      return _exhaustive;
+      return ignoreEvent(state, _exhaustive, 'unknown');
     }
   }
 }
@@ -213,7 +220,9 @@ function upsertTool(state: RunState, id: string, rawName: string): RunState {
 }
 
 function finishTool(state: RunState, id: string, isError: boolean): RunState {
-  if (!(state.knownToolIds ?? []).includes(id)) return state;
+  if (!(state.knownToolIds ?? []).includes(id)) {
+    return ignoreEvent(state, { type: 'tool_result', id }, 'tool-end-without-start');
+  }
   let changed = false;
   const blocks = state.blocks.map((block): Block => {
     if (block.kind !== 'tool' || block.tool.id !== id) return block;
@@ -251,6 +260,7 @@ function terminateNormally(state: RunState): RunState {
   const finalText = completed.pendingAssistant ?? completed.finalText;
   return {
     ...completed,
+    blocks: finishOpenTools(completed.blocks),
     ...(finalText ? { finalText } : {}),
     pendingAssistant: undefined,
     reasoning: { ...completed.reasoning, active: false },
@@ -264,12 +274,39 @@ function terminateAbnormally(state: RunState, terminal: Exclude<Terminal, 'runni
   const committed = commitPendingAsReasoning(completeDraft(state));
   return {
     ...committed,
+    blocks: finishOpenTools(committed.blocks),
+    finalText: undefined,
     pendingAssistant: undefined,
     reasoning: { ...committed.reasoning, active: false },
     footer: null,
     terminal,
     activityStack: [],
   };
+}
+
+function finishOpenTools(blocks: Block[]): Block[] {
+  return blocks.map((block): Block =>
+    block.kind === 'tool' && block.tool.status === 'running'
+      ? { kind: 'tool', tool: { ...block.tool, status: 'unfinished' } }
+      : block,
+  );
+}
+
+function ignoreEvent(state: RunState, event: unknown, reason: string): RunState {
+  log.warn('card', 'event-ignored', { reason, type: eventType(event) });
+  return state;
+}
+
+function eventType(event: unknown): string {
+  if (
+    event !== null &&
+    typeof event === 'object' &&
+    'type' in event &&
+    typeof event.type === 'string'
+  ) {
+    return event.type;
+  }
+  return 'unknown';
 }
 
 function retryLabel(attempt?: number, maxAttempts?: number, delayMs?: number): string {

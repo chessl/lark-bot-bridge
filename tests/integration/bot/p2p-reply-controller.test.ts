@@ -169,6 +169,116 @@ describe('P2P OMP Reply', () => {
     );
   });
 
+  it.each([
+    {
+      name: 'normal completion',
+      events: [
+        { type: 'final_text', content: 'EARLIER_ASSISTANT' },
+        { type: 'final_text', content: 'CONFIRMED_FINAL' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      expectedAnswer: 'CONFIRMED_FINAL',
+      expectedReasoning: 'EARLIER\\\\_ASSISTANT',
+    },
+    {
+      name: 'local-only completion',
+      events: [
+        { type: 'text', delta: 'LOCAL_COMMAND_RESULT' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      expectedAnswer: 'LOCAL_COMMAND_RESULT',
+    },
+    {
+      name: 'no-content completion',
+      events: [],
+      expectedAnswer: '未返回内容',
+    },
+    {
+      name: 'interruption',
+      events: [
+        { type: 'final_text', content: 'PARTIAL_INTERRUPTED' },
+        { type: 'tool_use', id: 'tool-interrupted', name: 'Bash', input: {} },
+        { type: 'done', terminationReason: 'interrupted' },
+      ],
+      expectedAnswer: '运行已中断。',
+      expectedReasoning: 'PARTIAL\\\\_INTERRUPTED',
+      unfinishedTool: true,
+    },
+    {
+      name: 'idle timeout',
+      events: [
+        { type: 'final_text', content: 'PARTIAL_TIMEOUT' },
+        { type: 'tool_use', id: 'tool-timeout', name: 'Bash', input: {} },
+        { type: 'done', terminationReason: 'timeout' },
+      ],
+      expectedAnswer: '运行已超时。',
+      expectedReasoning: 'PARTIAL\\\\_TIMEOUT',
+      unfinishedTool: true,
+    },
+    {
+      name: 'failure',
+      events: [
+        { type: 'final_text', content: 'PARTIAL_FAILURE' },
+        { type: 'tool_use', id: 'tool-failed', name: 'Bash', input: {} },
+        {
+          type: 'error',
+          message: 'SECRET_RAW_FAILURE',
+          terminationReason: 'failed',
+        },
+      ],
+      expectedAnswer: '运行失败。',
+      expectedReasoning: 'PARTIAL\\\\_FAILURE',
+      unfinishedTool: true,
+    },
+  ] satisfies readonly {
+    name: string;
+    events: FakeAgentEvents;
+    expectedAnswer: string;
+    expectedReasoning?: string;
+    unfinishedTool?: boolean;
+  }[])(
+    'terminalizes $name in the original Reply before closing',
+    async ({ events, expectedAnswer, expectedReasoning, unfinishedTool }) => {
+      const h = await createHarness({ events });
+      await startTestBridge(h);
+
+      await h.channel.handlers.message?.(message(`om_terminal_${expectedAnswer}`, 'run'));
+      await waitFor(() =>
+        h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+      );
+
+      expect(h.channel.createdCards).toHaveLength(1);
+      expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+      expect(replyCardId(h.channel.rawClient.im.v1.message.reply.mock.calls[0]?.[0])).toBe(
+        'card_1',
+      );
+      expect(h.channel.sent).toHaveLength(0);
+      expect(h.channel.streams).toHaveLength(0);
+
+      const finalUpdate = h.channel.updates.at(-1);
+      expect(finalUpdate?.cardId).toBe('card_1');
+      expect(h.channel.updates.every((update) => update.cardId === 'card_1')).toBe(true);
+      const elements = cardElements(finalUpdate?.card);
+      expect(elements).toMatchObject([
+        { element_id: 'reasoning', expanded: false },
+        { element_id: 'answer', content: `**${expectedAnswer}**` },
+        { element_id: 'metrics' },
+        { element_id: 'tools', expanded: false },
+      ]);
+      const outbound = JSON.stringify(finalUpdate?.card);
+      if (expectedReasoning) expect(outbound).toContain(expectedReasoning);
+      if (unfinishedTool) expect(outbound).toContain('未完成');
+      expect(outbound).not.toContain('SECRET_RAW_FAILURE');
+
+      const closeCall = h.channel.rawClient.cardkit.v1.card.settings.mock.calls.at(-1)?.[0];
+      const closeSequence = (finalUpdate?.sequence ?? 0) + 1;
+      expect(operationSequence(closeCall)).toBe(closeSequence);
+      expect(h.channel.operations.indexOf(`card:update:${finalUpdate?.sequence}`)).toBeLessThan(
+        h.channel.operations.indexOf(`card:close:${closeSequence}`),
+      );
+    },
+  );
+
   it('projects ordered progress without disclosing hidden OMP fields', async () => {
     const progressGates = [2, 3, 4, 5, 6, 12].map(controllableEventGate);
     const hidden = [

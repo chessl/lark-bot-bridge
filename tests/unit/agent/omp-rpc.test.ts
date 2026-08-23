@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { OmpRpcFrameDecoder, OmpRpcTranslator } from '../../../src/agent/omp/rpc.js';
+import { log } from '../../../src/core/logger.js';
 
 function translate(translator: OmpRpcTranslator, frame: unknown) {
   return [...translator.translate(frame)];
@@ -144,6 +145,7 @@ describe('OmpRpcTranslator', () => {
 
   it('finishes a local-only prompt and surfaces prompt failures', () => {
     const local = new OmpRpcTranslator();
+    expect(translate(local, { type: 'command_output', output: 'local result' })).toEqual([]);
     expect(
       translate(local, {
         type: 'response',
@@ -151,7 +153,16 @@ describe('OmpRpcTranslator', () => {
         success: true,
         data: { agentInvoked: false },
       }),
-    ).toEqual([{ type: 'done', terminationReason: 'normal' }]);
+    ).toEqual([
+      { type: 'text', delta: 'local result' },
+      { type: 'done', terminationReason: 'normal' },
+    ]);
+
+    const invoked = new OmpRpcTranslator();
+    expect(translate(invoked, { type: 'command_output', output: 'internal output' })).toEqual([]);
+    expect(translate(invoked, { type: 'agent_end' })).toEqual([
+      { type: 'done', terminationReason: 'normal' },
+    ]);
 
     const failed = new OmpRpcTranslator();
     expect(
@@ -162,5 +173,33 @@ describe('OmpRpcTranslator', () => {
         error: 'no authenticated model',
       }),
     ).toEqual([{ type: 'error', message: 'no authenticated model', terminationReason: 'failed' }]);
+  });
+
+  it('logs malformed, unknown, and post-terminal frames without emitting events', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+    const info = vi.spyOn(log, 'info').mockImplementation(() => undefined);
+    const translator = new OmpRpcTranslator();
+
+    expect(translate(translator, null)).toEqual([]);
+    expect(translate(translator, { type: 'tool_execution_end' })).toEqual([]);
+    expect(translate(translator, { type: 'future_frame', secret: 'not logged' })).toEqual([]);
+    expect(translate(translator, { type: 'agent_end' })).toEqual([
+      { type: 'done', terminationReason: 'normal' },
+    ]);
+    expect(translate(translator, { type: 'message_start' })).toEqual([]);
+
+    expect(warn).toHaveBeenCalledWith('agent', 'rpc-frame-ignored', { reason: 'malformed' });
+    expect(warn).toHaveBeenCalledWith('agent', 'rpc-frame-ignored', {
+      reason: 'malformed',
+      type: 'tool_execution_end',
+    });
+    expect(warn).toHaveBeenCalledWith('agent', 'rpc-frame-ignored', {
+      reason: 'unknown',
+      type: 'future_frame',
+    });
+    expect(info).toHaveBeenCalledWith('agent', 'rpc-frame-ignored', {
+      reason: 'post-terminal',
+      type: 'message_start',
+    });
   });
 });

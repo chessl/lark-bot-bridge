@@ -78,6 +78,13 @@ export function renderOmpReplyCard(state: RunState): object {
   });
 }
 
+export function renderOmpReplyMarkdown(state: RunState): string {
+  if (state.terminal === 'running') {
+    throw new Error('cannot render a running OMP Reply as terminal Markdown');
+  }
+  return `**Final Reply**\n\n${finalReply(state)}\n\n_Run Termination: ${statusLabel(state)}_`;
+}
+
 function disclosure(elementId: string, title: string, expanded: boolean, elements: object[]): object {
   return {
     tag: 'collapsible_panel',
@@ -103,8 +110,22 @@ function placeholder(content: string): object {
 }
 
 function toolRow(tool: ToolEntry): string {
-  const icon = tool.status === 'error' ? '⚠️' : tool.status === 'done' ? '✓' : '⏳';
-  const status = tool.status === 'error' ? '失败' : tool.status === 'done' ? '完成' : '运行中';
+  const icon =
+    tool.status === 'error'
+      ? '⚠️'
+      : tool.status === 'done'
+        ? '✓'
+        : tool.status === 'unfinished'
+          ? '◼'
+          : '⏳';
+  const status =
+    tool.status === 'error'
+      ? '失败'
+      : tool.status === 'done'
+        ? '完成'
+        : tool.status === 'unfinished'
+          ? '未完成'
+          : '运行中';
   return `- ${icon} **${escapeMarkdown(tool.name)}** · ${tool.action ?? '执行'} · ${status}`;
 }
 
