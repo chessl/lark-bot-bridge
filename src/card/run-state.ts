@@ -13,16 +13,10 @@ export type ToolAction = '读取' | '搜索' | '执行' | '修改' | '协作';
 export interface ToolEntry {
   id: string;
   name: string;
-  action?: ToolAction;
+  action: ToolAction;
   status: ToolStatus;
-  /** Legacy callers may construct these fields; the OMP reducer never retains them. */
-  input?: unknown;
-  output?: string;
 }
 
-export type Block =
-  | { kind: 'text'; content: string; streaming: boolean }
-  | { kind: 'tool'; tool: ToolEntry };
 
 export type FooterStatus = 'thinking' | 'tool_running' | 'streaming' | null;
 export type Terminal = 'running' | 'done' | 'interrupted' | 'error' | 'idle_timeout';
@@ -55,14 +49,11 @@ export type RunMetricReceipt = Readonly<
 
 
 export interface RunState {
-  blocks: Block[];
+  tools: ToolEntry[];
   finalText?: string;
-  reasoning: { content: string; active: boolean };
   footer: FooterStatus;
   terminal: Terminal;
   metrics: RunMetrics;
-  errorMsg?: string;
-  idleTimeoutMinutes?: number;
   pendingAssistant?: string;
   assistantDraft?: string;
   reasoningEntries?: readonly string[];
@@ -72,8 +63,7 @@ export interface RunState {
 
 export function createRunState(receipt?: RunMetricReceipt): RunState {
   return {
-    blocks: [],
-    reasoning: { content: '', active: false },
+    tools: [],
     footer: 'thinking',
     terminal: 'running',
     metrics: { ...receipt, toolIds: [] },
@@ -226,16 +216,8 @@ export function markInterrupted(state: RunState, atMono = performance.now()): Ru
     : state;
 }
 
-export function markIdleTimeout(
-  state: RunState,
-  minutes: number,
-  atMono = performance.now(),
-): RunState {
-  if (state.terminal !== 'running') return state;
-  return {
-    ...terminateAbnormally(state, 'idle_timeout', atMono),
-    idleTimeoutMinutes: minutes,
-  };
+export function markIdleTimeout(state: RunState, atMono = performance.now()): RunState {
+  return state.terminal === 'running' ? terminateAbnormally(state, 'idle_timeout', atMono) : state;
 }
 
 export function finalizeIfRunning(state: RunState, atMono = performance.now()): RunState {
@@ -294,45 +276,37 @@ function addReasoning(state: RunState, content: string): RunState {
   const entries = [...(state.reasoningEntries ?? []), entry].slice(-MAX_REASONING);
   return {
     ...state,
-    blocks: [...state.blocks, { kind: 'text', content: entry, streaming: false }],
     reasoningEntries: entries,
     reasoningTotal: (state.reasoningTotal ?? 0) + 1,
-    reasoning: { content: entries.join('\n\n'), active: true },
     footer: 'thinking',
   };
 }
 
 function upsertTool(state: RunState, id: string, rawName: string): RunState {
   const known = state.metrics.toolIds;
-  const existing = state.blocks.find(
-    (block): block is Extract<Block, { kind: 'tool' }> =>
-      block.kind === 'tool' && block.tool.id === id,
-  );
+  const existing = state.tools.find((tool) => tool.id === id);
   const visible = existing !== undefined;
   const alreadyKnown = visible || known.includes(id);
   const { name, action } = safeToolLabel(rawName);
-  let blocks: Block[];
+  let tools: ToolEntry[];
   if (visible) {
-    blocks = state.blocks.map((block): Block =>
-      block.kind === 'tool' && block.tool.id === id
-        ? { kind: 'tool', tool: { id, name, action, status: 'running' } }
-        : block,
+    tools = state.tools.map((tool) =>
+      tool.id === id ? { id, name, action, status: 'running' } : tool,
     );
   } else if (alreadyKnown) {
-    blocks = state.blocks;
+    tools = state.tools;
   } else {
-    blocks = [...state.blocks, { kind: 'tool', tool: { id, name, action, status: 'running' } }];
+    tools = [...state.tools, { id, name, action, status: 'running' }];
   }
-  blocks = trimToolBlocks(blocks);
+  tools = tools.slice(-MAX_TOOLS);
   return {
     ...state,
-    blocks,
+    tools,
     metrics: {
       ...state.metrics,
       toolIds: alreadyKnown ? known : [...known, id],
     },
     footer: 'tool_running',
-    reasoning: { ...state.reasoning, active: false },
   };
 }
 
@@ -341,22 +315,14 @@ function finishTool(state: RunState, id: string, isError: boolean): RunState {
     return ignoreEvent(state, { type: 'tool_result', id }, 'tool-end-without-start');
   }
   let changed = false;
-  const blocks = state.blocks.map((block): Block => {
-    if (block.kind !== 'tool' || block.tool.id !== id) return block;
+  const tools = state.tools.map((tool): ToolEntry => {
+    if (tool.id !== id) return tool;
     changed = true;
-    return {
-      kind: 'tool',
-      tool: { ...block.tool, input: undefined, output: undefined, status: isError ? 'error' : 'done' },
-    };
+    return { ...tool, status: isError ? 'error' : 'done' };
   });
-  return changed ? { ...state, blocks } : state;
+  return changed ? { ...state, tools } : state;
 }
 
-function trimToolBlocks(blocks: Block[]): Block[] {
-  let excess = blocks.reduce((count, block) => count + (block.kind === 'tool' ? 1 : 0), 0) - MAX_TOOLS;
-  if (excess <= 0) return blocks;
-  return blocks.filter((block) => block.kind !== 'tool' || excess-- <= 0);
-}
 
 function pushActivity(state: RunState, activity: LifecycleActivity): RunState {
   return { ...state, activityStack: [...(state.activityStack ?? []), activity] };
@@ -377,10 +343,9 @@ function terminateNormally(state: RunState, atMono: number): RunState {
   const finalText = completed.pendingAssistant ?? completed.finalText;
   return {
     ...completed,
-    blocks: finishOpenTools(completed.blocks),
+    tools: finishOpenTools(completed.tools),
     ...(finalText ? { finalText } : {}),
     pendingAssistant: undefined,
-    reasoning: { ...completed.reasoning, active: false },
     footer: null,
     terminal: 'done',
     metrics: { ...completed.metrics, terminalAtMono: atMono },
@@ -396,10 +361,9 @@ function terminateAbnormally(
   const committed = commitPendingAsReasoning(completeDraft(state));
   return {
     ...committed,
-    blocks: finishOpenTools(committed.blocks),
+    tools: finishOpenTools(committed.tools),
     finalText: undefined,
     pendingAssistant: undefined,
-    reasoning: { ...committed.reasoning, active: false },
     footer: null,
     terminal,
     metrics: { ...committed.metrics, terminalAtMono: atMono },
@@ -407,11 +371,9 @@ function terminateAbnormally(
   };
 }
 
-function finishOpenTools(blocks: Block[]): Block[] {
-  return blocks.map((block): Block =>
-    block.kind === 'tool' && block.tool.status === 'running'
-      ? { kind: 'tool', tool: { ...block.tool, status: 'unfinished' } }
-      : block,
+function finishOpenTools(tools: ToolEntry[]): ToolEntry[] {
+  return tools.map((tool) =>
+    tool.status === 'running' ? { ...tool, status: 'unfinished' } : tool,
   );
 }
 

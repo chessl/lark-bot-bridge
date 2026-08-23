@@ -49,14 +49,6 @@ export interface SecretsConfig {
   defaults?: { env?: string; file?: string; exec?: string };
 }
 
-/**
- * How replies are rendered in IM chats:
- *   - `card`: full interactive card (tool panels, ⏹ button, footer status)
- *   - `markdown`: lightweight streaming markdown card (typewriter, no buttons)
- *   - `text`: plain markdown post sent once at run completion (no streaming)
- */
-export type MessageReplyMode = 'card' | 'markdown' | 'text';
-export type CotMessagesMode = 'off' | 'brief' | 'detailed';
 
 /**
  * Access control settings. Empty lists are fail-closed in the v2 policy:
@@ -76,20 +68,11 @@ export interface AppAccess {
 }
 
 export interface AppPreferences {
-  /** Reply rendering mode for IM (group/p2p) messages. Default 'card'. */
-  messageReply?: MessageReplyMode;
-  /**
-   * Whether to render tool-call blocks in the output. Default true. Turn off
-   * to show only OMP's final text answer.
-   */
-  showToolCalls?: boolean;
   /**
    * OMP model forwarded as `--model`. `undefined` or the `'default'` sentinel
    * omits the flag so the OMP profile default applies.
    */
   model?: string;
-  /** Whether to send a separate Lark COT process message before the final answer. */
-  cotMessages?: CotMessagesMode;
   /**
    * Cap on concurrent OMP runs across all chats and topics. Excess runs queue
    * FIFO. Default 10.
@@ -158,22 +141,6 @@ export function secretKeyForApp(appId: string): string {
   return `app-${appId}`;
 }
 
-/** Resolve the message-reply preference with a markdown default. */
-export function getMessageReplyMode(cfg: AppConfig): MessageReplyMode {
-  const raw = cfg.preferences?.messageReply;
-  if (raw === 'card' || raw === 'markdown' || raw === 'text') return raw;
-  return 'markdown';
-}
-
-/** Resolve the show-tool-calls preference with default fallback. */
-export function getShowToolCalls(cfg: AppConfig): boolean {
-  return cfg.preferences?.showToolCalls !== false;
-}
-
-export function getCotMessages(cfg: AppConfig): CotMessagesMode {
-  const raw = cfg.preferences?.cotMessages;
-  return raw === 'brief' || raw === 'detailed' ? raw : 'off';
-}
 
 /** Resolve the max-concurrent-runs preference with default + sanity clamp. */
 export function getMaxConcurrentRuns(cfg: AppConfig): number {

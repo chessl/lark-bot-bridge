@@ -27,7 +27,7 @@ describe('OMP profile store', () => {
       ...createDefaultProfileConfig({
         accounts: { app },
         omp,
-        preferences: { messageReply: 'markdown', showToolCalls: false },
+        preferences: { model: 'custom-model', maxConcurrentRuns: 4 },
         access: { allowedUsers: ['ou_user'], requireMentionInGroup: false },
       }),
       workspaces: { default: '/repo' },

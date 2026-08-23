@@ -32,10 +32,6 @@ const STDOUT_INFO_ALLOWLIST: Record<string, true> = {
   'run.started': true,
   'run.completed': true,
   'run.failed': true,
-  'cot.created': true,
-  'cot.completed': true,
-  'outbound.sent': true,
-  'outbound.markdown-stream-fallback': true,
   'card.final': true,
 };
 
@@ -320,20 +316,6 @@ function formatStdout(
     const scope = shortId(fields.scope);
     const duration = formatDurationMs(fields.durationMs);
     return `  ${mark} run ${result} scope=${scope} run=${shortId(fields.runId)}${duration ? ` duration=${duration}` : ''}`;
-  }
-  if (phase === 'cot' && event === 'created') {
-    return `  ◇ cot created message=${shortId(fields.messageId)} cot=${shortId(fields.cotId)}`;
-  }
-  if (phase === 'cot' && event === 'completed') {
-    return `  ◇ cot completed cot=${shortId(fields.cotId)} reason=${fields.reason ?? '-'}`;
-  }
-  if (phase === 'outbound' && event === 'markdown-stream-fallback') {
-    return `  ⚠ markdown stream fallback: ${fields.err ?? ''}`;
-  }
-  if (phase === 'outbound' && event === 'sent') {
-    const scope = shortId(fields.scope);
-    const reply = fields.replyInThread === true ? 'thread' : 'reply';
-    return `  ↗ sent ${fields.type ?? 'message'} scope=${scope} ${reply}=${shortId(fields.replyTo)} msg=${shortId(fields.messageId)}`;
   }
   if (phase === 'card' && event === 'final') {
     const c = ctx.chatId ? ctx.chatId.slice(-6) : '-';

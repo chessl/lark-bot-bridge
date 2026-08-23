@@ -6,9 +6,9 @@
 
 推荐架构已于 2026-08-20 一次性落地：
 
-1. Bridge 的 bot 调用统一复用 `channel.rawClient`；`CotClient` 和会议 preflight 不再自行取 tenant token 或启动 `lark-cli`。
+1. Bridge 的 bot 调用统一复用 `channel.rawClient`；会议 preflight 也不再自行取 tenant token 或启动 `lark-cli`。
 2. Bridge 在同一 Node 进程内提供只绑定 `127.0.0.1` 的 Streamable HTTP MCP endpoint。每个 run 单独签发 bearer token，并绑定 profile、会话和 policy fingerprint。
-3. Claude Code、Codex、OMP 都在启动时获得临时 MCP 配置；token 只在环境变量中传递，不进入 argv、system prompt、session 记录或持久配置。
+3. OMP 启动时获得临时 MCP 配置；token 只通过环境变量传递，不进入 argv、system prompt、session 记录或持久配置。
 4. 常用 bot reads、Docx blocks、CardKit 发送、工作区图片上传、用户 OAuth 和拉 bot 入群已迁入原生工具。破坏性或跨会话写操作由 bridge 在原飞书会话内发确认卡，签名确认绑定 run/scope/actor 且一次性消费。
 5. 用户 access/refresh token 存在 OS keychain；磁盘只保存 profile-local 元数据。刷新在 profile/app/user 跨进程锁内完成完整的 read-refresh-write。
 6. 原 `src/lark-cli/user-im.ts`、身份策略、启动 preflight、profile projection 和 CLI-specific agent 配置均已删除；runtime 不再依赖 `lark-cli`。
@@ -55,7 +55,7 @@ bridge Node process
 - 已安装的 `@larksuite/channel@0.5.0` 明确把 `rawClient` 作为底层 `Client` 的 escape hatch；本地包文档 `node_modules/@larksuite/channel/README.zh.md:51-60` 和类型 `dist/index.d.mts:1169-1171` 均如此声明。
 - `pnpm why @larksuiteoapi/node-sdk` 显示项目已通过 `@larksuite/channel` 安装 `@larksuiteoapi/node-sdk@1.73.0`。
 
-但 `src/bot/cot.ts:20-83` 又自行实现 tenant token 缓存和 `fetch`。这和 `rawClient` 重复，适合先原生化。
+即时消息 Run 的 CardKit 交付和会议 preflight 都复用进程内 `rawClient`，仓库不再保留第二套 bot token/fetch client。
 
 ## 可复用的一手能力
 
@@ -192,9 +192,9 @@ MCP 是真实 seam：迁移期间确实有 native 与 CLI 两个 adapter；迁�
 
 ### 阶段 A：零身份风险
 
-1. 把 `CotClient` 等 bot-only 自建 token/fetch 调用迁到 `channel.rawClient`。
-2. 不改 user OAuth、不改技能、不改身份策略。
-3. 用现有行为测试与一次真实 bot 请求验证响应/错误保持一致。
+1. bot-only 调用已统一迁到 `channel.rawClient`。
+2. user OAuth、技能和身份策略保持独立边界。
+3. 行为测试覆盖 native 请求、响应和错误分类。
 
 ### 阶段 B：Agent 原生 read-only pilot
 

@@ -1,4 +1,4 @@
-import { deepMaskEmails } from './mask-email';
+import { deepMaskEmails, maskEmails } from './mask-email';
 import type { RunState, ToolEntry } from './run-state';
 
 const MAX_CARD_BYTES = 30 * 1024;
@@ -12,7 +12,7 @@ type RenderOptions = Readonly<{
 
 export function renderOmpReplyCard(state: RunState, options?: RenderOptions): object {
   let reasoning = state.reasoningEntries ?? [];
-  let tools = state.blocks.flatMap((block) => (block.kind === 'tool' ? [block.tool] : []));
+  let tools = state.tools;
   const finalText = finalReply(state);
   let card = buildOmpReplyCard(state, reasoning, tools, finalText, options);
 
@@ -197,7 +197,9 @@ export function renderOmpReplyMarkdown(state: RunState): string {
     throw new Error('cannot render a running OMP Reply as terminal Markdown');
   }
   const metrics = metricParts(state).join(' · ');
-  return `**Final Reply**\n\n${finalReply(state)}\n\n_Run Termination: ${statusLabel(state)}_${metrics ? `\n\n_${metrics}_` : ''}`;
+  return maskEmails(
+    `**Final Reply**\n\n${finalReply(state)}\n\n_Run Termination: ${statusLabel(state)}_${metrics ? `\n\n_${metrics}_` : ''}`,
+  );
 }
 
 function metricsElements(state: RunState): object[] {
@@ -321,7 +323,7 @@ function toolRow(tool: ToolEntry): string {
         : tool.status === 'unfinished'
           ? '未完成'
           : '运行中';
-  return `- ${icon} **${escapeMarkdown(tool.name)}** · ${tool.action ?? '执行'} · ${status}`;
+  return `- ${icon} **${escapeMarkdown(tool.name)}** · ${tool.action} · ${status}`;
 }
 
 function finalReply(state: RunState): string {

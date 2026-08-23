@@ -39,7 +39,7 @@ A/B 必须同时满足：公开源码；源码确认 ingress；源码或同仓�
 
 ### CardKit、身份与 tools
 
-官方 [CardKit 流式指南](https://open.feishu.cn/document/cardkit-v1/streaming-updates-openapi-overview?lang=zh-CN)与[文本流式接口](https://open.feishu.cn/document/cardkit-v1/card-element/content?lang=zh-CN)提供打字机渲染；同卡 `sequence` 必须严格递增。Bridge 仍要实现 delta 合并/限频、顺序、终态、长文分块、卡片失败降级和 tool/approval/cancel 的 UX。
+官方 [CardKit 流式指南](https://open.feishu.cn/document/cardkit-v1/streaming-updates-openapi-overview?lang=zh-CN)与[文本流式接口](https://open.feishu.cn/document/cardkit-v1/card-element/content?lang=zh-CN)提供原位更新；同卡 `sequence` 必须严格递增。Bridge 负责有序归约、限频、终态、30 KB / 200 元素预算、精确重试和不产生第二气泡的降级。
 
 Bot tenant token 与 user OAuth token 权限语义不同。官方 [lark-openapi-mcp](https://github.com/larksuite/lark-openapi-mcp)把 IM、Docs、Calendar、Bitable 等 OpenAPI 暴露为 MCP tools；[官方说明](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/mcp_integration/mcp_introduction)区分托管远程 MCP 与本地自部署 MCP。0.5.1 可核实发布提交为 [2025-08-06](https://github.com/larksuite/lark-openapi-mcp/commit/ae40986e9cd55b3ff00633d99d925cb3e80bd2f5)，README 仍标 Beta。官方 [larksuite/cli](https://github.com/larksuite/cli)是 Agent 可用的 CLI/Skills；其 [lark-event skill](https://github.com/larksuite/cli/blob/main/skills/lark-event/SKILL.md)输出 NDJSON 事件流，但两者都不是完整 Agent bridge。
 
@@ -180,11 +180,11 @@ Bot tenant token 与 user OAuth token 权限语义不同。官方 [lark-openapi-
 {"v":1,"run_id":"run_...","session_id":"tenant:chat:thread","seq":42,"time":"2026-08-20T10:00:00Z","kind":"tool.call","payload":{"call_id":"tc_...","name":"shell","input":{}}}
 ```
 
-`kind`至少有 `run.started`、`assistant.delta`、`reasoning.delta`、`tool.call/result`、`approval.requested/resolved`、`auth.required/resolved`、`artifact`、`usage`、`run.completed/failed/cancelled`。同 run `seq`单调、terminal唯一、tool result引用 call ID；UI可合并 delta但不能丢 terminal/approval/artifact。这样 ACP、SDK和 CLI JSONL可共用同一 Lark renderer、Web UI和审计。
+OMP RPC 事件由同步 reducer 按到达顺序归约。terminal 是吸收态；tool lifecycle 按 ID 合并；隐藏 thinking 和原始工具输入输出不会进入用户投影。这样事件顺序、可见状态和交付状态保持分离。
 
 ### 4. streaming/card projection
 
-AgentEvent/store是事实源，CardKit只是可重建投影。每 session一个 renderer queue，按 seq更新并节流；保存 card/message ID、CardKit sequence和最后成功状态。先快速发“已接收”，tool/approval用组件，终态关闭 streaming。卡片失败降级富文本/纯文本，但不能绕过审批。
+RunState 是事实源，CardKit 是有预算的投影。每张卡只有一个 controller writer，按严格递增 sequence 串行更新并限流；journal 保存 card/message ID、下一 sequence 和最多一个精确 pending operation。终态先提交完整静态内容，再关闭 streaming。只有明确未提交时才允许 fallback；已知或结果不确定的气泡绝不补发。
 
 ### 5. 三层权限与 tool/MCP seam
 
@@ -242,9 +242,9 @@ Lark WS / Card / Comment
   → scope(chat | chat:thread | document) + 600ms debounce
   → RunPolicy：realpath、附件、access、sandbox、TTL、fingerprint
   → RunExecutor：scope reservation + FIFO process pool
-  → Claude stream-json | Codex JSONL | OMP RPC
+  → OMP RPC
   → AgentEvent
-  → CoT / CardKit / markdown / text renderer
+  → unified OMP Reply reducer / renderer / controller
   → session catalog + logs
 ```
 
@@ -252,10 +252,10 @@ Lark WS / Card / Comment
 
 - [`startChannel`](../src/bot/channel.ts#L172-L526)复用 `@larksuite/channel`，配置 WS liveness、握手/REST timeout、proxy，并在断开时暂停新 run、终止进程和 flush 状态；依赖版本见 [`package.json`](../package.json#L46-L52)。
 - [`PendingQueue`](../src/bot/pending-queue.ts#L23-L102)、[`ActiveRuns`](../src/bot/active-runs.ts#L8-L101)和 [`RunExecutor`](../src/runtime/run-executor.ts#L46-L244)共同实现同 scope 单 run、运行中消息合并、全局 FIFO 上限、取消及终态清理。
-- [`AgentAdapter` / `AgentEvent`](../src/agent/types.ts#L6-L86)是真实 seam：Claude、Codex、OMP 三个 adapter 共用 renderer；这比把 CLI stdout 直接拼到卡片更深、更可测。
+- [`OmpRunEngine` / `AgentEvent`](../src/agent/types.ts)是 OMP-only seam：RPC 事件由单一 reducer 归约，再交给统一 Reply controller。
 - [`startRunFlow`](../src/bot/run-flow.ts#L74-L199)在 spawn 前统一做 workspace、access、附件和 capability 决策；[`evaluateRunPolicy`](../src/policy/run-policy.ts#L90-L158)生成有 TTL 的 immutable policy 与 fingerprint，session 只在 agent/cwd/policy 兼容时 resume。
 - [`CallbackAuth`](../src/card/callback-auth.ts#L64-L142)把 run、scope、chat、operator、action、policy fingerprint、expiry 与 single-use nonce 一起签名；[`CallbackNonceStore`](../src/card/callback-store.ts#L7-L62)跨重启保存 replay 状态。这一项优于多数公开同类。
-- [`runAgentBatch`](../src/bot/channel.ts#L779-L1257)支持 topic reply、typing ack、CoT、lazy streaming、节流更新、空流撤回和 card/markdown/text fallback。
+- [`runAgentBatch`](../src/bot/channel.ts)先创建唯一 CardKit Reply，再按序投影 OMP 进度和终态；topic 定位、限流、精确重试、fallback 和重启恢复都封装在统一 controller 内。
 - [`logger`](../src/core/logger.ts#L19-L180)用 `AsyncLocalStorage` 传播 trace/chat/message context，写 JSONL、保留期和凭据脱敏；[`RunExecutor`](../src/runtime/run-executor.ts#L132-L187)记录 queue wait、duration、termination 与 policy dimensions。
 
 ### 逐项评分
@@ -266,14 +266,14 @@ Lark WS / Card / Comment
 | event 去重/快速摄取 | 部分符合 | SDK 有内存 dedup/stale gate；本项目 handler 很快入自己的 queue，但没有 durable inbox 与跨重启 event ID 唯一键。个人 WS 模式足够，HA 不够。 |
 | session scope | 符合 | p2p/group 用 chat，topic 用 `chat:thread`，comment 用 document scope；不会跨话题串上下文。 |
 | 每 scope 串行/跨 scope 并行 | 符合 | reservation 消除 submit 竞态，pending block/unblock 串行，FIFO pool 限总并发。 |
-| Agent seam | 符合 | 统一 typed `AgentEvent`、stop/wait contract 和三种真实 adapter；不必为了追 ACP 重写现有 seam。 |
-| streaming/card UX | 符合 | tool/reasoning/final 状态、CoT、fallback、topic 定位、取消按钮均已覆盖。 |
+| Agent seam | 符合 | 统一 typed `AgentEvent` 和 OMP `stop/wait` contract；没有多 adapter 选择。 |
+| streaming/card UX | 符合 | 一个 CardKit Reply 原位展示安全的 tool/reasoning/final 状态，并保留 topic 定位、预算和恢复语义。 |
 | 触发权限与 callback | 符合 | 默认私有、owner/admin/chat/mention gate；callback HMAC、operator/context/fingerprint、TTL、nonce replay protection 完整。 |
-| Lark 结构化 tools | **缺失** | [`BRIDGE_SYSTEM_PROMPT`](../src/agent/bridge-system-prompt.ts#L62-L128)要求模型拼 `lark-cli` 命令；参数、身份和副作用不在 bridge 的 tool interface 内。 |
-| 危险工具人在环 | **缺失** | `AgentEvent` 无 approval；Claude/Codex/OMP 无统一 approve/deny 回路。[MCP tools 规范](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#user-interaction-model)明确建议提供可拒绝的 UI 与操作确认。 |
-| 最小权限与 sandbox | 部分符合 | 能 clamp `read-only/workspace/full`，但 [`defaultPermissions`](../src/config/permissions.ts#L111-L115)是 `full`；OMP 还使用 [`--approval-mode yolo`](../src/agent/omp/adapter.ts#L136-L153)。 |
-| 身份/OAuth | 部分符合 | profile 隔离 lark-cli 配置，默认 bot-only；但群聊不得发起 user OAuth 等关键限制仍是 prompt 约定，不是服务端强制状态机。Codex 更把 bridge prompt 与 user prompt 一起写入 stdin（[`adapter.ts`](../src/agent/codex/adapter.ts#L91-L152)），不能把它当安全边界。 |
-| 恢复与可观测 | 部分符合 | session/catalog/config/nonce/log 可恢复，run 日志充分；pending input、in-flight run、card sequence、pending approval/tool side effect 不可恢复，也没有 metrics/OTel exporter。 |
+| Lark 结构化 tools | 符合 | run-scoped `lark_bridge` MCP 提供常用 bot reads、消息、Docx、CardKit、图片、用户 OAuth 和拉群能力；长尾 OpenAPI 不做全量复制。 |
+| 危险工具人在环 | 部分符合 | 原生 Lark 写工具通过原会话中的签名确认卡审批；通用 OMP 工具审批仍由 OMP 自身负责。 |
+| 最小权限与 sandbox | 部分符合 | workspace policy 会验证工作目录和附件，但 OMP 使用 `yolo` approval mode；工作目录不是文件系统 sandbox。 |
+| 身份/OAuth | 符合 | 个人版私聊可按需获得 user OAuth；团队版、群聊、话题、文档评论和会议 run 只使用 bot 身份。 |
+| 恢复与可观测 | 部分符合 | session/catalog/config/nonce/log 和 active Reply delivery 可恢复；旧 OMP RPC run 不能重连，因此重启后在原气泡标为 interrupted。 |
 
 ### 与主要参照的差异
 

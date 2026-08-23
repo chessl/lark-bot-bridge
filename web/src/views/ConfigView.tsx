@@ -78,9 +78,6 @@ export function ConfigView({ profile }: { profile: string }) {
         mode: cfg.mode,
         meeting: cfg.meeting,
         model: cfg.model,
-        messageReply: cfg.messageReply,
-        showToolCalls: cfg.showToolCalls,
-        cotMessages: cfg.cotMessages,
         maxConcurrentRuns: cfg.maxConcurrentRuns,
         runIdleTimeoutMinutes: cfg.runIdleTimeoutMinutes,
         requireMentionInGroup: cfg.requireMentionInGroup,
@@ -148,7 +145,7 @@ export function ConfigView({ profile }: { profile: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>回复与运行</CardTitle>
+          <CardTitle>OMP 与运行</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <Field label="模型">
@@ -156,33 +153,6 @@ export function ConfigView({ profile }: { profile: string }) {
               value={cfg.model}
               onChange={(v) => set("model", v)}
               options={cfg.models.map((m) => [m.value, m.label])}
-            />
-          </Field>
-          <Field label="消息回复方式">
-            <SelectRow
-              value={cfg.messageReply}
-              onChange={(v) => set("messageReply", v as ConfigData["messageReply"])}
-              options={[
-                ["markdown", "消息卡片（默认）"],
-                ["text", "纯文本"],
-              ]}
-            />
-          </Field>
-          <ToggleRow
-            label="工具调用显示"
-            hint="显示 bot 执行的命令与文件读写过程"
-            checked={cfg.showToolCalls}
-            onChange={(v) => set("showToolCalls", v)}
-          />
-          <Field label="COT 过程消息">
-            <SelectRow
-              value={cfg.cotMessages}
-              onChange={(v) => set("cotMessages", v as ConfigData["cotMessages"])}
-              options={[
-                ["off", "关闭"],
-                ["brief", "简略"],
-                ["detailed", "详细"],
-              ]}
             />
           </Field>
           <div className="grid grid-cols-2 gap-4">

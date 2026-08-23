@@ -116,7 +116,7 @@ describe('OMP Reply CardKit budget', () => {
       ...terminalState('F'.repeat(28_000)),
       reasoningEntries,
       reasoningTotal: 12,
-      blocks: tools.map((entry) => ({ kind: 'tool', tool: entry })),
+      tools,
       metrics: {
         receivedAtWall: 1_000,
         receivedAtMono: 100,

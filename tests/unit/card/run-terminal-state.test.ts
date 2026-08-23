@@ -79,10 +79,9 @@ describe('terminal OMP Run state', () => {
         finalText: undefined,
         reasoningEntries: ['partial assistant text'],
       });
-      expect(state.blocks).toContainEqual({
-        kind: 'tool',
-        tool: expect.objectContaining({ id: 'tool-1', status: 'unfinished' }),
-      });
+      expect(state.tools).toContainEqual(
+        expect.objectContaining({ id: 'tool-1', status: 'unfinished' }),
+      );
       expect(card).toMatchObject({
         config: { streaming_mode: false },
         body: {

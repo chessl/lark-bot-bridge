@@ -1,4 +1,4 @@
-import type { AppCredentials, AppPreferences, MessageReplyMode, SecretsConfig } from './schema';
+import type { AppCredentials, AppPreferences, SecretsConfig } from './schema';
 
 export interface ProfileAccess {
   allowedUsers: string[];
@@ -195,23 +195,14 @@ function normalizeAccounts(input: unknown): ProfileConfig['accounts'] {
 function normalizePreferences(
   preferences: AppPreferences | undefined,
 ): ProfileConfig['preferences'] {
-  const {
-    access: _access,
-    requireMentionInGroup: _mention,
-    messageReply,
-    ...rest
-  } = preferences ?? {};
-  if (messageReply !== undefined && isMessageReply(messageReply)) {
-    return {
-      ...rest,
-      messageReply,
-    };
-  }
-  return rest;
-}
-
-function isMessageReply(value: unknown): value is MessageReplyMode {
-  return value === 'card' || value === 'markdown' || value === 'text';
+  if (!preferences) return {};
+  const { model, maxConcurrentRuns, runIdleTimeoutMinutes, agentStopGraceMs } = preferences;
+  return {
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(typeof maxConcurrentRuns === 'number' ? { maxConcurrentRuns } : {}),
+    ...(typeof runIdleTimeoutMinutes === 'number' ? { runIdleTimeoutMinutes } : {}),
+    ...(typeof agentStopGraceMs === 'number' ? { agentStopGraceMs } : {}),
+  };
 }
 
 function normalizeAccess(access: Partial<ProfileAccess> | undefined): ProfileAccess {

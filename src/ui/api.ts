@@ -11,14 +11,9 @@ import type { MeetingConfig, ProfileAccess, ProfileMode } from '../config/profil
 import { loadRootConfig, runtimeProfileConfig } from '../config/profile-store';
 import {
   type AppPreferences,
-  type CotMessagesMode,
-  getCotMessages,
   getMaxConcurrentRuns,
-  getMessageReplyMode,
   getRequireMentionInGroup,
   getRunIdleTimeoutMs,
-  getShowToolCalls,
-  type MessageReplyMode,
 } from '../config/schema';
 import { log } from '../core/logger';
 import {
@@ -54,9 +49,6 @@ export interface ConfigView {
   mode: ProfileMode;
   model: string;
   models: { value: string; label: string }[];
-  messageReply: MessageReplyMode;
-  showToolCalls: boolean;
-  cotMessages: CotMessagesMode;
   maxConcurrentRuns: number;
   runIdleTimeoutMinutes: number;
   requireMentionInGroup: boolean;
@@ -80,9 +72,6 @@ export function buildConfigView(state: MutableProfileState, live = false): Confi
     mode: state.profileConfig.mode,
     model: normalizeModelSelection(state.cfg.preferences?.model),
     models: supportedModels(),
-    messageReply: getMessageReplyMode(state.cfg),
-    showToolCalls: getShowToolCalls(state.cfg),
-    cotMessages: getCotMessages(state.cfg),
     maxConcurrentRuns: getMaxConcurrentRuns(state.cfg),
     runIdleTimeoutMinutes: ms ? Math.round(ms / 60_000) : 0,
     requireMentionInGroup: getRequireMentionInGroup(state.cfg),
@@ -210,16 +199,6 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
     : normalizeModelSelection(state.cfg.preferences?.model);
   const model = modelSelection === DEFAULT_MODEL ? undefined : modelSelection;
 
-  const messageReply: MessageReplyMode =
-    fv.messageReply === 'markdown' || fv.messageReply === 'text' || fv.messageReply === 'card'
-      ? fv.messageReply
-      : getMessageReplyMode(state.cfg);
-  const showToolCalls =
-    typeof fv.showToolCalls === 'boolean' ? fv.showToolCalls : getShowToolCalls(state.cfg);
-  const cotMessages: CotMessagesMode =
-    fv.cotMessages === 'brief' || fv.cotMessages === 'detailed' || fv.cotMessages === 'off'
-      ? fv.cotMessages
-      : getCotMessages(state.cfg);
   const maxConcurrentRuns =
     fv.maxConcurrentRuns === undefined
       ? getMaxConcurrentRuns(state.cfg)
@@ -254,9 +233,6 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
     nextPreferences: {
       ...(state.cfg.preferences ?? {}),
       model,
-      messageReply,
-      showToolCalls,
-      cotMessages,
       maxConcurrentRuns,
       runIdleTimeoutMinutes,
     },

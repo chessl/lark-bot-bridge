@@ -613,11 +613,8 @@ function createFakeLarkChannel(
       sent.push({ chatId, content, options });
       return { messageId: `om_sent_${sent.length}` };
     },
-    async stream(chatId, input, options) {
+    async stream(chatId, _input, options) {
       streams.push({ chatId, options });
-      if (isMarkdownStreamInput(input)) {
-        await input.markdown({ setContent: async () => {} });
-      }
       return { messageId: `om_stream_${streams.length}` };
     },
     recallMessage: vi.fn(async () => {}),
@@ -673,13 +670,6 @@ function message(input: {
   } as unknown as NormalizedMessage;
 }
 
-interface MarkdownStreamInput {
-  markdown(ctrl: { setContent(markdown: string): Promise<void> }): Promise<void> | void;
-}
-
-function isMarkdownStreamInput(input: unknown): input is MarkdownStreamInput {
-  return Boolean(input && typeof input === 'object' && 'markdown' in input);
-}
 
 async function waitFor(predicate: () => boolean, timeoutMs = 1500): Promise<void> {
   const deadline = Date.now() + timeoutMs;

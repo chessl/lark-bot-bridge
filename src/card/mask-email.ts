@@ -1,19 +1,16 @@
 /**
  * Feishu's tenant message audit rejects any outbound message that contains a
  * raw email address with a 400 ("The messages do NOT pass the audit ...
- * contain sensitive data: EMAIL_ADDRESS"). For a streamed card/markdown reply
- * this is silent from the agent's side: the update just fails, so a run that
- * `cot completed reason=done` appears to never reply. The usual trigger is a
- * commit co-author trailer (`Co-Authored-By: … <name@example.com>`) that the
- * agent echoes in its answer or runs through `git commit` (shown in a tool
- * panel).
+ * contain sensitive data: EMAIL_ADDRESS"). A rejected CardKit update can leave
+ * the visible Reply behind the Run. The usual trigger is a commit co-author
+ * trailer (`Co-Authored-By: … <name@example.com>`) that the agent echoes in its
+ * answer.
  *
- * We neutralize emails at the render boundary (renderText / renderCard) by
- * rewriting the `@` to `[at]`. Deliberately NOT a lookalike codepoint (fullwidth
- * `＠`) or a zero-width space: Chinese text audits routinely normalize
- * fullwidth→ASCII and strip zero-width characters, either of which would re-form
- * the address and re-trigger the block. `[at]` cannot be normalized back into a
- * valid address and stays readable.
+ * We neutralize emails at the unified Reply render boundary by rewriting the
+ * `@` to `[at]`. We do not use a lookalike `＠` or zero-width space because
+ * Chinese text audits normalize fullwidth characters and strip zero-width
+ * characters, either of which would re-form the address and trigger the block.
+ * `[at]` remains readable and cannot normalize back into a valid address.
  */
 
 // `local@domain.tld`, requiring a dotted domain ending in a 2+ letter TLD. The

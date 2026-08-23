@@ -29,7 +29,7 @@ import {
   sendManagedCard,
   updateManagedCard,
 } from '../card/managed';
-import { renderCard } from '../card/run-renderer';
+import { renderOmpReplyCard } from '../card/omp-reply-renderer';
 import {
   finalizeIfRunning,
   initialState,
@@ -41,14 +41,11 @@ import { helpCard, resumeCard, statusCard, workspacesCard } from '../card/templa
 import { resolveAppPaths } from '../config/app-paths';
 import * as configOps from '../config/config-ops';
 import type { ProfileAccess, ProfileConfig, ProfileMode } from '../config/profile-schema';
-import type { AppConfig, AppPreferences, MessageReplyMode, TenantBrand } from '../config/schema';
+import type { AppConfig, AppPreferences, TenantBrand } from '../config/schema';
 import {
-  getCotMessages,
   getMaxConcurrentRuns,
-  getMessageReplyMode,
   getRequireMentionInGroup,
   getRunIdleTimeoutMs,
-  getShowToolCalls,
 } from '../config/schema';
 import { buildEncryptedAccountConfig } from '../config/store';
 import { log } from '../core/logger';
@@ -963,13 +960,13 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
           ctx.msg.chatId,
           {
             card: {
-              initial: renderCard(withDoctorReport(initialState, doctorReport('pending'))),
+              initial: renderOmpReplyCard(withDoctorReport(initialState, doctorReport('pending'))),
               producer: async (ctrl) => {
                 let state: RunState = initialState;
                 let echoText = '';
                 const echoStatus = (): string => formatDoctorEchoStatus(echoText, state);
                 const flush = (): Promise<void> =>
-                  ctrl.update(renderCard(withDoctorReport(state, doctorReport(echoStatus()))));
+                  ctrl.update(renderOmpReplyCard(withDoctorReport(state, doctorReport(echoStatus()))));
                 for await (const evt of run.events) {
                   if (run.wasInterrupted()) break;
                   if (evt.type === 'system' || evt.type === 'usage') continue;
@@ -1007,7 +1004,7 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
         // user's p2p chat with the bot (auto-creates it if needed); other
         // group members never see this payload.
         await ctx.channel.send(ctx.msg.senderId, {
-          card: renderCard(
+          card: renderOmpReplyCard(
             withDoctorReport(state, doctorReport(formatDoctorEchoStatus(echoText, state))),
           ),
         });
@@ -1063,10 +1060,7 @@ function buildDoctorReport(
 }
 
 function withDoctorReport(state: RunState, report: string): RunState {
-  return {
-    ...state,
-    blocks: [{ kind: 'text', content: report, streaming: false }, ...state.blocks],
-  };
+  return { ...state, finalText: report };
 }
 
 function formatDoctorEchoStatus(echoText: string, state: RunState): string {
@@ -1492,9 +1486,6 @@ async function showConfigForm(ctx: CommandContext): Promise<void> {
   const card = configFormCard({
     mode: ctx.controls.profileConfig.mode,
     model: normalizeModelSelection(ctx.controls.cfg.preferences?.model),
-    messageReply: getMessageReplyMode(ctx.controls.cfg),
-    showToolCalls: getShowToolCalls(ctx.controls.cfg),
-    cotMessages: getCotMessages(ctx.controls.cfg),
     maxConcurrentRuns: getMaxConcurrentRuns(ctx.controls.cfg),
     runIdleTimeoutMinutes: ms ? Math.round(ms / 60_000) : 0,
     requireMentionInGroup: getRequireMentionInGroup(ctx.controls.cfg),
@@ -1539,13 +1530,6 @@ async function cancelConfig(ctx: CommandContext): Promise<void> {
 
 async function submitConfig(ctx: CommandContext): Promise<void> {
   const fv = ctx.formValue ?? {};
-  const rawReply = String(fv.message_reply ?? '').trim();
-  const messageReply: MessageReplyMode =
-    rawReply === 'markdown' || rawReply === 'text' || rawReply === 'card'
-      ? (rawReply as MessageReplyMode)
-      : getMessageReplyMode(ctx.controls.cfg);
-  const rawTools = String(fv.show_tool_calls ?? '').trim();
-  const showToolCalls = rawTools !== 'hide';
   // Unexpected or empty values keep the current selection. Store `undefined`
   // for the "default" sentinel to keep config tidy.
   const rawModel = String(fv.model ?? '').trim();
@@ -1554,15 +1538,6 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
     ? rawModel
     : normalizeModelSelection(ctx.controls.cfg.preferences?.model);
   const model = modelSelection === DEFAULT_MODEL ? undefined : modelSelection;
-  const rawCotMessages = String(fv.cot_messages ?? '').trim();
-  const cotMessages =
-    rawCotMessages === 'brief'
-      ? 'brief'
-      : rawCotMessages === 'detailed' || rawCotMessages === 'on'
-        ? 'detailed'
-        : rawCotMessages === 'off'
-          ? 'off'
-          : getCotMessages(ctx.controls.cfg);
   // Parse max_concurrent_runs; invalid input falls back to current value.
   const rawMaxCC = String(fv.max_concurrent_runs ?? '').trim();
   const parsedMaxCC = Number(rawMaxCC);
@@ -1617,9 +1592,6 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
     const nextPreferences: AppPreferences = {
       ...(ctx.controls.cfg.preferences ?? {}),
       model,
-      messageReply,
-      showToolCalls,
-      cotMessages,
       maxConcurrentRuns,
       runIdleTimeoutMinutes,
       requireMentionInGroup,
@@ -1636,9 +1608,6 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
 
     log.info('command', 'config-saved', {
       mode,
-      messageReply,
-      showToolCalls,
-      cotMessages,
       maxConcurrentRuns,
       runIdleTimeoutMinutes,
       requireMentionInGroup,
@@ -1653,9 +1622,6 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
       configSavedCard({
         mode,
         model: modelSelection,
-        messageReply,
-        showToolCalls,
-        cotMessages,
         maxConcurrentRuns,
         runIdleTimeoutMinutes,
         requireMentionInGroup,

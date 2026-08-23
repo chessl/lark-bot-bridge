@@ -32,13 +32,13 @@ describe('OMP profile schema', () => {
     );
   });
 
-  it('keeps supported message reply preferences', () => {
+  it('keeps supported OMP preferences', () => {
     const cfg = normalizeProfileConfig({
       accounts: { app },
       omp,
-      preferences: { messageReply: 'markdown', model: 'custom-model' },
+      preferences: { model: 'custom-model', maxConcurrentRuns: 4 },
     });
-    expect(cfg.preferences).toMatchObject({ messageReply: 'markdown', model: 'custom-model' });
+    expect(cfg.preferences).toEqual({ model: 'custom-model', maxConcurrentRuns: 4 });
   });
 
   it('provides attachment and meeting defaults', () => {

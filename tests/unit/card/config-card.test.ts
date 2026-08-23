@@ -4,9 +4,6 @@ import { type ConfigFormOpts, configFormCard } from '../../../src/card/config-ca
 const base: ConfigFormOpts = {
   mode: 'personal',
   model: 'default',
-  messageReply: 'markdown',
-  showToolCalls: false,
-  cotMessages: 'off',
   maxConcurrentRuns: 1,
   runIdleTimeoutMinutes: 0,
   requireMentionInGroup: false,

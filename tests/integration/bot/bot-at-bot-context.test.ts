@@ -337,11 +337,7 @@ function createFakeLarkChannel(): FakeLarkChannel & { handlers: MessageHandlerMa
       return { state: 'connected', reconnectAttempts: 0 };
     },
     async send() {},
-    async stream(_chatId, input) {
-      if (isMarkdownStreamInput(input)) {
-        await input.markdown({ setContent: async () => {} });
-      }
-    },
+    async stream() {},
   };
 }
 
@@ -409,12 +405,4 @@ async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error('timed out waiting for async work');
-}
-
-interface MarkdownStreamInput {
-  markdown(ctrl: { setContent(markdown: string): Promise<void> }): Promise<void> | void;
-}
-
-function isMarkdownStreamInput(input: unknown): input is MarkdownStreamInput {
-  return Boolean(input && typeof input === 'object' && 'markdown' in input);
 }

@@ -1,6 +1,6 @@
 # lark-bot-bridge
 
-把飞书 / Lark 消息和本地 Oh My Pi（OMP）打通的轻量 bot。用一条命令启动，扫码绑定 PersonalAgent 应用，然后在飞书里让 OMP 读图、处理文件、改代码。
+把飞书 / Lark 消息接到本地 Oh My Pi（OMP）的轻量 bot。OMP 是唯一的 Run 引擎。用一条命令启动，扫码绑定 PersonalAgent 应用，然后在飞书里让 OMP 读图、处理文件、改代码。
 
 [English README](./README.md)
 
@@ -9,8 +9,7 @@
 ## 主要功能
 
 - 在飞书私聊直接发消息，或在群里 `@bot`，把任务转给本机 OMP。
-- **流式卡片**：文本回复和工具调用实时更新在同一张卡片上。
-- **COT 过程消息**：可选先发一条过程消息展示 agent 的阶段性文本和工具调用，再单独发送最终答案。
+- **即时消息单一 Reply**：每个已启动的 OMP Run 只更新同一个 CardKit Reply，安全展示进度、最终答案、终止状态和实测运行数据。
 - **会话延续**：每个聊天、话题或文档评论有自己的会话，不会互相串。
 - **排队与消息合并**：短时间连续发送的消息会合并处理；任务运行中收到的普通消息会排队到下一轮，`/new`、`/cd`、`/ws use`、`/stop` 这类命令可以中断当前任务。
 - **多工作空间**：用 `/cd` 切换当前项目，用 `/ws` 保存和复用常用项目目录。
@@ -20,7 +19,7 @@
 ## 前置条件
 
 - Node.js **>= 20.12.0**
-- 本机已安装并登录 Oh My Pi：`omp`
+- 本机已安装并登录 Oh My Pi：`omp`。不支持 Claude Code、Codex 或通用 adapter 配置。
 - 一个飞书 / Lark PersonalAgent 应用。首次启动的扫码向导可以帮你创建并绑定。
 
 ## 安装
@@ -140,13 +139,13 @@ lark-bot-bridge profile export <name> --include-secrets --yes
 | `/ws remove <name>` | 删除命名工作空间 |
 | `/resume` | 恢复同工作目录和策略下的当前 OMP 会话 |
 | `/status` | 查看 profile、OMP 引擎、工作目录、会话和运行状态 |
-| `/config` | 调整展示偏好和访问控制 |
+| `/config` | 调整 OMP 模型、运行限制、会议行为和访问控制 |
 | `/invite user @某人` | 允许用户私聊使用 bot |
 | `/invite admin @某人` | 添加访问控制管理员 |
 | `/invite group` | 允许当前群使用 bot |
 | `/invite all group` | 允许 bot 所在的所有群使用 |
 | `/remove user @某人`, `/remove admin @某人`, `/remove group` | 移除访问控制条目 |
-| `/stop` | 停止当前 run，也可点卡片停止按钮 |
+| `/stop` | 停止当前 Run |
 | `/timeout [N\|off\|default]` | 设置或清除当前会话的 idle watchdog |
 | `/ps` | 列出本机 bridge 进程 |
 | `/exit <id\|#>` | 停止指定 bridge 进程 |
@@ -156,15 +155,32 @@ lark-bot-bridge profile export <name> --include-secrets --yes
 
 私聊不需要 @。群和话题群默认必须 `@bot`；`@all` 会被忽略。支持的云文档评论里 @bot 就会触发回复。
 
-## 回复展示与 COT
+## 即时消息统一 Reply
 
-`/config` 可以调整三类展示选项：
+所有由即时消息启动的 OMP Run 只有一条生产 Reply 路径。bridge 在消费 OMP 事件前，先回复已接收 Message Batch 的最后一条消息，之后只更新同一个 CardKit 气泡。私聊和普通群保留原生消息引用；话题和明确要求线程回复的 Invocation 留在对应话题或线程内。
 
-- **消息回复方式**：`消息卡片` 流式更新最终回复；`纯文本` 在 run 完成后一次性发送。
-- **工具调用显示**：控制最终回复卡片 / markdown 中是否展示工具块。
-- **COT 过程消息**：`关闭` 只发送最终回复；`简略` 先用 COT 消息展示 agent 的过程文本和工具摘要；`详细` 还会展示工具参数和截断后的输出。
+Run 进行中时，Reply 展开安全的 Reasoning 和工具状态。发生 Run Termination 后，两部分都会收起，卡片保留 Final Reply、终止状态、model/effort/context 信息和可用 RunMetrics。隐藏思考、工具输入输出、命令、路径、查询、原始错误、provider 信息和 fallback 原因都不会展示。Reply 最多保留最近 12 条 Reasoning 和 20 行工具状态。
 
-开启 COT 后，bridge 会把过程消息和最终答案拆成两条消息。过程消息用于追踪 agent 做了什么；最终答案仍由 agent 原始文本生成，bridge 不做启发式过滤。若 agent 把最终答案也作为普通流式文本输出，COT 过程消息中可能会出现对应片段。
+每张卡片都受 CardKit 30 KB、200 元素限制。超过预算时，bridge 先删除最早的 Reasoning，再删除最早的工具行。如果 Final Reply 仍然过长，会在合法 UTF-8 边界截断并追加 `内容过长，已截断`。一个 Run 不会被拆成第二条 Reply。
+
+Commands 和 Run Rejections 继续使用普通直接回复。会议、文档评论和卡片操作 Invocation 保持原有交付方式，不进入即时消息统一 Reply 路径。
+
+### Delivery Failure 与重启恢复
+
+Run Termination 和 Reply 交付结果相互独立。如果已知气泡无法更新或关闭，bridge 会在结构化日志中记录 **Delivery Failure**，不会补发替代消息。因此 OMP Run 成功不代表终态 Reply 一定已送达飞书。
+
+每个 profile 用本地交付 journal 保存活跃交付标识，以及最多一个内容完全确定但尚未解决的请求。journal 采用原子写入，文件 mode 为 `0600`。bridge 重启后，只会在飞书一小时 UUID 去重窗口内精确重试结果未知的首次提交；已知消息只会在 14 天更新窗口内原位终态化，并把已断开的 Run 标为“已中断”。尚未提交的条目直接丢弃；过期、损坏或语义不确定的状态一律 fail closed，不猜测，也不创建第二个气泡。
+
+### 客户端支持范围
+
+| 客户端 | 统一 Reply 支持 |
+|---|---|
+| 中国版飞书 PC 7.32 及以上 | 支持目标 |
+| 中国版飞书 PC 7.32 以下 | 不支持 |
+| 中国版飞书 iOS / Android | 不支持 |
+| Lark 国际版客户端 | 不支持 |
+
+会议、文档评论、命令卡片和卡片操作不属于这份统一 Reply 客户端契约。
 
 ## 原生 Lark 工具与用户身份
 
@@ -215,6 +231,7 @@ bridge 会检查所选目录存在、是目录，并且不是 `/`、Home 根、�
 | `~/.lark-bot-bridge/profiles/<profile>/user-auth.json` | 用户 OAuth 元数据；token 保存在 OS keychain |
 | `~/.lark-bot-bridge/profiles/<profile>/media/` | 附件缓存 |
 | `~/.lark-bot-bridge/profiles/<profile>/logs/` | 结构化运行日志 |
+| `~/.lark-bot-bridge/profiles/<profile>/active-deliveries.json` | 仅 owner 可读写的 Reply 精确交付与重启恢复 journal |
 | `~/.lark-bot-bridge/registry/processes.json` | 本机进程注册表 |
 | `~/.lark-bot-bridge/registry/locks/` | profile lock 和 app lock |
 
@@ -293,7 +310,7 @@ grep '"event":"enter"' ~/.lark-bot-bridge/profiles/<profile>/logs/bridge-$(date 
 
 **bot 没反应 / OMP 不回复**：通常是本机 `omp` 没登录，或者当前会话指向了不存在的工作目录。发 `/status` 看当前状态；`/new` 重开会话往往就好。
 
-**agent 子进程假死（卡片停在最后一帧不动）**：支持 idle 探活。agent 一段时间没输出就会被 SIGTERM kill，卡片末尾会标出自动终止原因。默认关闭。开启方式：`/config` 设全局值（分钟），或 `/timeout 10` 只对当前会话生效；`/timeout off` 关掉当前会话的探活；`/timeout default` 清掉会话覆盖，回退到全局设置。
+**Reply 停在旧画面**：检查当前 profile 的结构化日志里是否有 `Delivery Failure` 或恢复事件。提交结果不确定或已经知道气泡存在时，bridge 不会补发第二条消息。重启后，可恢复的原气泡会被更新为“已中断”；未提交状态直接丢弃，过期或损坏的 journal 会 fail closed。
 
 **图片发过去 agent 说看不到**：升级到最新版，0.1.0 之前的版本有文件名去重 bug。
 
