@@ -1,11 +1,38 @@
 import { randomUUID } from 'node:crypto';
-import type { LarkChannel } from '@larksuite/channel';
+import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { renderCard } from '../card/run-renderer';
 import type { RunState } from '../card/run-state';
 
-export interface OmpReplyTarget {
-  messageId: string;
-  replyInThread?: boolean;
+export type OmpReplyTarget =
+  | Readonly<{
+      chatId: string;
+      messageId: string;
+      replyInThread: false;
+    }>
+  | Readonly<{
+      chatId: string;
+      messageId: string;
+      threadId: string;
+      replyInThread: true;
+    }>;
+
+export function deriveOmpReplyTarget(
+  message: Pick<NormalizedMessage, 'chatId' | 'messageId' | 'threadId'>,
+): OmpReplyTarget {
+  return Object.freeze(
+    message.threadId
+      ? {
+          chatId: message.chatId,
+          messageId: message.messageId,
+          threadId: message.threadId,
+          replyInThread: true,
+        }
+      : {
+          chatId: message.chatId,
+          messageId: message.messageId,
+          replyInThread: false,
+        },
+  );
 }
 
 /** Owns the one CardKit bubble used by an OMP instant-message Run. */
@@ -30,7 +57,7 @@ export class OmpReplyController {
       data: {
         msg_type: 'interactive',
         content: JSON.stringify({ type: 'card', data: { card_id: cardId } }),
-        reply_in_thread: this.#target.replyInThread ?? false,
+        reply_in_thread: this.#target.replyInThread,
         uuid: randomUUID(),
       },
     });

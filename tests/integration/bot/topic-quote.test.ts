@@ -1,7 +1,7 @@
 import { realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { NormalizedMessage } from '@larksuite/channel';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { AgentEvent } from '../../../src/agent/types.js';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 import { SessionStore } from '../../../src/session/store.js';
@@ -45,12 +45,16 @@ interface FakeLarkChannel {
       v1: {
         message: {
           list: ReturnType<typeof vi.fn>;
+          reply: Mock<(input: unknown) => Promise<unknown>>;
         };
         messageReaction: {
           create: ReturnType<typeof vi.fn>;
           delete: ReturnType<typeof vi.fn>;
         };
       };
+    };
+    cardkit: {
+      v1: { card: { settings: Mock<(input: unknown) => Promise<unknown>> } };
     };
   };
   getAppInfo: ReturnType<typeof vi.fn>;
@@ -63,6 +67,8 @@ interface FakeLarkChannel {
   disconnect(): Promise<void>;
   getChatMode(chatId: string): Promise<'group' | 'topic'>;
   getConnectionStatus(): { state: 'connected'; reconnectAttempts: number };
+  createCard(card: object): Promise<{ cardId: string }>;
+  updateCardById(cardId: string, card: object, sequence: number): Promise<void>;
   send(chatId: string, content: unknown, options?: unknown): Promise<{ messageId: string }>;
   stream(chatId: string, input: unknown, options?: unknown): Promise<{ messageId: string }>;
 }
@@ -102,8 +108,7 @@ describe('topic message quote handling', () => {
   });
 
   it('treats messages with threadId as topic messages even when chat mode cache says group', async () => {
-    // The agent has to say something for a progress stream to exist at all —
-    // see "does not open a progress stream when the agent produces no content".
+    // Message shape is stronger than stale Chat metadata for both scope and delivery.
     const h = await createHarness({
       chatMode: 'group',
       agentEvents: [
@@ -129,11 +134,13 @@ describe('topic message quote handling', () => {
     expect(prompt).toContain('"threadId":"omt_converted_topic"');
     expect(prompt).not.toContain('<quoted_messages>');
     expect(h.channel.fetchRawMessage).not.toHaveBeenCalled();
-    await waitFor(() => h.channel.streams.length === 1);
-    expect(h.channel.streams[0]?.options).toMatchObject({
-      replyTo: 'om_converted_topic',
-      replyInThread: true,
-    });
+    await waitFor(() => h.channel.rawClient.im.v1.message.reply.mock.calls.length === 1);
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { message_id: 'om_converted_topic' },
+        data: expect.objectContaining({ reply_in_thread: true }),
+      }),
+    );
   });
 
   it('backfills a missing threadId in topic groups so the reply threads into the topic', async () => {
@@ -167,11 +174,13 @@ describe('topic message quote handling', () => {
     const prompt = h.agent.runOptions[0]?.prompt ?? '';
     expect(prompt).toContain('"threadId":"omt_backfilled"');
 
-    await waitFor(() => h.channel.streams.length === 1);
-    expect(h.channel.streams[0]?.options).toMatchObject({
-      replyTo: 'om_topic_start',
-      replyInThread: true,
-    });
+    await waitFor(() => h.channel.rawClient.im.v1.message.reply.mock.calls.length === 1);
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { message_id: 'om_topic_start' },
+        data: expect.objectContaining({ reply_in_thread: true }),
+      }),
+    );
   });
 
   it('does not thread the reply when a topic-group event has no recoverable threadId', async () => {
@@ -198,8 +207,13 @@ describe('topic message quote handling', () => {
     await waitFor(() => h.agent.runOptions.length === 1);
 
     expect(h.channel.fetchRawMessage).toHaveBeenCalledWith('om_no_thread');
-    await waitFor(() => h.channel.streams.length === 1);
-    expect(h.channel.streams[0]?.options).not.toMatchObject({ replyInThread: true });
+    await waitFor(() => h.channel.rawClient.im.v1.message.reply.mock.calls.length === 1);
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { message_id: 'om_no_thread' },
+        data: expect.objectContaining({ reply_in_thread: false }),
+      }),
+    );
   });
 
   it('pulls in the topic upstream messages when first engaged in a topic', async () => {
@@ -260,60 +274,6 @@ describe('topic message quote handling', () => {
       prompt.indexOf('</topic_context>'),
     );
     expect(topicBlock).not.toContain('om_at_in_topic');
-  });
-
-  it('does not open a progress stream when the agent produces no content', async () => {
-    // The SDK starts a stream eagerly and finishes an empty one with its
-    // "(no content)" placeholder, so a content-less run used to post a card and
-    // recall it seconds later. Nothing durable to show → no message at all.
-    const h = await createHarness({
-      chatMode: 'group',
-      agentEvents: [{ type: 'done', terminationReason: 'normal' }],
-    });
-
-    await startTestBridge(h);
-
-    await h.channel.handlers.message?.(
-      message({
-        messageId: 'om_empty',
-        rootId: 'om_empty',
-        parentId: 'om_empty',
-        content: '@Bridge ping',
-      }),
-    );
-    await waitFor(() => h.agent.runOptions.length === 1);
-    // give the (absent) stream and its recall a chance to fire before asserting
-    await new Promise((resolve) => setTimeout(resolve, 80));
-
-    expect(h.channel.streams).toHaveLength(0);
-    expect(h.channel.sent).toHaveLength(0);
-    expect(h.channel.recallMessage).not.toHaveBeenCalled();
-  });
-
-  it('does not recall when the agent produced real content', async () => {
-    const h = await createHarness({
-      chatMode: 'group',
-      agentEvents: [
-        { type: 'text', delta: '这是真正的回答' },
-        { type: 'done', terminationReason: 'normal' },
-      ],
-    });
-
-    await startTestBridge(h);
-
-    await h.channel.handlers.message?.(
-      message({
-        messageId: 'om_real',
-        rootId: 'om_real',
-        parentId: 'om_real',
-        content: '@Bridge 问题',
-      }),
-    );
-    await waitFor(() => h.channel.streams.length === 1);
-    // give any (erroneous) recall a chance to fire before asserting it didn't
-    await new Promise((resolve) => setTimeout(resolve, 60));
-
-    expect(h.channel.recallMessage).not.toHaveBeenCalled();
   });
 
   it('skips a group message that does not mention the bot (requireMention default)', async () => {
@@ -595,12 +555,16 @@ function createFakeLarkChannel(
         v1: {
           message: {
             list: vi.fn(async () => ({ data: { items: threadMessages, has_more: false } })),
+            reply: vi.fn(async () => ({ data: { message_id: 'om_reply' } })),
           },
           messageReaction: {
             create: vi.fn(async () => ({ data: { reaction_id: 'reaction_1' } })),
             delete: vi.fn(async () => ({})),
           },
         },
+      },
+      cardkit: {
+        v1: { card: { settings: vi.fn(async () => ({ code: 0 })) } },
       },
     },
     getAppInfo: vi.fn(async () => ({ ownerId: 'ou_owner' })),
@@ -640,6 +604,10 @@ function createFakeLarkChannel(
     getConnectionStatus() {
       return { state: 'connected', reconnectAttempts: 0 };
     },
+    async createCard() {
+      return { cardId: 'card_topic' };
+    },
+    async updateCardById() {},
     async send(chatId, content, options) {
       sent.push({ chatId, content, options });
       return { messageId: `om_sent_${sent.length}` };

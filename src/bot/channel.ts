@@ -54,7 +54,7 @@ import { handleCommentMention } from './comments';
 import { CotClient, CotPublisher, finalAnswerOnlyState, withCotEvents } from './cot';
 import { startKeepalive } from './keepalive';
 import { fetchKnownChats } from './lark-info';
-import { OmpReplyController } from './omp-reply-controller';
+import { deriveOmpReplyTarget, OmpReplyController } from './omp-reply-controller';
 import { PendingQueue } from './pending-queue';
 import { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
@@ -790,6 +790,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const lastMsg = batch[batch.length - 1];
   if (!firstMsg || !lastMsg) return;
 
+  const replyTarget = deriveOmpReplyTarget(lastMsg);
+
   const chatId = firstMsg.chatId;
   const threadId = firstMsg.threadId;
 
@@ -900,20 +902,20 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     ...(modelSwitched ? { modelSwitchedTo: modelSelection } : {}),
   });
 
-  // For topic groups: thread the reply so it lands in the same topic as the
-  // user's message. Otherwise the SDK posts at top level and the user's
-  // topic discussion breaks visually.
+  // A message-carried thread ID is authoritative even when cached Chat
+  // metadata still says group; without the native option, the Reply escapes
+  // to the Chat top level.
   const sendOpts = {
-    replyTo: lastMsg.messageId,
-    ...(mode === 'topic' && threadId ? { replyInThread: true } : {}),
+    replyTo: replyTarget.messageId,
+    ...(replyTarget.replyInThread ? { replyInThread: true } : {}),
   };
   log.info('flush', 'reply-target', {
     scope,
     mode,
-    chatId,
-    threadId,
-    replyTo: sendOpts.replyTo,
-    replyInThread: sendOpts.replyInThread === true,
+    chatId: replyTarget.chatId,
+    threadId: replyTarget.replyInThread ? replyTarget.threadId : undefined,
+    replyTo: replyTarget.messageId,
+    replyInThread: replyTarget.replyInThread,
   });
 
   const accessDecision =
@@ -967,10 +969,10 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     log.info('flush', 'idle-watchdog', { idleTimeoutMs });
   }
 
-  if (firstMsg.chatType === 'p2p') {
+  if (firstMsg.chatType === 'p2p' || firstMsg.chatType === 'group') {
     const reply = new OmpReplyController({
       channel,
-      target: { messageId: lastMsg.messageId },
+      target: replyTarget,
     });
     try {
       await reply.open(initialState);
@@ -985,7 +987,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       );
       await reply.finish(finalState);
     } catch (err) {
-      log.fail('reply', err, { scope, step: 'p2p' });
+      log.fail('reply', err, { scope, step: 'im' });
       await run.stop().catch((stopErr) =>
         log.warn('reply', 'stop-failed', {
           scope,
