@@ -2,10 +2,6 @@ import type { AgentEvent } from '../types';
 
 const DEFAULT_MAX_REASSEMBLED_BYTES = 64 * 1024 * 1024;
 
-type ToolLifecycleEvent =
-  | Extract<AgentEvent, { type: 'tool_use' }>
-  | Extract<AgentEvent, { type: 'tool_result' }>;
-
 interface ChunkFrame {
   type: 'rpc_chunk';
   chunkId: string;
@@ -83,8 +79,6 @@ export class OmpRpcFrameDecoder {
 export class OmpRpcTranslator {
   private sessionId: string | undefined;
   private assistantDraft = '';
-  private assistantOpen = false;
-  private queuedTools: ToolLifecycleEvent[] = [];
   private terminal = false;
 
   terminalEmitted(): boolean {
@@ -103,13 +97,10 @@ export class OmpRpcTranslator {
 
     if (rpcFrame.type === 'message_start') {
       this.assistantDraft = '';
-      this.assistantOpen = true;
-      this.queuedTools = [];
       return;
     }
 
     if (rpcFrame.type === 'message_update') {
-      this.assistantOpen = true;
       const rawUpdate = rpcFrame.assistantMessageEvent;
       const update =
         rawUpdate && typeof rawUpdate === 'object' && !Array.isArray(rawUpdate)
@@ -140,10 +131,6 @@ export class OmpRpcTranslator {
       const usage = usageEvent(message?.usage);
       if (usage) yield usage;
       this.assistantDraft = '';
-      this.assistantOpen = false;
-      const queuedTools = this.queuedTools;
-      this.queuedTools = [];
-      yield* queuedTools;
       return;
     }
 
@@ -151,14 +138,12 @@ export class OmpRpcTranslator {
       const id = stringField(rpcFrame, 'toolCallId') ?? stringField(rpcFrame, 'id');
       const name = stringField(rpcFrame, 'toolName') ?? stringField(rpcFrame, 'name');
       if (id && name) {
-        const event: ToolLifecycleEvent = {
+        yield {
           type: 'tool_use',
           id,
           name,
           input: rpcFrame.args ?? rpcFrame.arguments ?? {},
         };
-        if (this.assistantOpen) this.queuedTools.push(event);
-        else yield event;
       }
       return;
     }
@@ -166,14 +151,12 @@ export class OmpRpcTranslator {
     if (rpcFrame.type === 'tool_execution_end') {
       const id = stringField(rpcFrame, 'toolCallId') ?? stringField(rpcFrame, 'id');
       if (id) {
-        const event: ToolLifecycleEvent = {
+        yield {
           type: 'tool_result',
           id,
           output: resultText(rpcFrame.result ?? rpcFrame.output),
           isError: rpcFrame.isError === true || rpcFrame.error === true,
         };
-        if (this.assistantOpen) this.queuedTools.push(event);
-        else yield event;
       }
       return;
     }
