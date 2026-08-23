@@ -305,6 +305,7 @@ async function createHarness(
     },
     access: {
       allowedUsers: ['ou_user'],
+      allowedChats: ['oc_dm'],
     },
     omp: { binaryPath: '/usr/local/bin/omp' },
     ...(options.messageReply ? { preferences: { messageReply: options.messageReply } } : {}),
@@ -473,13 +474,13 @@ function message(messageId: string, content: string): NormalizedMessage {
   return {
     messageId,
     chatId: 'oc_dm',
-    chatType: 'p2p',
+    chatType: 'group',
     senderId: 'ou_user',
     senderName: 'User',
     content,
     rawContentType: 'text',
     resources: [],
-    mentionedBot: false,
+    mentionedBot: true,
     createTime: 1760000001000,
   } as unknown as NormalizedMessage;
 }

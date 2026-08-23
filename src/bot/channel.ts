@@ -54,6 +54,7 @@ import { handleCommentMention } from './comments';
 import { CotClient, CotPublisher, finalAnswerOnlyState, withCotEvents } from './cot';
 import { startKeepalive } from './keepalive';
 import { fetchKnownChats } from './lark-info';
+import { OmpReplyController } from './omp-reply-controller';
 import { PendingQueue } from './pending-queue';
 import { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
@@ -964,6 +965,35 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       : getRunIdleTimeoutMs(controls.cfg);
   if (idleTimeoutMs) {
     log.info('flush', 'idle-watchdog', { idleTimeoutMs });
+  }
+
+  if (firstMsg.chatType === 'p2p') {
+    const reply = new OmpReplyController({
+      channel,
+      target: { messageId: lastMsg.messageId },
+    });
+    try {
+      await reply.open(initialState);
+      const finalState = await processAgentStream(
+        run,
+        run.events,
+        scope,
+        idleTimeoutMs,
+        async (state) => {
+          if (state.terminal === 'running') await reply.project(state);
+        },
+      );
+      await reply.finish(finalState);
+    } catch (err) {
+      log.fail('reply', err, { scope, step: 'p2p' });
+      await run.stop().catch((stopErr) =>
+        log.warn('reply', 'stop-failed', {
+          scope,
+          err: stopErr instanceof Error ? stopErr.message : String(stopErr),
+        }),
+      );
+    }
+    return;
   }
 
   const replyMode = getMessageReplyMode(controls.cfg);
