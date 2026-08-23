@@ -340,7 +340,7 @@ function applyDeepSeekProbe(current: PrototypeState): void {
   current.progressTotal = 1;
   current.finalAnswer = '2+2=4';
   current.runtime = {
-    model: 'deepseek/deepseek-v4-flash',
+    model: 'deepseek-v4-flash',
     effort: 'high',
     contextUsed: 5_359,
     contextWindow: 1_000_000,
