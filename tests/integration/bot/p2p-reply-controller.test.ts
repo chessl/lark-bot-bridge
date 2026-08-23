@@ -57,7 +57,14 @@ interface FakeLarkChannel {
         };
       };
     };
-    cardkit: { v1: { card: { settings: Mock<(input: unknown) => Promise<unknown>> } } };
+    cardkit: {
+      v1: {
+        card: {
+          update: Mock<(input: unknown) => Promise<unknown>>;
+          settings: Mock<(input: unknown) => Promise<unknown>>;
+        };
+      };
+    };
   };
   on(handlers: MessageHandlerMap): void;
   connect(): Promise<void>;
@@ -70,13 +77,50 @@ interface FakeLarkChannel {
   stream(chatId: string, input: unknown, options?: unknown): Promise<void>;
 }
 
+interface EventGate {
+  after: number;
+  promise: Promise<void>;
+  reached?: () => void;
+}
+
+function controllableEventGate(after: number) {
+  const release = Promise.withResolvers<void>();
+  const reached = Promise.withResolvers<void>();
+  return {
+    after,
+    promise: release.promise,
+    resolve: release.resolve,
+    reached: reached.resolve,
+    reachedPromise: reached.promise,
+  };
+}
+
 const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   sdkMock.channel = undefined;
   sdkMock.createLarkChannel.mockClear();
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
 });
+
+const ambiguousInitialReplies = [
+  {
+    name: 'timeout',
+    reply: async () => {
+      throw new Error('request timed out');
+    },
+  },
+  {
+    name: 'disconnect',
+    reply: async () => {
+      throw new Error('socket disconnected');
+    },
+  },
+  { name: '5xx', reply: async () => ({ status: 503 }) },
+  { name: 'missing receipt', reply: async () => ({ code: 0, data: {} }) },
+  { name: 'rate limit', reply: async () => ({ code: 99991400 }) },
+] as const;
 
 describe('P2P OMP Reply', () => {
   it('opens before prompt consumption, finalizes the same bubble, then closes streaming', async () => {
@@ -125,6 +169,7 @@ describe('P2P OMP Reply', () => {
   });
 
   it('projects ordered progress without disclosing hidden OMP fields', async () => {
+    const progressGates = [2, 3, 4, 5, 6, 12].map(controllableEventGate);
     const hidden = [
       'SECRET_THINKING',
       'SECRET_TOOL_INPUT',
@@ -216,11 +261,22 @@ describe('P2P OMP Reply', () => {
         { type: 'final_text', content: 'SAFE_FINAL_REPLY' },
         { type: 'done', terminationReason: 'normal' },
       ],
+      eventGates: progressGates,
     });
     await startTestBridge(h);
+    vi.useFakeTimers();
 
-    await h.channel.handlers.message?.(message('om_safe_progress', 'run'));
-    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+    void h.channel.handlers.message?.(message('om_safe_progress', 'run'));
+    await vi.waitFor(() => expect(h.channel.operations).toContain('omp:consume'));
+    for (const [index, gate] of progressGates.entries()) {
+      await gate.reachedPromise;
+      await vi.runAllTimersAsync();
+      expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledTimes(index + 1);
+      gate.resolve();
+    }
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledOnce(),
+    );
 
     const payloads = [
       ...h.channel.createdCards,
@@ -282,11 +338,20 @@ describe('P2P OMP Reply', () => {
       })),
       { type: 'done', terminationReason: 'normal' },
     ];
-    const h = await createHarness({ events });
+    const historyGate = controllableEventGate(35);
+    const h = await createHarness({ events, eventGates: [historyGate] });
     await startTestBridge(h);
+    vi.useFakeTimers();
 
-    await h.channel.handlers.message?.(message('om_bounded_progress', 'run'));
-    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+    void h.channel.handlers.message?.(message('om_bounded_progress', 'run'));
+    await vi.waitFor(() => expect(h.channel.operations).toContain('omp:consume'));
+    await historyGate.reachedPromise;
+    await vi.runAllTimersAsync();
+    expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce();
+    historyGate.resolve();
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledOnce(),
+    );
 
     const running = h.channel.updates.findLast((update) =>
       JSON.stringify(update.card).includes('"content":"运行中"'),
@@ -302,28 +367,257 @@ describe('P2P OMP Reply', () => {
     expect(outbound).toContain('调用工具 21 次');
   });
 
-  it('fails closed when the initial IM Reply result is ambiguous', async () => {
+  it.each(ambiguousInitialReplies)(
+    'exact-retries an ambiguous initial IM Reply ($name), then fails closed',
+    async ({ reply }) => {
+      const h = await createHarness({
+        events: [
+          { type: 'text', delta: 'MUST_NOT_BE_CONSUMED' },
+          { type: 'done', terminationReason: 'normal' },
+        ],
+        reply,
+      });
+      await startTestBridge(h);
+      vi.useFakeTimers();
+
+      void h.channel.handlers.message?.(message('om_ambiguous', 'run'));
+      await vi.waitFor(() =>
+        expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce(),
+      );
+      await vi.runAllTimersAsync();
+      await vi.waitFor(() => expect(h.agent.runs[0]?.stopped).toBe(true));
+
+      const attempts = h.channel.rawClient.im.v1.message.reply.mock.calls.map(([input]) =>
+        JSON.stringify(input),
+      );
+      expect(attempts).toHaveLength(3);
+      expect(attempts).toEqual([attempts[0], attempts[0], attempts[0]]);
+      expect(h.channel.createdCards).toHaveLength(1);
+      expect(h.channel.updates).toHaveLength(0);
+      expect(h.channel.rawClient.cardkit.v1.card.settings).not.toHaveBeenCalled();
+      expect(h.channel.sent).toHaveLength(0);
+      expect(h.channel.streams).toHaveLength(0);
+      expect(h.channel.operations).not.toContain('omp:consume');
+    },
+  );
+
+  it('accepts 200780 only as exact-retry binding proof and keeps one bubble', async () => {
     const h = await createHarness({
       events: [
-        { type: 'text', delta: 'MUST_NOT_BE_CONSUMED' },
+        { type: 'text', delta: 'BOUND_REPLY_SENTINEL' },
         { type: 'done', terminationReason: 'normal' },
       ],
-      reply: async () => {
-        throw new Error('request timed out');
+      reply: async () => ({ code: 200780 }),
+    });
+    await startTestBridge(h);
+    vi.useFakeTimers();
+
+    void h.channel.handlers.message?.(message('om_bound', 'run'));
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce(),
+    );
+    await vi.runAllTimersAsync();
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledOnce(),
+    );
+
+    const attempts = h.channel.rawClient.im.v1.message.reply.mock.calls.map(([input]) =>
+      JSON.stringify(input),
+    );
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toBe(attempts[0]);
+    expect(h.channel.createdCards).toHaveLength(1);
+    expect(h.channel.updates.at(-1)?.cardId).toBe('card_1');
+    expect(h.channel.sent).toHaveLength(0);
+    expect(h.channel.streams).toHaveLength(0);
+  });
+
+  it('retries the exact final update before the next-sequence close', async () => {
+    let updateAttempt = 0;
+    const h = await createHarness({
+      events: [
+        { type: 'text', delta: 'EXACT_FINAL_SENTINEL' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      update: async () => {
+        updateAttempt++;
+        if (updateAttempt === 1) throw new Error('socket disconnected');
+        return { code: 0 };
       },
     });
     await startTestBridge(h);
+    vi.useFakeTimers();
 
-    await h.channel.handlers.message?.(message('om_ambiguous', 'run'));
-    await waitFor(() => h.agent.runs[0]?.stopped === true);
+    void h.channel.handlers.message?.(message('om_update_retry', 'run'));
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce(),
+    );
+    await vi.runAllTimersAsync();
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledOnce(),
+    );
 
-    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+    const updateCalls = h.channel.rawClient.cardkit.v1.card.update.mock.calls.map(
+      ([input]) => input,
+    );
+    expect(updateCalls).toHaveLength(2);
+    expect(JSON.stringify(updateCalls[1])).toBe(JSON.stringify(updateCalls[0]));
+    expect(operationSequence(updateCalls[0])).toBe(1);
+    const closeCall = h.channel.rawClient.cardkit.v1.card.settings.mock.calls[0]?.[0];
+    expect(operationSequence(closeCall)).toBe(2);
+    expect(h.channel.operations).toEqual(
+      expect.arrayContaining(['card:update:1', 'card:close:2']),
+    );
+    expect(h.channel.operations.lastIndexOf('card:update:1')).toBeLessThan(
+      h.channel.operations.indexOf('card:close:2'),
+    );
     expect(h.channel.createdCards).toHaveLength(1);
-    expect(h.channel.updates).toHaveLength(0);
-    expect(h.channel.rawClient.cardkit.v1.card.settings).not.toHaveBeenCalled();
     expect(h.channel.sent).toHaveLength(0);
-    expect(h.channel.streams).toHaveLength(0);
-    expect(h.channel.operations).not.toContain('omp:consume');
+  });
+
+  it('exact-retries streaming close without changing its sequence or summary payload', async () => {
+    let closeAttempt = 0;
+    const h = await createHarness({
+      events: [
+        { type: 'text', delta: 'CLOSE_RETRY_SENTINEL' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      close: async () => {
+        closeAttempt++;
+        if (closeAttempt === 1) return { status: 503 };
+        return { code: 0 };
+      },
+    });
+    await startTestBridge(h);
+    vi.useFakeTimers();
+
+    void h.channel.handlers.message?.(message('om_close_retry', 'run'));
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledOnce(),
+    );
+    await vi.runAllTimersAsync();
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledTimes(2),
+    );
+
+    const closeCalls = h.channel.rawClient.cardkit.v1.card.settings.mock.calls.map(
+      ([input]) => input,
+    );
+    expect(JSON.stringify(closeCalls[1])).toBe(JSON.stringify(closeCalls[0]));
+    expect(operationSequence(closeCalls[0])).toBe(2);
+    expect(h.channel.updates.map((update) => update.sequence)).toEqual([1]);
+    expect(h.channel.createdCards).toHaveLength(1);
+    expect(h.channel.sent).toHaveLength(0);
+  });
+
+  it('coalesces running projections latest-wins and skips an identical projection', async () => {
+    const burstGate = controllableEventGate(2);
+    const identicalGate = controllableEventGate(3);
+    const h = await createHarness({
+      events: [
+        { type: 'reasoning', content: 'OLDERPROJECTION' },
+        { type: 'reasoning', content: 'LATESTPROJECTIONSENTINEL' },
+        { type: 'tool_result', id: 'missing-tool', output: 'IGNORED_OUTPUT' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      eventGates: [burstGate, identicalGate],
+    });
+    await startTestBridge(h);
+    vi.useFakeTimers();
+
+    void h.channel.handlers.message?.(message('om_latest', 'run'));
+    await vi.waitFor(() => expect(h.channel.operations).toContain('omp:consume'));
+    await burstGate.reachedPromise;
+    await vi.runAllTimersAsync();
+    expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce();
+    expect(JSON.stringify(h.channel.updates[0]?.card)).toContain('LATESTPROJECTIONSENTINEL');
+
+    burstGate.resolve();
+    await identicalGate.reachedPromise;
+    await vi.runAllTimersAsync();
+    expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce();
+
+    identicalGate.resolve();
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledOnce(),
+    );
+    expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledTimes(2);
+    expect(h.channel.updates.map((update) => update.sequence)).toEqual([1, 2]);
+    expect(operationSequence(h.channel.rawClient.cardkit.v1.card.settings.mock.calls[0]?.[0])).toBe(
+      3,
+    );
+  });
+
+  it('keeps a terminal update behind an in-flight running projection', async () => {
+    const terminalGate = controllableEventGate(1);
+    const heldUpdate = Promise.withResolvers<unknown>();
+    let updateAttempt = 0;
+    const h = await createHarness({
+      events: [
+        { type: 'reasoning', content: 'RUNNINGPROJECTION' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      eventGates: [terminalGate],
+      update: async () => {
+        updateAttempt++;
+        return updateAttempt === 1 ? heldUpdate.promise : { code: 0 };
+      },
+    });
+    await startTestBridge(h);
+    vi.useFakeTimers();
+
+    void h.channel.handlers.message?.(message('om_in_flight', 'run'));
+    await vi.waitFor(() => expect(h.channel.operations).toContain('omp:consume'));
+    await terminalGate.reachedPromise;
+    await vi.runAllTimersAsync();
+    expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce();
+    expect(operationSequence(h.channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0])).toBe(1);
+
+    terminalGate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce();
+    expect(h.channel.rawClient.cardkit.v1.card.settings).not.toHaveBeenCalled();
+
+    heldUpdate.resolve({ code: 0 });
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledOnce(),
+    );
+    expect(h.channel.updates.map((update) => update.sequence)).toEqual([1, 2]);
+    expect(operationSequence(h.channel.rawClient.cardkit.v1.card.settings.mock.calls[0]?.[0])).toBe(
+      3,
+    );
+    expect(h.channel.createdCards).toHaveLength(1);
+    expect(h.channel.sent).toHaveLength(0);
+  });
+
+  it('never lets terminal close overtake an unresolved final update', async () => {
+    const h = await createHarness({
+      events: [
+        { type: 'text', delta: 'UNCONFIRMED_FINAL' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      update: async () => {
+        throw new Error('upstream unavailable');
+      },
+    });
+    await startTestBridge(h);
+    vi.useFakeTimers();
+
+    void h.channel.handlers.message?.(message('om_unresolved', 'run'));
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce(),
+    );
+    await vi.runAllTimersAsync();
+    await vi.waitFor(() => expect(h.agent.runs[0]?.stopped).toBe(true));
+
+    const updates = h.channel.rawClient.cardkit.v1.card.update.mock.calls.map(([input]) =>
+      JSON.stringify(input),
+    );
+    expect(updates).toHaveLength(3);
+    expect(updates).toEqual([updates[0], updates[0], updates[0]]);
+    expect(h.channel.rawClient.cardkit.v1.card.settings).not.toHaveBeenCalled();
+    expect(h.channel.createdCards).toHaveLength(1);
+    expect(h.channel.sent).toHaveLength(0);
   });
 
   it('keeps Commands and Run Rejections on ordinary replies', async () => {
@@ -352,7 +646,10 @@ async function createHarness(
   options: {
     events?: FakeAgentEvents;
     configuredWorkspace?: boolean;
+    eventGates?: readonly EventGate[];
     reply?: (input: unknown) => Promise<unknown>;
+    update?: (input: unknown) => Promise<unknown>;
+    close?: (input: unknown) => Promise<unknown>;
   } = {},
 ): Promise<{
   tmp: TmpProfile;
@@ -381,7 +678,7 @@ async function createHarness(
   };
   const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
-  const channel = createFakeLarkChannel(options.reply);
+  const channel = createFakeLarkChannel(options);
   const agent = new FakeAgentAdapter({
     events:
       options.events ??
@@ -391,6 +688,31 @@ async function createHarness(
       ] satisfies FakeAgentEvents),
     onEventStreamStart: () => channel.operations.push('omp:consume'),
   });
+  if (options.eventGates) {
+    const start = agent.start.bind(agent);
+    vi.spyOn(agent, 'start').mockImplementation(async (runOptions) => {
+      const run = await start(runOptions);
+      const source = run.events;
+      const events = (async function* () {
+        let count = 0;
+        for await (const event of source) {
+          yield event;
+          count++;
+          const gate = options.eventGates?.find((candidate) => candidate.after === count);
+          if (gate) {
+            gate.reached?.();
+            await gate.promise;
+          }
+        }
+      })();
+      return {
+        runId: run.runId,
+        events,
+        stop: () => run.stop(),
+        waitForExit: (timeoutMs) => run.waitForExit(timeoutMs),
+      };
+    });
+  }
   sdkMock.channel = channel;
   const controls = createControls(profileConfig);
   cleanups.push(async () => {
@@ -417,9 +739,11 @@ async function startTestBridge(harness: {
 }
 
 function createFakeLarkChannel(
-  reply: (input: unknown) => Promise<unknown> = async () => ({
-    data: { message_id: 'om_reply_1' },
-  }),
+  options: {
+    reply?: (input: unknown) => Promise<unknown>;
+    update?: (input: unknown) => Promise<unknown>;
+    close?: (input: unknown) => Promise<unknown>;
+  } = {},
 ): FakeLarkChannel {
   const handlers: MessageHandlerMap = {};
   const operations: string[] = [];
@@ -429,12 +753,25 @@ function createFakeLarkChannel(
   const streams: unknown[] = [];
   const replyMock = vi.fn(async (input: unknown) => {
     operations.push('im:reply');
-    return reply(input);
+    return options.reply
+      ? options.reply(input)
+      : { code: 0, data: { message_id: 'om_reply_1' } };
+  });
+  const update = vi.fn(async (input: unknown) => {
+    const sequence = operationSequence(input);
+    const cardId = operationCardId(input);
+    const cardData = updateCardData(input);
+    if (sequence === undefined || !cardId || !cardData) {
+      throw new Error('invalid captured CardKit update');
+    }
+    operations.push(`card:update:${sequence}`);
+    updates.push({ cardId, card: JSON.parse(cardData), sequence });
+    return options.update ? options.update(input) : { code: 0 };
   });
   const settings = vi.fn(async (input: unknown) => {
     const sequence = operationSequence(input);
     operations.push(`card:close:${sequence}`);
-    return { code: 0 };
+    return options.close ? options.close(input) : { code: 0 };
   });
 
   return {
@@ -466,7 +803,7 @@ function createFakeLarkChannel(
           },
         },
       },
-      cardkit: { v1: { card: { settings } } },
+      cardkit: { v1: { card: { update, settings } } },
     },
     on(nextHandlers) {
       Object.assign(handlers, nextHandlers);
@@ -550,6 +887,22 @@ function operationSequence(input: unknown): number | undefined {
   const data = input.data;
   if (!data || typeof data !== 'object' || !('sequence' in data)) return undefined;
   return typeof data.sequence === 'number' ? data.sequence : undefined;
+}
+
+function operationCardId(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || !('path' in input)) return undefined;
+  const path = input.path;
+  if (!path || typeof path !== 'object' || !('card_id' in path)) return undefined;
+  return typeof path.card_id === 'string' ? path.card_id : undefined;
+}
+
+function updateCardData(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || !('data' in input)) return undefined;
+  const data = input.data;
+  if (!data || typeof data !== 'object' || !('card' in data)) return undefined;
+  const card = data.card;
+  if (!card || typeof card !== 'object' || !('data' in card)) return undefined;
+  return typeof card.data === 'string' ? card.data : undefined;
 }
 
 function closeSettings(input: unknown): string {
