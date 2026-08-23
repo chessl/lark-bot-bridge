@@ -520,6 +520,7 @@ async function startTestBridge(h: {
       keystoreSaltFile: join(h.tmp.profile, '.keystore.salt'),
       mediaDir: join(h.tmp.profile, 'media'),
       callbackNoncesFile: join(h.tmp.profile, 'callback-nonces.json'),
+      activeDeliveriesFile: join(h.tmp.profile, 'active-deliveries.json'),
     },
   });
   cleanups.push(() => bridge.disconnect());
