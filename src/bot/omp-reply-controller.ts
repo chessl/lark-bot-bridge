@@ -281,13 +281,7 @@ export class OmpReplyController {
         if (code === CARD_ALREADY_BOUND) {
           return operation.attempts > 1 ? 'success' : 'unknown';
         }
-        return code === undefined ||
-          code === 0 ||
-          code === 429 ||
-          code === 99991400 ||
-          code >= 500
-          ? 'unknown'
-          : 'rejected';
+        return code === undefined || code === 0 ? 'unknown' : 'rejected';
       }
 
       const result =
@@ -296,9 +290,7 @@ export class OmpReplyController {
           : await this.#channel.rawClient.cardkit.v1.card.settings(operation.request);
       const code = result.code;
       if (code === 0) return 'success';
-      return code === undefined || code === 429 || code === 99991400 || code >= 500
-        ? 'unknown'
-        : 'rejected';
+      return code === undefined ? 'unknown' : 'rejected';
     } catch {
       return 'unknown';
     }

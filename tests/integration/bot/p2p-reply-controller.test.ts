@@ -119,7 +119,7 @@ const ambiguousInitialReplies = [
   },
   { name: '5xx', reply: async () => ({ status: 503 }) },
   { name: 'missing receipt', reply: async () => ({ code: 0, data: {} }) },
-  { name: 'rate limit', reply: async () => ({ code: 99991400 }) },
+  { name: 'rate limit', reply: async () => ({ status: 429 }) },
 ] as const;
 
 describe('P2P OMP Reply', () => {
@@ -401,6 +401,22 @@ describe('P2P OMP Reply', () => {
     },
   );
 
+  it('does not retry an explicit business rejection', async () => {
+    const h = await createHarness({
+      reply: async () => ({ code: 99991400, msg: 'permission denied' }),
+    });
+    await startTestBridge(h);
+    vi.useFakeTimers();
+
+    void h.channel.handlers.message?.(message('om_rejected', 'run'));
+    await vi.waitFor(() => expect(h.agent.runs[0]?.stopped).toBe(true));
+
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+    expect(h.channel.operations).not.toContain('omp:consume');
+    expect(h.channel.createdCards).toHaveLength(1);
+    expect(h.channel.sent).toHaveLength(0);
+  });
+
   it('accepts 200780 only as exact-retry binding proof and keeps one bubble', async () => {
     const h = await createHarness({
       events: [
@@ -519,7 +535,7 @@ describe('P2P OMP Reply', () => {
         { type: 'reasoning', content: 'LATESTPROJECTIONSENTINEL' },
         { type: 'tool_result', id: 'missing-tool', output: 'IGNORED_OUTPUT' },
         { type: 'done', terminationReason: 'normal' },
-      ],
+      ] satisfies FakeAgentEvents,
       eventGates: [burstGate, identicalGate],
     });
     await startTestBridge(h);
@@ -556,7 +572,7 @@ describe('P2P OMP Reply', () => {
       events: [
         { type: 'reasoning', content: 'RUNNINGPROJECTION' },
         { type: 'done', terminationReason: 'normal' },
-      ],
+      ] satisfies FakeAgentEvents,
       eventGates: [terminalGate],
       update: async () => {
         updateAttempt++;
