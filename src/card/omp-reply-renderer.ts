@@ -10,7 +10,6 @@ type RenderOptions = Readonly<{
   summary: string;
 }>;
 
-
 export function renderOmpReplyCard(state: RunState, options?: RenderOptions): object {
   let reasoning = state.reasoningEntries ?? [];
   let tools = state.blocks.flatMap((block) => (block.kind === 'tool' ? [block.tool] : []));
