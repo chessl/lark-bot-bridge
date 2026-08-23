@@ -23,6 +23,7 @@ export interface AppPaths {
   secretsGetterScript: string;
   mediaDir: string;
   callbackNoncesFile: string;
+  activeDeliveriesFile: string;
   logsDir: string;
   daemonLogsDir: string;
   daemonStdoutFile: string;
@@ -74,6 +75,7 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
     userAuthFile: join(profileDir, 'user-auth.json'),
     secretsGetterScript: join(rootDir, 'secrets-getter'),
     callbackNoncesFile: join(profileDir, 'callback-nonces.json'),
+    activeDeliveriesFile: join(profileDir, 'active-deliveries.json'),
     mediaDir: join(profileDir, 'media'),
     logsDir,
     daemonLogsDir,

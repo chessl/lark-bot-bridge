@@ -74,6 +74,7 @@ describe('resolveAppPaths', () => {
     expect(paths.userAuthFile).toBe(join(profileDir, 'user-auth.json'));
     expect(paths.mediaDir).toBe(join(profileDir, 'media'));
     expect(paths.callbackNoncesFile).toBe(join(profileDir, 'callback-nonces.json'));
+    expect(paths.activeDeliveriesFile).toBe(join(profileDir, 'active-deliveries.json'));
     expect(paths.logsDir).toBe(join(profileDir, 'logs'));
     expect(paths.daemonLogsDir).toBe(join(profileDir, 'logs', 'daemon'));
     expect(paths.daemonStdoutFile).toBe(join(profileDir, 'logs', 'daemon', 'daemon-stdout.log'));

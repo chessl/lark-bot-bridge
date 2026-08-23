@@ -213,6 +213,7 @@ class ManagedProfile {
         workspaces: this.workspaces,
         controls: nextControls,
         appPaths: nextRuntime.appPaths,
+        deferDeliveryRecovery: true,
       });
       try {
         await this.bridge.disconnect();
@@ -222,6 +223,7 @@ class ManagedProfile {
           err: String(err),
         });
       }
+      await nextBridge.activateDeliveryRecovery?.();
       this.bridge = nextBridge;
       await updateEntry(
         this.entry.id,

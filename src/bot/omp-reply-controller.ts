@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { renderOmpReplyCard, renderOmpReplyMarkdown } from '../card/omp-reply-renderer';
-import type { RunState } from '../card/run-state';
+import { initialState as emptyRunState, markInterrupted, type RunState } from '../card/run-state';
+import type {
+  ActiveDelivery,
+  DeliveryState,
+  DurablePendingOperation,
+  OmpDeliveryJournal,
+  ReplyTransport,
+} from './omp-delivery-journal';
 
 export type OmpReplyTarget =
   | Readonly<{
@@ -35,9 +42,7 @@ export function deriveOmpReplyTarget(
   );
 }
 
-type DeliveryState = 'no_message' | 'unknown' | 'not_sent' | 'message_known' | 'delivered';
 type OperationResult = 'success' | 'unknown' | 'rejected';
-type ReplyTransport = 'managed' | 'inline' | 'markdown';
 type ReplyRequest = Parameters<LarkChannel['rawClient']['im']['v1']['message']['reply']>[0];
 type UpdateRequest = Parameters<LarkChannel['rawClient']['cardkit']['v1']['card']['update']>[0];
 type CloseRequest = Parameters<LarkChannel['rawClient']['cardkit']['v1']['card']['settings']>[0];
@@ -49,56 +54,39 @@ interface Projection {
 }
 
 type PendingOperation =
-  | {
-      kind: 'reply';
-      transport: ReplyTransport;
-      terminal: boolean;
-      uuid: string;
-      sequence: 0;
-      request: ReplyRequest;
-      attempts: number;
-      exhausted: boolean;
-    }
-  | {
-      kind: 'update';
-      uuid: string;
-      sequence: number;
+  | (Extract<DurablePendingOperation, { kind: 'reply' }> & PendingAttempt)
+  | (Extract<DurablePendingOperation, { kind: 'update' }> & PendingAttempt & {
       projection: Projection;
-      request: UpdateRequest;
-      attempts: number;
-      exhausted: boolean;
-    }
-  | {
-      kind: 'close';
-      uuid: string;
-      sequence: number;
-      request: CloseRequest;
-      attempts: number;
-      exhausted: boolean;
-    }
-  | {
-      kind: 'patch';
-      terminal: boolean;
+    })
+  | (Extract<DurablePendingOperation, { kind: 'close' }> & PendingAttempt)
+  | (Extract<DurablePendingOperation, { kind: 'patch' }> & PendingAttempt & {
       projection: Projection;
-      request: PatchRequest;
-      attempts: number;
-      exhausted: boolean;
-    };
+    });
+
+interface PendingAttempt {
+  attempts: number;
+  exhausted: boolean;
+}
 
 const PROJECTION_THROTTLE_MS = 400;
-const RETRY_DELAYS_MS = [0, 500, 1_500] as const;
+const RETRY_DELAYS_MS = [0, 500, 1_000] as const;
 const CARD_ALREADY_BOUND = 200780;
 
 /** Owns the one CardKit bubble used by an OMP instant-message Run. */
 export class OmpReplyController {
   readonly #channel: LarkChannel;
   readonly #target: OmpReplyTarget;
+  readonly #journal: OmpDeliveryJournal | undefined;
+  readonly #runId: string | undefined;
+  readonly #now: () => number;
+  readonly #openedAtMs: number;
   #opened = false;
   #transport: ReplyTransport | undefined;
   #cardId: string | undefined;
   #messageId: string | undefined;
   #deliveryState: DeliveryState = 'no_message';
   #messageKnown = false;
+  #messageKnownAtMs: number | undefined;
   #sequence = 0;
   #pending: PendingOperation | undefined;
   #writer: Promise<void> = Promise.resolve();
@@ -108,14 +96,31 @@ export class OmpReplyController {
   #terminalRequested = false;
   #finished = false;
 
-  constructor(input: { channel: LarkChannel; target: OmpReplyTarget }) {
+  constructor(input: {
+    channel: LarkChannel;
+    target: OmpReplyTarget;
+    journal?: OmpDeliveryJournal;
+    runId?: string;
+    now?: () => number;
+  }) {
+    if (Boolean(input.journal) !== Boolean(input.runId)) {
+      throw new Error('OMP Reply journal and runId must be provided together');
+    }
     this.#channel = input.channel;
     this.#target = input.target;
+    this.#journal = input.journal;
+    this.#runId = input.runId;
+    this.#now = input.now ?? Date.now;
+    this.#openedAtMs = this.#now();
   }
 
   async open(initialState: RunState): Promise<void> {
     if (this.#opened) throw new Error('OMP Reply is already open');
     this.#opened = true;
+    if (this.#journal && this.#runId) {
+      this.#journal.claim(this.#runId);
+      await this.persist();
+    }
 
     await this.enqueue(async () => {
       const inlineCard = renderOmpReplyCard(initialState);
@@ -128,6 +133,7 @@ export class OmpReplyController {
       if (cardId?.trim()) {
         this.#cardId = cardId;
         this.#transport = 'managed';
+        await this.persist();
         const result = await this.commitReply(
           'managed',
           'interactive',
@@ -148,7 +154,12 @@ export class OmpReplyController {
 
       this.#transport = 'markdown';
       this.#deliveryState = 'not_sent';
+      await this.persist();
     });
+  }
+
+  release(): void {
+    if (this.#journal && this.#runId) this.#journal.release(this.#runId);
   }
 
   async project(state: RunState): Promise<void> {
@@ -187,6 +198,7 @@ export class OmpReplyController {
       if (transport === 'managed') {
         const update = await this.commitManagedProjection(
           makeProjection(renderManagedCard(finalState)),
+          true,
         );
         if (update === 'rejected') {
           await this.patchKnownTerminal(staticTerminal);
@@ -260,6 +272,7 @@ export class OmpReplyController {
 
   private async commitManagedProjection(
     projection: Projection,
+    terminal = false,
   ): Promise<Exclude<OperationResult, 'unknown'>> {
     if (projection.serialized === this.#lastSuccessfulProjection) return 'success';
     const cardId = this.requireManagedCard();
@@ -275,6 +288,7 @@ export class OmpReplyController {
     } satisfies UpdateRequest;
     this.#pending = {
       kind: 'update',
+      terminal,
       uuid,
       sequence,
       projection,
@@ -304,6 +318,7 @@ export class OmpReplyController {
     } satisfies CloseRequest;
     this.#pending = {
       kind: 'close',
+      terminal: true,
       uuid,
       sequence,
       request,
@@ -324,7 +339,10 @@ export class OmpReplyController {
     terminal: boolean,
   ): Promise<Exclude<OperationResult, 'unknown'>> {
     if (projection.serialized === this.#lastSuccessfulProjection) {
-      if (terminal) this.#deliveryState = 'delivered';
+      if (terminal) {
+        this.#deliveryState = 'delivered';
+        await this.persist();
+      }
       return 'success';
     }
     const messageId = this.#messageId;
@@ -333,6 +351,8 @@ export class OmpReplyController {
       kind: 'patch',
       terminal,
       projection,
+      uuid: randomUUID(),
+      sequence: 0,
       request: {
         path: { message_id: messageId },
         data: { content: projection.serialized },
@@ -347,6 +367,8 @@ export class OmpReplyController {
     const operation = this.#pending;
     if (!operation) throw new Error('OMP Reply has no reserved operation');
     if (operation.exhausted) throw this.pendingError();
+    this.#deliveryState = 'unknown';
+    await this.persist();
 
     for (const delayMs of RETRY_DELAYS_MS) {
       if (delayMs > 0) {
@@ -359,6 +381,7 @@ export class OmpReplyController {
       if (result === 'success') {
         this.completeOperation(operation);
         this.#pending = undefined;
+        await this.persist();
         return 'success';
       }
       if (result === 'rejected') {
@@ -367,9 +390,11 @@ export class OmpReplyController {
         }
         this.#deliveryState = this.#messageKnown ? 'message_known' : 'not_sent';
         this.#pending = undefined;
+        await this.persist();
         return 'rejected';
       }
       this.#deliveryState = 'unknown';
+      await this.persist();
     }
 
     operation.exhausted = true;
@@ -379,11 +404,14 @@ export class OmpReplyController {
   private completeOperation(operation: PendingOperation): void {
     if (operation.kind === 'reply') {
       this.#messageKnown = true;
+      this.#messageKnownAtMs ??= this.#now();
       this.#deliveryState = operation.terminal ? 'delivered' : 'message_known';
       return;
     }
     if (operation.kind === 'patch') {
       this.#lastSuccessfulProjection = operation.projection.serialized;
+      this.#messageKnown = true;
+      this.#messageKnownAtMs ??= this.#now();
       this.#deliveryState = operation.terminal ? 'delivered' : 'message_known';
       return;
     }
@@ -391,10 +419,43 @@ export class OmpReplyController {
     this.#sequence = operation.sequence;
     if (operation.kind === 'update') {
       this.#lastSuccessfulProjection = operation.projection.serialized;
+      this.#messageKnown = true;
+      this.#messageKnownAtMs ??= this.#now();
       this.#deliveryState = 'message_known';
     } else {
       this.#deliveryState = 'delivered';
     }
+  }
+
+  private async persist(): Promise<void> {
+    const journal = this.#journal;
+    const runId = this.#runId;
+    if (!journal || !runId) return;
+    if (this.#deliveryState === 'delivered') {
+      await journal.remove(runId);
+      journal.release(runId);
+      return;
+    }
+    const pending = this.#pending ? durableOperation(this.#pending) : undefined;
+    const reservedSequence =
+      pending && pending.sequence > 0 ? pending.sequence + 1 : this.#sequence + 1;
+    const entry: ActiveDelivery = {
+      runId,
+      target: this.#target,
+      ...(this.#cardId ? { cardId: this.#cardId } : {}),
+      ...(this.#messageId ? { messageId: this.#messageId } : {}),
+      ...(this.#transport ? { transport: this.#transport } : {}),
+      deliveryState: this.#deliveryState,
+      nextSequence: Math.max(this.#sequence + 1, reservedSequence),
+      time: {
+        openedAtMs: this.#openedAtMs,
+        ...(this.#messageKnownAtMs === undefined
+          ? {}
+          : { messageKnownAtMs: this.#messageKnownAtMs }),
+      },
+      ...(pending ? { pending } : {}),
+    };
+    await journal.put(entry);
   }
 
   private async attempt(operation: PendingOperation): Promise<OperationResult> {
@@ -457,6 +518,371 @@ export class OmpReplyController {
     if (!this.#cardId) throw new Error('OMP Reply has no managed card');
     return this.#cardId;
   }
+}
+
+function durableOperation(operation: PendingOperation): DurablePendingOperation {
+  if (operation.kind === 'reply') {
+    return {
+      kind: 'reply',
+      transport: operation.transport,
+      terminal: operation.terminal,
+      uuid: operation.uuid,
+      sequence: 0,
+      request: operation.request,
+    };
+  }
+  if (operation.kind === 'update') {
+    return {
+      kind: 'update',
+      terminal: operation.terminal,
+      uuid: operation.uuid,
+      sequence: operation.sequence,
+      request: operation.request,
+    };
+  }
+  if (operation.kind === 'close') {
+    return {
+      kind: 'close',
+      terminal: true,
+      uuid: operation.uuid,
+      sequence: operation.sequence,
+      request: operation.request,
+    };
+  }
+  return {
+    kind: 'patch',
+    terminal: operation.terminal,
+    uuid: operation.uuid,
+    sequence: 0,
+    request: operation.request,
+  };
+}
+
+const INITIAL_UUID_WINDOW_MS = 60 * 60 * 1_000;
+const MESSAGE_UPDATE_WINDOW_MS = 14 * 24 * 60 * 60 * 1_000;
+
+export async function activateOmpReplyRecovery(input: {
+  channel: LarkChannel;
+  journal: OmpDeliveryJournal;
+  now?: () => number;
+  scanIntervalMs?: number;
+}): Promise<void> {
+  const now = input.now ?? Date.now;
+  await input.journal.load();
+  let scanner = Promise.resolve();
+  const scan = (startup: boolean): Promise<void> => {
+    const result = scanner.then(() => scanRecoverableDeliveries(input.channel, input.journal, now, startup));
+    scanner = result.catch(() => undefined);
+    return result;
+  };
+  await scan(true);
+  input.journal.startScanner(() => scan(false), input.scanIntervalMs);
+}
+
+async function scanRecoverableDeliveries(
+  channel: LarkChannel,
+  journal: OmpDeliveryJournal,
+  now: () => number,
+  startup: boolean,
+): Promise<void> {
+  for (const entry of journal.entries()) {
+    if (journal.isClaimed(entry.runId)) continue;
+    if (
+      entry.deliveryState === 'no_message' ||
+      entry.deliveryState === 'delivered' ||
+      entry.deliveryState === 'not_sent'
+    ) {
+      if (startup) await journal.remove(entry.runId);
+      continue;
+    }
+    if (entry.deliveryState === 'message_known') {
+      if (!startup) continue;
+      if (isKnownEntryExpired(entry, now())) {
+        await failRecovery(journal, entry, 'message-update-window-expired');
+        continue;
+      }
+      await recoverInterrupted(channel, journal, entry, now);
+      continue;
+    }
+    if (!entry.pending) {
+      await failRecovery(journal, entry, 'unknown-delivery-without-operation');
+      continue;
+    }
+    const initialSubmission =
+      entry.pending.kind === 'reply' && entry.time.messageKnownAtMs === undefined;
+    if (
+      initialSubmission
+        ? now() - entry.time.openedAtMs > INITIAL_UUID_WINDOW_MS
+        : isKnownEntryExpired(entry, now())
+    ) {
+      await failRecovery(
+        journal,
+        entry,
+        initialSubmission ? 'initial-uuid-window-expired' : 'message-update-window-expired',
+      );
+      continue;
+    }
+    await retryUnknownOperation(channel, journal, entry, now);
+  }
+}
+
+async function retryUnknownOperation(
+  channel: LarkChannel,
+  journal: OmpDeliveryJournal,
+  entry: ActiveDelivery,
+  now: () => number,
+): Promise<void> {
+  const pending = entry.pending;
+  if (!pending) return;
+  journal.claim(entry.runId);
+  try {
+    const attempt = await attemptDurableOperation(channel, pending, true);
+    if (attempt.result === 'unknown') return;
+    if (attempt.result === 'rejected') {
+      if (pending.kind === 'reply' && entry.time.messageKnownAtMs === undefined) {
+        await journal.remove(entry.runId);
+        return;
+      }
+      if (pending.kind === 'patch') {
+        await failRecovery(journal, entry, 'static-terminal-patch-rejected');
+        return;
+      }
+      const known = clearPending(entry, now, attempt.messageId);
+      await journal.put(known);
+      await recoverInterrupted(channel, journal, known, now);
+      return;
+    }
+
+    const known = clearPending(entry, now, attempt.messageId);
+    await journal.put(known);
+    await recoverInterrupted(channel, journal, known, now);
+  } finally {
+    journal.release(entry.runId);
+  }
+}
+
+function clearPending(
+  entry: ActiveDelivery,
+  now: () => number,
+  messageId?: string,
+): ActiveDelivery {
+  return {
+    ...entry,
+    ...(messageId ? { messageId } : {}),
+    deliveryState: 'message_known',
+    nextSequence:
+      entry.pending && entry.pending.sequence > 0
+        ? Math.max(entry.nextSequence, entry.pending.sequence + 1)
+        : entry.nextSequence,
+    time: {
+      ...entry.time,
+      messageKnownAtMs: entry.time.messageKnownAtMs ?? now(),
+    },
+    pending: undefined,
+  };
+}
+
+async function recoverInterrupted(
+  channel: LarkChannel,
+  journal: OmpDeliveryJournal,
+  entry: ActiveDelivery,
+  now: () => number,
+): Promise<void> {
+  journal.claim(entry.runId);
+  try {
+    const interrupted = markInterrupted(emptyRunState);
+    const staticProjection = makeProjection(renderOmpReplyCard(interrupted));
+    if (entry.transport === 'managed' && entry.cardId) {
+      const sequence = entry.nextSequence;
+      const uuid = randomUUID();
+      const pending: DurablePendingOperation = {
+        kind: 'update',
+        terminal: true,
+        uuid,
+        sequence,
+        request: {
+          path: { card_id: entry.cardId },
+          data: {
+            card: {
+              type: 'card_json',
+              data: JSON.stringify(renderManagedCard(interrupted)),
+            },
+            sequence,
+            uuid,
+          },
+        },
+      };
+      const update = await submitRecoveryOperation(channel, journal, entry, pending);
+      if (update === 'unknown') return;
+      const known = clearPending(
+        { ...entry, nextSequence: sequence + 1, pending },
+        now,
+      );
+      await journal.put(known);
+      if (update === 'rejected') {
+        await patchRecoveredMessage(channel, journal, known, staticProjection);
+        return;
+      }
+      await closeRecoveredManaged(channel, journal, known, now);
+      return;
+    }
+    await patchRecoveredMessage(channel, journal, entry, staticProjection);
+  } finally {
+    journal.release(entry.runId);
+  }
+}
+
+async function closeRecoveredManaged(
+  channel: LarkChannel,
+  journal: OmpDeliveryJournal,
+  entry: ActiveDelivery,
+  now: () => number,
+): Promise<void> {
+  if (!entry.cardId) {
+    await failRecovery(journal, entry, 'managed-recovery-has-no-card-id');
+    return;
+  }
+  const sequence = entry.nextSequence;
+  const uuid = randomUUID();
+  const pending: DurablePendingOperation = {
+    kind: 'close',
+    terminal: true,
+    uuid,
+    sequence,
+    request: {
+      path: { card_id: entry.cardId },
+      data: {
+        settings: JSON.stringify({
+          streaming_mode: false,
+          summary: { content: '已中断' },
+        }),
+        sequence,
+        uuid,
+      },
+    },
+  };
+  const close = await submitRecoveryOperation(channel, journal, entry, pending);
+  if (close === 'unknown') return;
+  const known = clearPending({ ...entry, nextSequence: sequence + 1, pending }, now);
+  await journal.put(known);
+  if (close === 'rejected') {
+    await patchRecoveredMessage(
+      channel,
+      journal,
+      known,
+      makeProjection(renderOmpReplyCard(markInterrupted(emptyRunState))),
+    );
+    return;
+  }
+  await journal.remove(entry.runId);
+}
+
+async function patchRecoveredMessage(
+  channel: LarkChannel,
+  journal: OmpDeliveryJournal,
+  entry: ActiveDelivery,
+  projection: Projection,
+): Promise<void> {
+  if (!entry.messageId) {
+    await failRecovery(journal, entry, 'same-message-recovery-has-no-message-id');
+    return;
+  }
+  const content =
+    entry.transport === 'markdown'
+      ? JSON.stringify(markdownPost(renderOmpReplyMarkdown(markInterrupted(emptyRunState))))
+      : projection.serialized;
+  const pending: DurablePendingOperation = {
+    kind: 'patch',
+    terminal: true,
+    uuid: randomUUID(),
+    sequence: 0,
+    request: {
+      path: { message_id: entry.messageId },
+      data: { content },
+    },
+  };
+  const patch = await submitRecoveryOperation(channel, journal, entry, pending);
+  if (patch === 'unknown') return;
+  if (patch === 'rejected') {
+    await failRecovery(journal, entry, 'static-terminal-patch-rejected');
+    return;
+  }
+  await journal.remove(entry.runId);
+}
+
+async function submitRecoveryOperation(
+  channel: LarkChannel,
+  journal: OmpDeliveryJournal,
+  entry: ActiveDelivery,
+  pending: DurablePendingOperation,
+): Promise<OperationResult> {
+  await journal.put({
+    ...entry,
+    deliveryState: 'unknown',
+    nextSequence:
+      pending.sequence > 0 ? Math.max(entry.nextSequence, pending.sequence + 1) : entry.nextSequence,
+    pending,
+  });
+  for (const delayMs of RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    }
+    const attempt = await attemptDurableOperation(channel, pending, true);
+    if (attempt.result !== 'unknown') return attempt.result;
+  }
+  return 'unknown';
+}
+
+async function attemptDurableOperation(
+  channel: LarkChannel,
+  operation: DurablePendingOperation,
+  exactRetry: boolean,
+): Promise<{ result: OperationResult; messageId?: string }> {
+  try {
+    if (operation.kind === 'reply') {
+      const response = await channel.rawClient.im.v1.message.reply(operation.request);
+      const code = response.code;
+      const messageId = response.data?.message_id;
+      if (
+        (code === undefined || code === 0) &&
+        typeof messageId === 'string' &&
+        messageId.trim()
+      ) {
+        return { result: 'success', messageId };
+      }
+      if (code === CARD_ALREADY_BOUND && exactRetry) return { result: 'success' };
+      return {
+        result: typeof code === 'number' && code !== 0 ? 'rejected' : 'unknown',
+      };
+    }
+    if (operation.kind === 'patch') {
+      const response = await channel.rawClient.im.v1.message.patch(operation.request);
+      const code = response.code;
+      return { result: code === 0 ? 'success' : typeof code === 'number' ? 'rejected' : 'unknown' };
+    }
+    const response =
+      operation.kind === 'update'
+        ? await channel.rawClient.cardkit.v1.card.update(operation.request)
+        : await channel.rawClient.cardkit.v1.card.settings(operation.request);
+    const code = response.code;
+    return { result: code === 0 ? 'success' : typeof code === 'number' ? 'rejected' : 'unknown' };
+  } catch (error) {
+    return { result: isClearRejection(error) ? 'rejected' : 'unknown' };
+  }
+}
+
+function isKnownEntryExpired(entry: ActiveDelivery, nowMs: number): boolean {
+  const knownAt = entry.time.messageKnownAtMs;
+  return knownAt === undefined || nowMs - knownAt > MESSAGE_UPDATE_WINDOW_MS;
+}
+
+async function failRecovery(
+  journal: OmpDeliveryJournal,
+  entry: ActiveDelivery,
+  reason: string,
+): Promise<void> {
+  journal.recordFailure(entry.runId, reason);
+  await journal.remove(entry.runId);
 }
 
 function makeProjection(card: object): Projection {

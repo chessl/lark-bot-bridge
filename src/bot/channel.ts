@@ -56,7 +56,12 @@ import { handleCommentMention } from './comments';
 import { CotClient, CotPublisher, finalAnswerOnlyState, withCotEvents } from './cot';
 import { startKeepalive } from './keepalive';
 import { fetchKnownChats } from './lark-info';
-import { deriveOmpReplyTarget, OmpReplyController } from './omp-reply-controller';
+import { OmpDeliveryJournal } from './omp-delivery-journal';
+import {
+  activateOmpReplyRecovery,
+  deriveOmpReplyTarget,
+  OmpReplyController,
+} from './omp-reply-controller';
 import { PendingQueue } from './pending-queue';
 import { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
@@ -158,6 +163,7 @@ function stringifyArgs(args: unknown[]): string {
 export interface BridgeChannel {
   channel: LarkChannel;
   disconnect(): Promise<void>;
+  activateDeliveryRecovery?(): Promise<void>;
 }
 
 export interface StartChannelDeps {
@@ -169,10 +175,16 @@ export interface StartChannelDeps {
   controls: Controls;
   appPaths?: Pick<
     AppPaths,
-    'rootDir' | 'secretsFile' | 'keystoreSaltFile' | 'mediaDir' | 'callbackNoncesFile'
+    | 'rootDir'
+    | 'secretsFile'
+    | 'keystoreSaltFile'
+    | 'mediaDir'
+    | 'callbackNoncesFile'
+    | 'activeDeliveriesFile'
   >;
   wallNow?: () => number;
   monoNow?: () => number;
+  deferDeliveryRecovery?: boolean;
 }
 
 export async function startChannel(deps: StartChannelDeps): Promise<BridgeChannel> {
@@ -258,6 +270,15 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   };
 
   const channel = createLarkChannel(opts);
+  const deliveryJournal = deps.appPaths?.activeDeliveriesFile
+    ? new OmpDeliveryJournal({ path: deps.appPaths.activeDeliveriesFile })
+    : undefined;
+  let deliveryRecoveryActivated = false;
+  const activateDeliveryRecovery = async (): Promise<void> => {
+    if (!deliveryJournal || deliveryRecoveryActivated) return;
+    deliveryRecoveryActivated = true;
+    await activateOmpReplyRecovery({ channel, journal: deliveryJournal });
+  };
   const cotClient = new CotClient(channel.rawClient);
   const nativeServer = await NativeLarkServer.start({
     profile: controls.profile,
@@ -317,6 +338,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           sessions,
           sessionCatalog,
           media,
+          deliveryJournal,
           batch,
           controls,
           cotClient,
@@ -468,6 +490,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     await nativeServer.close();
     throw error;
   }
+  if (!deps.deferDeliveryRecovery) await activateDeliveryRecovery();
   const ownerRefresh = createOwnerRefreshController({
     controls,
     source: channel,
@@ -507,12 +530,14 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   });
 
   return {
+    activateDeliveryRecovery,
     channel,
     disconnect: async () => {
       scopedRuns.pauseNewRuns('bridge-disconnect');
       ownerRefresh.stop();
       knownChatsRefresh.stop();
       keepalive.stop();
+      await deliveryJournal?.stopScanner();
       // Stop meeting timers but stay in the meetings: /reconnect tears the
       // channel down and rebuilds it, and auto-leaving every meeting on a
       // reconnect would be surprising.
@@ -527,6 +552,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         sessionCatalog?.flush(),
         callbackNonceStore?.flush(),
         workspaces.flush(),
+        deliveryJournal?.flush(),
       ]);
       if (stopAllResult.status === 'rejected') {
         log.fail('disconnect', stopAllResult.reason, { step: 'stopAll' });
@@ -781,6 +807,7 @@ interface RunBatchDeps {
   controls: Controls;
   cotClient: CotClient;
   callbackAuth?: CallbackAuth;
+  deliveryJournal?: OmpDeliveryJournal;
   lastRunModelByScope: Map<string, string>;
   messageReceipts: WeakMap<NormalizedMessage, RunMetricReceipt>;
   monoNow: () => number;
@@ -799,6 +826,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     controls,
     cotClient,
     callbackAuth,
+    deliveryJournal,
     lastRunModelByScope,
     messageReceipts,
     monoNow,
@@ -994,6 +1022,12 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     const reply = new OmpReplyController({
       channel,
       target: replyTarget,
+      ...(deliveryJournal
+        ? {
+            journal: deliveryJournal,
+            runId: run.metadata.runId,
+          }
+        : {}),
     });
     try {
       await reply.open(state);
@@ -1017,6 +1051,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           err: stopErr instanceof Error ? stopErr.message : String(stopErr),
         }),
       );
+    } finally {
+      reply.release();
     }
     return;
   }
