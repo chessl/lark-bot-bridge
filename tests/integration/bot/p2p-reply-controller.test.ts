@@ -512,7 +512,7 @@ describe('P2P OMP Reply', () => {
     },
   );
 
-  it('does not retry an explicit business rejection', async () => {
+  it('does not retry a business rejection before changing transport', async () => {
     const h = await createHarness({
       reply: async () => ({ code: 99991400, msg: 'permission denied' }),
     });
@@ -522,8 +522,20 @@ describe('P2P OMP Reply', () => {
     void h.channel.handlers.message?.(message('om_rejected', 'run'));
     await vi.waitFor(() => expect(h.agent.runs[0]?.stopped).toBe(true));
 
-    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
-    expect(h.channel.operations).not.toContain('omp:consume');
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledTimes(3);
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ data: expect.objectContaining({ msg_type: 'interactive' }) }),
+    );
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ data: expect.objectContaining({ msg_type: 'interactive' }) }),
+    );
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ data: expect.objectContaining({ msg_type: 'post' }) }),
+    );
+    expect(h.channel.operations).toContain('omp:consume');
     expect(h.channel.createdCards).toHaveLength(1);
     expect(h.channel.sent).toHaveLength(0);
   });
