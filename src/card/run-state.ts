@@ -31,6 +31,27 @@ export interface LifecycleActivity {
   kind: LifecycleKind;
   label: string;
 }
+export interface RunMetrics {
+  receivedAtWall?: number;
+  receivedAtMono?: number;
+  messageCreatedAtWall?: number;
+  promptSentAtMono?: number;
+  commandTextAtMono?: number;
+  firstTextAtMono?: number;
+  terminalAtMono?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  toolIds: readonly string[];
+  modelId?: string;
+  effort?: string;
+  contextPercent?: number;
+}
+
+export type RunMetricReceipt = Readonly<
+  Required<Pick<RunMetrics, 'receivedAtWall' | 'receivedAtMono'>> &
+    Pick<RunMetrics, 'messageCreatedAtWall'>
+>;
+
 
 export interface RunState {
   blocks: Block[];
@@ -38,6 +59,7 @@ export interface RunState {
   reasoning: { content: string; active: boolean };
   footer: FooterStatus;
   terminal: Terminal;
+  metrics: RunMetrics;
   errorMsg?: string;
   idleTimeoutMinutes?: number;
   pendingAssistant?: string;
@@ -45,21 +67,28 @@ export interface RunState {
   reasoningEntries?: readonly string[];
   reasoningTotal?: number;
   activityStack?: readonly LifecycleActivity[];
-  knownToolIds?: readonly string[];
 }
 
-export const initialState: RunState = {
-  blocks: [],
-  reasoning: { content: '', active: false },
-  footer: 'thinking',
-  terminal: 'running',
-  reasoningEntries: [],
-  reasoningTotal: 0,
-  activityStack: [],
-  knownToolIds: [],
-};
+export function createRunState(receipt?: RunMetricReceipt): RunState {
+  return {
+    blocks: [],
+    reasoning: { content: '', active: false },
+    footer: 'thinking',
+    terminal: 'running',
+    metrics: { ...receipt, toolIds: [] },
+    reasoningEntries: [],
+    reasoningTotal: 0,
+    activityStack: [],
+  };
+}
 
-export function reduce(state: RunState, evt: AgentEvent): RunState {
+export const initialState: RunState = createRunState();
+
+export function reduce(
+  state: RunState,
+  evt: AgentEvent,
+  monoNow: () => number = () => performance.now(),
+): RunState {
   if (state.terminal !== 'running') {
     return ignoreEvent(
       state,
@@ -69,15 +98,52 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
   }
 
   switch (evt.type) {
-    case 'text':
+    case 'system':
       return {
         ...state,
+        metrics: {
+          ...state.metrics,
+          ...(evt.modelId ? { modelId: evt.modelId } : {}),
+          ...(evt.effort ? { effort: evt.effort } : {}),
+          ...(evt.contextPercent !== undefined ? { contextPercent: evt.contextPercent } : {}),
+        },
+      };
+
+    case 'prompt_sent':
+      return state.metrics.promptSentAtMono === undefined
+        ? { ...state, metrics: { ...state.metrics, promptSentAtMono: monoNow() } }
+        : state;
+
+    case 'text_started':
+      return captureFirstText(state, monoNow);
+
+    case 'command_text_started':
+      return state.metrics.commandTextAtMono === undefined
+        ? { ...state, metrics: { ...state.metrics, commandTextAtMono: monoNow() } }
+        : state;
+
+    case 'text': {
+      const timed =
+        evt.source === 'command' &&
+        state.metrics.firstTextAtMono === undefined &&
+        state.metrics.commandTextAtMono !== undefined
+          ? {
+              ...state,
+              metrics: { ...state.metrics, firstTextAtMono: state.metrics.commandTextAtMono },
+            }
+          : evt.delta
+            ? captureFirstText(state, monoNow)
+            : state;
+      return {
+        ...timed,
         assistantDraft: `${state.assistantDraft ?? ''}${evt.delta}`,
         footer: 'streaming',
       };
+    }
 
     case 'final_text': {
-      const committed = commitPendingAsReasoning(state);
+      const timed = evt.content ? captureFirstText(state, monoNow) : state;
+      const committed = commitPendingAsReasoning(timed);
       return {
         ...committed,
         assistantDraft: undefined,
@@ -119,6 +185,9 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
     case 'compaction_end':
       return popActivity(state, 'compaction');
 
+    case 'usage':
+      return addUsage(state, evt);
+
     case 'error': {
       const terminal =
         evt.terminationReason === 'interrupted'
@@ -126,22 +195,18 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
           : evt.terminationReason === 'timeout'
             ? 'idle_timeout'
             : 'error';
-      return terminateAbnormally(state, terminal);
+      return terminateAbnormally(state, terminal, monoNow());
     }
 
     case 'done': {
       if (evt.terminationReason === 'interrupted') {
-        return terminateAbnormally(state, 'interrupted');
+        return terminateAbnormally(state, 'interrupted', monoNow());
       }
       if (evt.terminationReason === 'timeout') {
-        return terminateAbnormally(state, 'idle_timeout');
+        return terminateAbnormally(state, 'idle_timeout', monoNow());
       }
-      return terminateNormally(state);
+      return terminateNormally(state, monoNow());
     }
-
-    case 'system':
-    case 'usage':
-      return state;
 
     default: {
       const _exhaustive: never = evt;
@@ -150,18 +215,62 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
   }
 }
 
-export function markInterrupted(state: RunState): RunState {
-  return state.terminal === 'running' ? terminateAbnormally(state, 'interrupted') : state;
+export function markInterrupted(state: RunState, atMono = performance.now()): RunState {
+  return state.terminal === 'running'
+    ? terminateAbnormally(state, 'interrupted', atMono)
+    : state;
 }
 
-export function markIdleTimeout(state: RunState, minutes: number): RunState {
+export function markIdleTimeout(
+  state: RunState,
+  minutes: number,
+  atMono = performance.now(),
+): RunState {
   if (state.terminal !== 'running') return state;
-  return { ...terminateAbnormally(state, 'idle_timeout'), idleTimeoutMinutes: minutes };
+  return {
+    ...terminateAbnormally(state, 'idle_timeout', atMono),
+    idleTimeoutMinutes: minutes,
+  };
 }
 
-export function finalizeIfRunning(state: RunState): RunState {
-  return state.terminal === 'running' ? terminateNormally(state) : state;
+export function finalizeIfRunning(state: RunState, atMono = performance.now()): RunState {
+  return state.terminal === 'running' ? terminateNormally(state, atMono) : state;
 }
+function captureFirstText(state: RunState, monoNow: () => number): RunState {
+  return state.metrics.firstTextAtMono === undefined
+    ? { ...state, metrics: { ...state.metrics, firstTextAtMono: monoNow() } }
+    : state;
+}
+
+function addUsage(
+  state: RunState,
+  event: Extract<AgentEvent, { type: 'usage' }>,
+): RunState {
+  const inputParts = [event.inputTokens, event.cacheReadTokens, event.cacheWriteTokens].filter(
+    (value): value is number => value !== undefined && Number.isFinite(value) && value >= 0,
+  );
+  const output =
+    event.outputTokens !== undefined &&
+    Number.isFinite(event.outputTokens) &&
+    event.outputTokens >= 0
+      ? event.outputTokens
+      : undefined;
+  if (inputParts.length === 0 && output === undefined) return state;
+  const input = inputParts.reduce((sum, value) => sum + value, 0);
+  return {
+    ...state,
+    metrics: {
+      ...state.metrics,
+      ...(inputParts.length > 0
+        ? { inputTokens: (state.metrics.inputTokens ?? 0) + input }
+        : {}),
+      ...(output !== undefined
+        ? { outputTokens: (state.metrics.outputTokens ?? 0) + output }
+        : {}),
+    },
+  };
+}
+
 
 function completeDraft(state: RunState): RunState {
   if (!state.assistantDraft) return state;
@@ -189,7 +298,7 @@ function addReasoning(state: RunState, content: string): RunState {
 }
 
 function upsertTool(state: RunState, id: string, rawName: string): RunState {
-  const known = state.knownToolIds ?? [];
+  const known = state.metrics.toolIds;
   const existing = state.blocks.find(
     (block): block is Extract<Block, { kind: 'tool' }> =>
       block.kind === 'tool' && block.tool.id === id,
@@ -213,14 +322,17 @@ function upsertTool(state: RunState, id: string, rawName: string): RunState {
   return {
     ...state,
     blocks,
-    knownToolIds: alreadyKnown ? known : [...known, id],
+    metrics: {
+      ...state.metrics,
+      toolIds: alreadyKnown ? known : [...known, id],
+    },
     footer: 'tool_running',
     reasoning: { ...state.reasoning, active: false },
   };
 }
 
 function finishTool(state: RunState, id: string, isError: boolean): RunState {
-  if (!(state.knownToolIds ?? []).includes(id)) {
+  if (!state.metrics.toolIds.includes(id)) {
     return ignoreEvent(state, { type: 'tool_result', id }, 'tool-end-without-start');
   }
   let changed = false;
@@ -255,7 +367,7 @@ function popActivity(state: RunState, kind: LifecycleKind): RunState {
   return state;
 }
 
-function terminateNormally(state: RunState): RunState {
+function terminateNormally(state: RunState, atMono: number): RunState {
   const completed = completeDraft(state);
   const finalText = completed.pendingAssistant ?? completed.finalText;
   return {
@@ -266,11 +378,16 @@ function terminateNormally(state: RunState): RunState {
     reasoning: { ...completed.reasoning, active: false },
     footer: null,
     terminal: 'done',
+    metrics: { ...completed.metrics, terminalAtMono: atMono },
     activityStack: [],
   };
 }
 
-function terminateAbnormally(state: RunState, terminal: Exclude<Terminal, 'running' | 'done'>): RunState {
+function terminateAbnormally(
+  state: RunState,
+  terminal: Exclude<Terminal, 'running' | 'done'>,
+  atMono: number,
+): RunState {
   const committed = commitPendingAsReasoning(completeDraft(state));
   return {
     ...committed,
@@ -280,6 +397,7 @@ function terminateAbnormally(state: RunState, terminal: Exclude<Terminal, 'runni
     reasoning: { ...committed.reasoning, active: false },
     footer: null,
     terminal,
+    metrics: { ...committed.metrics, terminalAtMono: atMono },
     activityStack: [],
   };
 }

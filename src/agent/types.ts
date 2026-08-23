@@ -2,8 +2,18 @@ import type { NativeMcpEndpoint } from './native-tools';
 import type { AgentAvailability } from './preflight';
 
 export type AgentEvent =
-  | { type: 'system'; sessionId?: string; cwd?: string; model?: string }
-  | { type: 'text'; delta: string }
+  | {
+      type: 'system';
+      sessionId?: string;
+      cwd?: string;
+      modelId?: string;
+      effort?: string;
+      contextPercent?: number;
+    }
+  | { type: 'prompt_sent' }
+  | { type: 'text_started' }
+  | { type: 'command_text_started' }
+  | { type: 'text'; delta: string; source?: 'command' }
   | { type: 'final_text'; content: string }
   | { type: 'reasoning'; content: string }
   | { type: 'thinking'; delta: string }
@@ -48,9 +58,8 @@ export type AgentEvent =
       type: 'usage';
       inputTokens?: number;
       outputTokens?: number;
-      cachedInputTokens?: number;
-      reasoningOutputTokens?: number;
-      costUsd?: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
     }
   | {
       type: 'done';

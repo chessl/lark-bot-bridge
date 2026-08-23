@@ -36,16 +36,23 @@ describe('OmpAdapter process contract', () => {
     });
 
     expect(await collect(run.events)).toEqual([
-      { type: 'system', sessionId: 'omp-session-1', model: 'openai/gpt-test' },
+      { type: 'prompt_sent' },
+      {
+        type: 'system',
+        sessionId: 'omp-session-1',
+        modelId: 'gpt-test',
+        effort: 'high',
+        contextPercent: 7.25,
+      },
+      { type: 'text_started' },
       { type: 'final_text', content: 'hello user' },
       { type: 'reasoning', content: 'approved reasoning' },
       {
         type: 'usage',
         inputTokens: 10,
         outputTokens: 4,
-        cachedInputTokens: 2,
-        reasoningOutputTokens: undefined,
-        costUsd: 0.01,
+        cacheReadTokens: 2,
+        cacheWriteTokens: 3,
       },
       { type: 'tool_use', id: 'tool-1', name: 'read', input: { path: 'README.md' } },
       { type: 'tool_result', id: 'tool-1', output: 'done', isError: false },
@@ -180,14 +187,14 @@ rl.on('line', (line) => {
   if (command.type === 'negotiate_protocol') {
     console.log(JSON.stringify({ id: command.id, type: 'response', command: 'negotiate_protocol', success: true, data: { protocolVersion: 2 } }));
   } else if (command.type === 'get_state') {
-    console.log(JSON.stringify({ id: command.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'omp-session-1', model: { provider: 'openai', id: 'gpt-test' } } }));
+    console.log(JSON.stringify({ id: command.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'omp-session-1', model: { provider: 'openai', id: 'gpt-test' }, thinkingLevel: 'high', contextUsage: { tokens: 725, contextWindow: 10000, percent: 7.25 } } }));
   } else if (command.type === 'prompt') {
     console.log(JSON.stringify({ id: command.id, type: 'response', command: 'prompt', success: true, data: { agentInvoked: true } }));
     console.log(JSON.stringify({ type: 'agent_start' }));
     console.log(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'checking' } }));
     console.log(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello ' } }));
     console.log(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'user' } }));
-    console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'approved reasoning' }, { type: 'text', text: 'hello user' }], usage: { input: 10, output: 4, cacheRead: 2, cost: { total: 0.01 } } } }));
+    console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'approved reasoning' }, { type: 'text', text: 'hello user' }], usage: { input: 10, output: 4, cacheRead: 2, cacheWrite: 3, cost: { total: 0.01 } } } }));
     console.log(JSON.stringify({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'read', args: { path: 'README.md' } }));
     console.log(JSON.stringify({ type: 'tool_execution_end', toolCallId: 'tool-1', result: { content: [{ type: 'text', text: 'done' }] } }));
     console.log(JSON.stringify({ type: 'agent_end', isTerminal: false }));

@@ -784,6 +784,231 @@ describe('P2P OMP Reply', () => {
     expect(rejection.channel.rawClient.im.v1.message.reply).not.toHaveBeenCalled();
     expect(rejection.channel.sent[0]?.options).toMatchObject({ replyTo: 'om_rejection' });
   });
+  it('renders all measured identity, timing, usage, and unique-tool facts in one footer', async () => {
+    const h = await createHarness({
+      wallNow: clock(1_000_500),
+      monoNow: clock(100, 2_600, 3_850, 125_100),
+      events: [
+        { type: 'prompt_sent' },
+        {
+          type: 'system',
+          modelId: 'gpt-test',
+          effort: 'high',
+          contextPercent: 7.25,
+        },
+        { type: 'text_started' },
+        { type: 'final_text', content: 'measured answer' },
+        {
+          type: 'usage',
+          inputTokens: 900,
+          cacheReadTokens: 50,
+          cacheWriteTokens: 25,
+          outputTokens: 999,
+        },
+        {
+          type: 'usage',
+          inputTokens: 100,
+          cacheReadTokens: 10,
+          cacheWriteTokens: 15,
+          outputTokens: 1,
+        },
+        { type: 'usage' },
+        { type: 'tool_use', id: 'tool-a', name: 'read', input: {} },
+        { type: 'tool_use', id: 'tool-a', name: 'read', input: {} },
+        { type: 'tool_result', id: 'tool-a', output: '', isError: false },
+        { type: 'tool_use', id: 'tool-b', name: 'bash', input: {} },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_metrics', 'run', 1_000_000));
+    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+
+    const metrics = cardElements(h.channel.updates.at(-1)?.card).filter(
+      (element) => 'element_id' in element && element.element_id === 'metrics',
+    );
+    expect(metrics).toEqual([
+      expect.objectContaining({
+        content:
+          "<font color='grey'>gpt-test · effort high · ctx 7.3% · 总耗时 2m5s · 飞书到达 ≈0.5s · 前置 2.5s · 首字 1.3s · OMP 2m3s · 输入 1.1k · 输出 1.0k · 工具 2</font>",
+      }),
+    ]);
+    expect(JSON.stringify(metrics)).not.toContain('provider');
+  });
+
+  it.each([
+    {
+      name: 'streamed assistant text',
+      visible: [
+        { type: 'text_started' },
+        { type: 'final_text', content: 'streamed' },
+      ],
+    },
+    {
+      name: 'non-streaming assistant text',
+      visible: [{ type: 'final_text', content: 'complete' }],
+    },
+    {
+      name: 'local command output',
+      visible: [
+        { type: 'command_text_started' },
+        { type: 'text', delta: 'local', source: 'command' },
+      ],
+    },
+  ] satisfies readonly {
+    name: string;
+    visible: readonly AgentEvent[];
+  }[])('measures first text for $name at the same high seam', async ({ visible }) => {
+    const h = await createHarness({
+      wallNow: clock(1_000),
+      monoNow: clock(0, 100, 500, 1_000),
+      events: [
+        { type: 'prompt_sent' },
+        ...visible,
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message(`om_first_${visible.length}`, 'run'));
+    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+
+    expect(JSON.stringify(h.channel.updates.at(-1)?.card)).toContain('首字 0.4s');
+  });
+
+  it('starts receipt intervals from the last message admitted to a Message Batch', async () => {
+    const h = await createHarness({
+      wallNow: clock(1_000, 2_000),
+      monoNow: clock(0, 100, 1_100, 2_100),
+      events: [
+        { type: 'prompt_sent' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_batch_first', 'first'));
+    await h.channel.handlers.message?.(message('om_batch_last', 'last'));
+    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+
+    const outbound = JSON.stringify(h.channel.updates.at(-1)?.card);
+    expect(outbound).toContain('总耗时 2.0s');
+    expect(outbound).toContain('前置 1.0s');
+    expect(h.channel.rawClient.im.v1.message.reply.mock.calls[0]?.[0]).toMatchObject({
+      path: { message_id: 'om_batch_last' },
+    });
+  });
+
+
+  it.each([
+    { name: 'zero', received: 600_000, created: 600_000, expected: '飞书到达 ≈0.0s' },
+    { name: 'ten minutes', received: 600_000, created: 0, expected: '飞书到达 ≈10m0s' },
+    { name: 'negative', received: 599_999, created: 600_000, expected: undefined },
+    { name: 'over ten minutes', received: 600_001, created: 0, expected: undefined },
+    { name: 'missing', received: 600_000, created: null, expected: undefined },
+  ])('gates $name Feishu arrival at the inclusive trust boundary', async (sample) => {
+    const h = await createHarness({
+      wallNow: clock(sample.received),
+      monoNow: clock(0, 1_000, 2_000),
+      events: [
+        { type: 'prompt_sent' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message(`om_arrival_${sample.name}`, 'run', sample.created));
+    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+
+    const outbound = JSON.stringify(h.channel.updates.at(-1)?.card);
+    if (sample.expected) expect(outbound).toContain(sample.expected);
+    else expect(outbound).not.toContain('飞书到达');
+    expect(outbound).not.toContain('首字');
+  });
+
+  it.each([
+    {
+      name: 'done',
+      terminal: { type: 'done', terminationReason: 'normal' },
+    },
+    {
+      name: 'interrupted',
+      terminal: { type: 'done', terminationReason: 'interrupted' },
+    },
+    {
+      name: 'idle timeout',
+      terminal: { type: 'done', terminationReason: 'timeout' },
+    },
+    {
+      name: 'error',
+      terminal: { type: 'error', message: 'SECRET', terminationReason: 'failed' },
+    },
+  ] satisfies readonly {
+    name: string;
+    terminal: AgentEvent;
+  }[])('freezes available metrics on $name without inventing missing values', async ({ terminal }) => {
+    const h = await createHarness({
+      wallNow: clock(1_000),
+      monoNow: clock(10, 1_010, 61_010),
+      events: [
+        { type: 'prompt_sent' },
+        { type: 'usage', inputTokens: 12 },
+        terminal,
+        { type: 'usage', inputTokens: 999, outputTokens: 999 },
+      ],
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message(`om_frozen_${terminal.type}`, 'run'));
+    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+
+    const outbound = JSON.stringify(h.channel.updates.at(-1)?.card);
+    expect(outbound).toContain('总耗时 1m1s');
+    expect(outbound).toContain('前置 1.0s');
+    expect(outbound).toContain('OMP 1m0s');
+    expect(outbound).toContain('输入 12');
+    expect(outbound).not.toContain('输出 ');
+    expect(outbound).not.toContain('首字');
+    expect(outbound).not.toContain('999');
+  });
+
+  it('keeps the frozen metric projection byte-identical across exact delivery retries', async () => {
+    const h = await createHarness({
+      wallNow: clock(1_000),
+      monoNow: clock(0, 1_000, 2_000, 3_000),
+      events: [
+        { type: 'prompt_sent' },
+        { type: 'text_started' },
+        { type: 'usage', inputTokens: 5, cacheReadTokens: 2, outputTokens: 3 },
+        { type: 'tool_use', id: 'tool-once', name: 'read', input: {} },
+        { type: 'tool_use', id: 'tool-once', name: 'read', input: {} },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      update: async () => {
+        throw new Error('upstream unavailable');
+      },
+    });
+    await startTestBridge(h);
+    vi.useFakeTimers();
+
+    void h.channel.handlers.message?.(message('om_metric_retry', 'run'));
+    await vi.waitFor(() =>
+      expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce(),
+    );
+    await vi.runAllTimersAsync();
+    await vi.waitFor(() => expect(h.agent.runs[0]?.stopped).toBe(true));
+
+    const updates = h.channel.rawClient.cardkit.v1.card.update.mock.calls.map(([input]) =>
+      JSON.stringify(input),
+    );
+    expect(updates).toHaveLength(3);
+    expect(updates).toEqual([updates[0], updates[0], updates[0]]);
+    expect(updates[0]).toContain('输入 7');
+    expect(updates[0]).toContain('输出 3');
+    expect(updates[0]).toContain('工具 1');
+  });
+
 });
 
 async function createHarness(
@@ -794,6 +1019,8 @@ async function createHarness(
     reply?: (input: unknown) => Promise<unknown>;
     update?: (input: unknown) => Promise<unknown>;
     close?: (input: unknown) => Promise<unknown>;
+    wallNow?: () => number;
+    monoNow?: () => number;
   } = {},
 ): Promise<{
   tmp: TmpProfile;
@@ -803,6 +1030,8 @@ async function createHarness(
   workspaces: WorkspaceStore;
   profileConfig: ProfileConfig;
   controls: Controls;
+  wallNow?: () => number;
+  monoNow?: () => number;
 }> {
   const tmp = await createTmpProfile('p2p-reply-controller-');
   const workspace = await realpath(tmp.workspace);
@@ -863,7 +1092,17 @@ async function createHarness(
     await Promise.all([sessions.flush(), workspaces.flush()]);
     await tmp.cleanup();
   });
-  return { tmp, channel, agent, sessions, workspaces, profileConfig, controls };
+  return {
+    tmp,
+    channel,
+    agent,
+    sessions,
+    workspaces,
+    profileConfig,
+    controls,
+    ...(options.wallNow ? { wallNow: options.wallNow } : {}),
+    ...(options.monoNow ? { monoNow: options.monoNow } : {}),
+  };
 }
 async function startTestBridge(harness: {
   profileConfig: ProfileConfig;
@@ -871,6 +1110,8 @@ async function startTestBridge(harness: {
   sessions: SessionStore;
   workspaces: WorkspaceStore;
   controls: Controls;
+  wallNow?: () => number;
+  monoNow?: () => number;
 }): Promise<void> {
   const bridge = await startChannel({
     cfg: harness.profileConfig,
@@ -878,6 +1119,8 @@ async function startTestBridge(harness: {
     sessions: harness.sessions,
     workspaces: harness.workspaces,
     controls: harness.controls,
+    ...(harness.wallNow ? { wallNow: harness.wallNow } : {}),
+    ...(harness.monoNow ? { monoNow: harness.monoNow } : {}),
   });
   cleanups.push(() => bridge.disconnect());
 }
@@ -994,18 +1237,21 @@ function createControls(profileConfig: ProfileConfig): Controls {
   };
 }
 
-function message(messageId: string, content: string): NormalizedMessage {
+function message(
+  messageId: string,
+  content: string,
+  createTime: number | null = 1760000001000,
+): NormalizedMessage {
   return {
     messageId,
-    chatId: 'oc_dm',
+    chatId: 'oc_p2p',
     chatType: 'p2p',
     senderId: 'ou_user',
-    senderName: 'User',
     content,
-    rawContentType: 'text',
+    contentType: 'text',
     resources: [],
     mentionedBot: false,
-    createTime: 1760000001000,
+    ...(createTime === null ? {} : { createTime }),
   } as unknown as NormalizedMessage;
 }
 
@@ -1073,4 +1319,13 @@ async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void
     if (Date.now() >= deadline) throw new Error('timed out waiting for condition');
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+function clock(...values: number[]): () => number {
+  let index = 0;
+  return () => {
+    const value = values[index++];
+    if (value === undefined) throw new Error(`controlled clock exhausted at call ${index}`);
+    return value;
+  };
 }

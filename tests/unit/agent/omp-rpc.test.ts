@@ -83,7 +83,7 @@ describe('OmpRpcTranslator', () => {
         type: 'message_update',
         assistantMessageEvent: { type: 'text_delta', delta: 'streamed' },
       }),
-    ).toEqual([]);
+    ).toEqual([{ type: 'text_started' }]);
     expect(
       translate(translator, {
         type: 'message_end',
@@ -145,7 +145,9 @@ describe('OmpRpcTranslator', () => {
 
   it('finishes a local-only prompt and surfaces prompt failures', () => {
     const local = new OmpRpcTranslator();
-    expect(translate(local, { type: 'command_output', output: 'local result' })).toEqual([]);
+    expect(translate(local, { type: 'command_output', output: 'local result' })).toEqual([
+      { type: 'command_text_started' },
+    ]);
     expect(
       translate(local, {
         type: 'response',
@@ -154,12 +156,14 @@ describe('OmpRpcTranslator', () => {
         data: { agentInvoked: false },
       }),
     ).toEqual([
-      { type: 'text', delta: 'local result' },
+      { type: 'text', delta: 'local result', source: 'command' },
       { type: 'done', terminationReason: 'normal' },
     ]);
 
     const invoked = new OmpRpcTranslator();
-    expect(translate(invoked, { type: 'command_output', output: 'internal output' })).toEqual([]);
+    expect(translate(invoked, { type: 'command_output', output: 'internal output' })).toEqual([
+      { type: 'command_text_started' },
+    ]);
     expect(translate(invoked, { type: 'agent_end' })).toEqual([
       { type: 'done', terminationReason: 'normal' },
     ]);
@@ -173,6 +177,60 @@ describe('OmpRpcTranslator', () => {
         error: 'no authenticated model',
       }),
     ).toEqual([{ type: 'error', message: 'no authenticated model', terminationReason: 'failed' }]);
+  });
+
+  it('takes identity and per-assistant usage only from source-backed RPC fields', () => {
+    const translator = new OmpRpcTranslator();
+    expect(
+      translate(translator, {
+        type: 'response',
+        command: 'get_state',
+        success: true,
+        data: {
+          model: { provider: 'SECRET_PROVIDER', id: 'model-id' },
+          thinkingLevel: 'medium',
+          contextUsage: { tokens: 1_234, contextWindow: 10_000, percent: 12.34 },
+        },
+      }),
+    ).toEqual([
+      {
+        type: 'system',
+        modelId: 'model-id',
+        effort: 'medium',
+        contextPercent: 12.34,
+      },
+    ]);
+    expect(
+      translate(translator, {
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [],
+          usage: { input: 10, cacheRead: 20, cacheWrite: 30, output: 4 },
+        },
+      }),
+    ).toEqual([
+      {
+        type: 'usage',
+        inputTokens: 10,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 30,
+        outputTokens: 4,
+      },
+    ]);
+    expect(
+      translate(translator, {
+        type: 'message_end',
+        message: { role: 'user', usage: { input: 999, output: 999 } },
+      }),
+    ).toEqual([]);
+    expect(
+      translate(translator, {
+        type: 'agent_end',
+        isTerminal: false,
+        usage: { input: 999, output: 999 },
+      }),
+    ).toEqual([]);
   });
 
   it('logs malformed, unknown, and post-terminal frames without emitting events', () => {

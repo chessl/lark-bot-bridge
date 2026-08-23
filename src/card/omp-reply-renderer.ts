@@ -52,15 +52,10 @@ export function renderOmpReplyCard(state: RunState): object {
             : `**${finalReply(state)}**`,
           text_size: 'body',
         },
-        {
-          tag: 'markdown',
-          element_id: 'metrics',
-          content: "<font color='grey'>运行统计暂不可得</font>",
-          text_size: 'notation',
-        },
+        ...metricsElements(state),
         disclosure(
           'tools',
-          `🔧 调用工具 ${state.knownToolIds?.length ?? tools.length} 次`,
+          `🔧 调用工具 ${state.metrics.toolIds.length} 次`,
           running,
           [
             {
@@ -82,7 +77,88 @@ export function renderOmpReplyMarkdown(state: RunState): string {
   if (state.terminal === 'running') {
     throw new Error('cannot render a running OMP Reply as terminal Markdown');
   }
-  return `**Final Reply**\n\n${finalReply(state)}\n\n_Run Termination: ${statusLabel(state)}_`;
+  const metrics = metricParts(state).join(' · ');
+  return `**Final Reply**\n\n${finalReply(state)}\n\n_Run Termination: ${statusLabel(state)}_${metrics ? `\n\n_${metrics}_` : ''}`;
+}
+
+function metricsElements(state: RunState): object[] {
+  const content = metricParts(state).join(' · ');
+  return content
+    ? [
+        {
+          tag: 'markdown',
+          element_id: 'metrics',
+          content: `<font color='grey'>${content}</font>`,
+          text_size: 'notation',
+        },
+      ]
+    : [];
+}
+
+function metricParts(state: RunState): string[] {
+  const metrics = state.metrics;
+  const terminal = state.terminal !== 'running';
+  const contextPercent = validPercent(metrics.contextPercent);
+  const arrival =
+    metrics.receivedAtWall !== undefined && metrics.messageCreatedAtWall !== undefined
+      ? metrics.receivedAtWall - metrics.messageCreatedAtWall
+      : undefined;
+  return [
+    metrics.modelId,
+    metrics.effort ? `effort ${metrics.effort}` : undefined,
+    contextPercent !== undefined ? `ctx ${formatPercent(contextPercent)}%` : undefined,
+    terminal
+      ? formatInterval('总耗时', metrics.receivedAtMono, metrics.terminalAtMono)
+      : undefined,
+    terminal && arrival !== undefined && arrival >= 0 && arrival <= 10 * 60_000
+      ? `飞书到达 ≈${formatDuration(arrival)}`
+      : undefined,
+    terminal
+      ? formatInterval('前置', metrics.receivedAtMono, metrics.promptSentAtMono)
+      : undefined,
+    terminal
+      ? formatInterval('首字', metrics.promptSentAtMono, metrics.firstTextAtMono)
+      : undefined,
+    terminal
+      ? formatInterval('OMP', metrics.promptSentAtMono, metrics.terminalAtMono)
+      : undefined,
+    terminal && metrics.inputTokens !== undefined
+      ? `输入 ${formatTokens(metrics.inputTokens)}`
+      : undefined,
+    terminal && metrics.outputTokens !== undefined
+      ? `输出 ${formatTokens(metrics.outputTokens)}`
+      : undefined,
+    terminal ? `工具 ${metrics.toolIds.length}` : undefined,
+  ].filter((part): part is string => part !== undefined);
+}
+
+function validPercent(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isFinite(value) && value >= 0
+    ? Math.min(100, value)
+    : undefined;
+}
+
+function formatPercent(value: number): string {
+  return value < 10 ? value.toFixed(1) : String(Math.round(value));
+}
+
+function formatInterval(
+  label: string,
+  start: number | undefined,
+  end: number | undefined,
+): string | undefined {
+  if (start === undefined || end === undefined || end < start) return undefined;
+  return `${label} ${formatDuration(end - start)}`;
+}
+
+function formatDuration(milliseconds: number): string {
+  if (milliseconds < 60_000) return `${(milliseconds / 1000).toFixed(1)}s`;
+  const seconds = Math.round(milliseconds / 1000);
+  return `${Math.floor(seconds / 60)}m${seconds % 60}s`;
+}
+
+function formatTokens(tokens: number): string {
+  return tokens < 1000 ? String(tokens) : `${(tokens / 1000).toFixed(1)}k`;
 }
 
 function disclosure(elementId: string, title: string, expanded: boolean, elements: object[]): object {

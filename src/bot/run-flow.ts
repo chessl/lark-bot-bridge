@@ -356,10 +356,10 @@ export class ScopedRuns {
               if (event.type === 'system' && event.sessionId) {
                 log.info('session', 'set', { sessionId: event.sessionId });
               }
-              if (event.type === 'system' && event.model) {
+              if (event.type === 'system' && event.modelId) {
                 log.info('session', 'model', {
                   requested: requestedModel ?? 'default',
-                  actual: event.model,
+                  actual: event.modelId,
                 });
               }
             }

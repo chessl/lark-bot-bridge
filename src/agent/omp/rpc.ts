@@ -81,6 +81,8 @@ export class OmpRpcTranslator {
   private sessionId: string | undefined;
   private assistantDraft = '';
   private commandOutput = '';
+  private textStarted = false;
+  private commandTextStarted = false;
   private terminal = false;
 
   terminalEmitted(): boolean {
@@ -122,8 +124,12 @@ export class OmpRpcTranslator {
           ? (rawUpdate as Record<string, unknown>)
           : undefined;
       const delta = stringField(update, 'delta');
-      if (update?.type === 'text_delta' && delta !== undefined) {
+      if (update?.type === 'text_delta' && delta) {
         this.assistantDraft += delta;
+        if (!this.textStarted) {
+          this.textStarted = true;
+          yield { type: 'text_started' };
+        }
       }
       // thinking_delta is deliberately discarded. Only complete, structured
       // reasoning content from message_end is eligible for user projection.
@@ -142,9 +148,9 @@ export class OmpRpcTranslator {
         for (const content of explicitReasoning(message.content)) {
           yield { type: 'reasoning', content };
         }
+        const usage = usageEvent(message.usage);
+        if (usage) yield usage;
       }
-      const usage = usageEvent(message?.usage);
-      if (usage) yield usage;
       this.assistantDraft = '';
       return;
     }
@@ -222,7 +228,12 @@ export class OmpRpcTranslator {
     }
 
     if (rpcFrame.type === 'command_output') {
-      this.commandOutput += resultText(rpcFrame.output ?? rpcFrame.content ?? rpcFrame.message);
+      const output = resultText(rpcFrame.output ?? rpcFrame.content ?? rpcFrame.message);
+      this.commandOutput += output;
+      if (output && !this.commandTextStarted) {
+        this.commandTextStarted = true;
+        yield { type: 'command_text_started' };
+      }
       return;
     }
 
@@ -232,8 +243,6 @@ export class OmpRpcTranslator {
     }
 
     if (rpcFrame.type === 'agent_end') {
-      const usage = usageEvent(rpcFrame.usage);
-      if (usage) yield usage;
       if (rpcFrame.isTerminal !== false) yield* this.finish(true);
       return;
     }
@@ -274,17 +283,24 @@ export class OmpRpcTranslator {
       const sessionId = stringField(data, 'sessionId');
       if (sessionId) this.sessionId = sessionId;
       const rawModel = data?.model;
-      const modelRecord =
+      const model =
         rawModel && typeof rawModel === 'object' && !Array.isArray(rawModel)
           ? (rawModel as Record<string, unknown>)
           : undefined;
-      const provider = stringField(modelRecord, 'provider');
-      const modelId = stringField(modelRecord, 'id');
-      const model = provider && modelId ? `${provider}/${modelId}` : modelId;
+      const rawContextUsage = data?.contextUsage;
+      const contextUsage =
+        rawContextUsage && typeof rawContextUsage === 'object' && !Array.isArray(rawContextUsage)
+          ? (rawContextUsage as Record<string, unknown>)
+          : undefined;
+      const modelId = stringField(model, 'id');
+      const effort = stringField(data, 'thinkingLevel');
+      const contextPercent = numberField(contextUsage, 'percent');
       yield {
         type: 'system',
         ...(this.sessionId ? { sessionId: this.sessionId } : {}),
-        ...(model ? { model } : {}),
+        ...(modelId ? { modelId } : {}),
+        ...(effort ? { effort } : {}),
+        ...(contextPercent !== undefined ? { contextPercent } : {}),
       };
       return;
     }
@@ -307,7 +323,7 @@ export class OmpRpcTranslator {
     this.terminal = true;
     const localOutput = agentInvoked ? '' : this.commandOutput;
     this.commandOutput = '';
-    if (localOutput) yield { type: 'text', delta: localOutput };
+    if (localOutput) yield { type: 'text', delta: localOutput, source: 'command' };
     yield {
       type: 'done',
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),
@@ -325,18 +341,15 @@ function frameType(frame: unknown): string {
 function usageEvent(value: unknown): Extract<AgentEvent, { type: 'usage' }> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const usage = value as Record<string, unknown>;
-  const rawCost = usage.cost;
-  const cost =
-    rawCost && typeof rawCost === 'object' && !Array.isArray(rawCost)
-      ? (rawCost as Record<string, unknown>)
-      : undefined;
   const event: Extract<AgentEvent, { type: 'usage' }> = {
     type: 'usage',
     inputTokens: numberField(usage, 'inputTokens') ?? numberField(usage, 'input'),
     outputTokens: numberField(usage, 'outputTokens') ?? numberField(usage, 'output'),
-    cachedInputTokens: numberField(usage, 'cachedInputTokens') ?? numberField(usage, 'cacheRead'),
-    reasoningOutputTokens: numberField(usage, 'reasoningOutputTokens'),
-    costUsd: numberField(usage, 'costUsd') ?? numberField(cost, 'total'),
+    cacheReadTokens:
+      numberField(usage, 'cacheReadTokens') ??
+      numberField(usage, 'cachedInputTokens') ??
+      numberField(usage, 'cacheRead'),
+    cacheWriteTokens: numberField(usage, 'cacheWriteTokens') ?? numberField(usage, 'cacheWrite'),
   };
   return Object.values(event).some((entry) => typeof entry === 'number') ? event : undefined;
 }

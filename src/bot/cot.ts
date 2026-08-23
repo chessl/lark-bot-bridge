@@ -245,7 +245,13 @@ export async function* withCotEvents(
 
   try {
     for await (const evt of events) {
-      if (evt.type === 'system' || evt.type === 'usage') {
+      if (
+        evt.type === 'system' ||
+        evt.type === 'prompt_sent' ||
+        evt.type === 'text_started' ||
+        evt.type === 'command_text_started' ||
+        evt.type === 'usage'
+      ) {
         yield evt;
         continue;
       }

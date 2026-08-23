@@ -100,6 +100,7 @@ describe('COT event mapping', () => {
       reasoning: { content: 'hidden', active: true },
       footer: 'streaming',
       terminal: 'done',
+      metrics: { toolIds: ['tool'] },
     };
 
     expect(finalAnswerOnlyState(state)).toMatchObject({

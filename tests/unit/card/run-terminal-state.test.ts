@@ -132,7 +132,7 @@ describe('terminal OMP Run state', () => {
     const noContent = stateFrom([{ type: 'done', terminationReason: 'normal' }]);
 
     expect(renderOmpReplyMarkdown(noContent)).toBe(
-      '**Final Reply**\n\n未返回内容\n\n_Run Termination: 已完成_',
+      '**Final Reply**\n\n未返回内容\n\n_Run Termination: 已完成_\n\n_工具 0_',
     );
     expect(() => renderOmpReplyMarkdown(initialState)).toThrow('running OMP Reply');
   });

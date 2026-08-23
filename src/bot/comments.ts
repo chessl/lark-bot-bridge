@@ -229,6 +229,9 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
             answer = '';
             break;
           case 'system':
+          case 'prompt_sent':
+          case 'text_started':
+          case 'command_text_started':
             break;
           case 'error':
             errorMsg = e.message;

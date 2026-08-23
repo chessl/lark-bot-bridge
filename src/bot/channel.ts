@@ -15,10 +15,12 @@ import { CallbackNonceStore } from '../card/callback-store';
 import { handleCardAction } from '../card/dispatcher';
 import { renderCard } from '../card/run-renderer';
 import {
+  createRunState,
   finalizeIfRunning,
   initialState,
   markIdleTimeout,
   markInterrupted,
+  type RunMetricReceipt,
   type RunState,
   reduce,
 } from '../card/run-state';
@@ -169,10 +171,15 @@ export interface StartChannelDeps {
     AppPaths,
     'rootDir' | 'secretsFile' | 'keystoreSaltFile' | 'mediaDir' | 'callbackNoncesFile'
   >;
+  wallNow?: () => number;
+  monoNow?: () => number;
 }
 
 export async function startChannel(deps: StartChannelDeps): Promise<BridgeChannel> {
   const { cfg, agent, sessions, sessionCatalog, workspaces, controls } = deps;
+  const wallNow = deps.wallNow ?? Date.now;
+  const monoNow = deps.monoNow ?? performance.now.bind(performance);
+  const messageReceipts = new WeakMap<NormalizedMessage, RunMetricReceipt>();
   const activeRuns = new ActiveRuns();
   // ChatModeCache stays per-bridge-instance — invalidated on restart along
   // with everything else. Topic-mode chats only need one chat.get() call ever.
@@ -315,6 +322,8 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           cotClient,
           callbackAuth,
           lastRunModelByScope,
+          messageReceipts,
+          monoNow,
           scope,
           mode,
         });
@@ -332,6 +341,13 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
 
   channel.on({
     message: async (msg) => {
+      const receivedAtWall = wallNow();
+      const receivedAtMono = monoNow();
+      messageReceipts.set(msg, {
+        receivedAtWall,
+        receivedAtMono,
+        ...(Number.isFinite(msg.createTime) ? { messageCreatedAtWall: msg.createTime } : {}),
+      });
       await withTrace({ chatId: msg.chatId, msgId: msg.messageId }, () =>
         intakeMessage({
           channel,
@@ -766,6 +782,8 @@ interface RunBatchDeps {
   cotClient: CotClient;
   callbackAuth?: CallbackAuth;
   lastRunModelByScope: Map<string, string>;
+  messageReceipts: WeakMap<NormalizedMessage, RunMetricReceipt>;
+  monoNow: () => number;
   scope: string;
   mode: ChatMode;
 }
@@ -782,6 +800,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     cotClient,
     callbackAuth,
     lastRunModelByScope,
+    messageReceipts,
+    monoNow,
     scope,
     mode,
   } = deps;
@@ -970,20 +990,23 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   }
 
   if (firstMsg.chatType === 'p2p' || firstMsg.chatType === 'group') {
+    const state = createRunState(messageReceipts.get(lastMsg));
     const reply = new OmpReplyController({
       channel,
       target: replyTarget,
     });
     try {
-      await reply.open(initialState);
+      await reply.open(state);
       const finalState = await processAgentStream(
         run,
         run.events,
         scope,
         idleTimeoutMs,
-        async (state) => {
-          if (state.terminal === 'running') await reply.project(state);
+        async (nextState) => {
+          if (nextState.terminal === 'running') await reply.project(nextState);
         },
+        state,
+        monoNow,
       );
       await reply.finish(finalState);
     } catch (err) {
@@ -1427,8 +1450,10 @@ async function processAgentStream(
   scope: string,
   idleTimeoutMs: number | undefined,
   flush: (state: RunState) => Promise<void>,
+  startState: RunState = initialState,
+  monoNow: () => number = () => performance.now(),
 ): Promise<RunState> {
-  let state: RunState = initialState;
+  let state = startState;
 
   // Idle watchdog: OMP going silent for `idleTimeoutMs` is treated as
   // "presumed hung", we stop() and surface a timeout marker on the card.
@@ -1478,22 +1503,19 @@ async function processAgentStream(
       }
       armOrPauseIdle();
 
-      if (evt.type === 'system') continue;
       if (evt.type === 'usage') {
-        const { costUsd, inputTokens, outputTokens } = evt;
-        if (costUsd !== undefined || inputTokens !== undefined || outputTokens !== undefined) {
-          log.info('agent', 'usage', {
-            ...(costUsd !== undefined ? { costUsd: Number(costUsd.toFixed(4)) } : {}),
-            ...(inputTokens !== undefined ? { inputTokens } : {}),
-            ...(outputTokens !== undefined ? { outputTokens } : {}),
-          });
-        }
-        continue;
+        const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = evt;
+        log.info('agent', 'usage', {
+          ...(inputTokens !== undefined ? { inputTokens } : {}),
+          ...(outputTokens !== undefined ? { outputTokens } : {}),
+          ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+          ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+        });
       }
 
       const prevTerminal = state.terminal;
       const prevFooter = state.footer;
-      state = reduce(state, evt);
+      state = reduce(state, evt, monoNow);
       if (state.footer !== prevFooter || state.terminal !== prevTerminal) {
         log.info('card', 'transition', { footer: state.footer, terminal: state.terminal });
       }
@@ -1511,12 +1533,13 @@ async function processAgentStream(
   // wins. This avoids "OMP finished but flush was slow → timer fired
   // mid-flush → user sees 'idle_timeout' on a successful run".
   if (state.terminal === 'running') {
+    const terminalAtMono = monoNow();
     if (idleFired) {
-      state = markIdleTimeout(state, Math.round(idleTimeoutMs! / 60_000));
+      state = markIdleTimeout(state, Math.round(idleTimeoutMs! / 60_000), terminalAtMono);
     } else if (run.wasInterrupted()) {
-      state = markInterrupted(state);
+      state = markInterrupted(state, terminalAtMono);
     } else {
-      state = finalizeIfRunning(state);
+      state = finalizeIfRunning(state, terminalAtMono);
     }
   }
   log.info('card', 'final', {
