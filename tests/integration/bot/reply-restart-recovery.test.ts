@@ -308,6 +308,48 @@ describe('OMP Reply restart recovery', () => {
     await activateOmpReplyRecovery({ channel: fake.channel, journal: corrupt, now: () => NOW });
     expect(corruptFailures).toEqual([{ reason: 'corrupt-journal-json' }]);
     expect(fake.close).not.toHaveBeenCalled();
+
+    const mismatchPath = join(tmp.profile, 'identity-mismatch.json');
+    await writeFile(
+      mismatchPath,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            ...knownDelivery('run_identity_mismatch'),
+            cardId: 'card_A',
+            transport: 'managed',
+            deliveryState: 'unknown',
+            nextSequence: 8,
+            pending: {
+              kind: 'update',
+              terminal: true,
+              uuid: 'uuid_U1',
+              sequence: 7,
+              request: {
+                path: { card_id: 'card_B' },
+                data: {
+                  card: { type: 'card_json', data: '{}' },
+                  sequence: 9,
+                  uuid: 'uuid_U2',
+                },
+              },
+            },
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
+    const mismatchFailures: Array<{ runId?: string; reason: string }> = [];
+    const mismatch = trackedJournal(mismatchPath, mismatchFailures);
+    await activateOmpReplyRecovery({ channel: fake.channel, journal: mismatch, now: () => NOW });
+    expect(mismatchFailures).toEqual([
+      { runId: 'run_identity_mismatch', reason: 'corrupt-journal-entry' },
+    ]);
+    expect(fake.reply).not.toHaveBeenCalled();
+    expect(fake.update).not.toHaveBeenCalled();
+    expect(fake.close).not.toHaveBeenCalled();
+    expect(fake.patch).not.toHaveBeenCalled();
   });
 });
 

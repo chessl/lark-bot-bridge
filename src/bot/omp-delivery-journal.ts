@@ -165,7 +165,7 @@ export class OmpDeliveryJournal {
     }
     for (const item of file.data.entries) {
       const parsed = ActiveDeliverySchema.safeParse(item);
-      if (parsed.success) {
+      if (parsed.success && isConsistentActiveDelivery(parsed.data)) {
         this.#entries.set(parsed.data.runId, parsed.data);
       } else {
         const runId =
@@ -243,4 +243,54 @@ export class OmpDeliveryJournal {
     this.#writer = result.catch(() => undefined);
     return result;
   }
+}
+
+function isConsistentActiveDelivery(entry: ActiveDelivery): boolean {
+  const pending = entry.pending;
+  if ((entry.deliveryState === 'unknown') !== Boolean(pending)) return false;
+  if (
+    (entry.deliveryState === 'message_known' || entry.deliveryState === 'delivered') &&
+    entry.time.messageKnownAtMs === undefined
+  ) {
+    return false;
+  }
+  if (entry.deliveryState === 'no_message' && entry.messageId) return false;
+  if (entry.transport === 'managed' && entry.deliveryState === 'message_known' && !entry.cardId) {
+    return false;
+  }
+  if (
+    (entry.transport === 'inline' || entry.transport === 'markdown') &&
+    entry.deliveryState === 'message_known' &&
+    !entry.messageId
+  ) {
+    return false;
+  }
+  if (!pending) return true;
+
+  if (pending.kind === 'reply') {
+    return (
+      entry.transport === pending.transport &&
+      entry.messageId === undefined &&
+      pending.uuid === pending.request.data.uuid &&
+      pending.request.path.message_id === entry.target.messageId &&
+      pending.request.data.reply_in_thread === entry.target.replyInThread
+    );
+  }
+  if (pending.kind === 'patch') {
+    return (
+      entry.messageId !== undefined &&
+      pending.request.path.message_id === entry.messageId &&
+      entry.time.messageKnownAtMs !== undefined
+    );
+  }
+  return (
+    entry.transport === 'managed' &&
+    entry.cardId !== undefined &&
+    pending.request.path.card_id === entry.cardId &&
+    pending.uuid === pending.request.data.uuid &&
+    pending.sequence >= 1 &&
+    pending.sequence === pending.request.data.sequence &&
+    entry.nextSequence === pending.sequence + 1 &&
+    entry.time.messageKnownAtMs !== undefined
+  );
 }
