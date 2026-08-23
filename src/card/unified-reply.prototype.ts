@@ -686,14 +686,15 @@ function elementBoundaryCard(count: number): object {
 }
 
 function byteBoundaryCard(targetBytes: number): object {
+  const payload = { tag: 'markdown', element_id: 'payload', content: '' };
   const card = {
     schema: '2.0',
     config: { summary: { content: '字节边界' } },
     header: { title: { tag: 'plain_text', content: '字节边界' }, template: 'blue' },
-    body: { elements: [{ tag: 'markdown', element_id: 'payload', content: '' }] },
+    body: { elements: [payload] },
   };
   const baseBytes = Buffer.byteLength(JSON.stringify(card));
-  card.body.elements[0].content = 'x'.repeat(Math.max(0, targetBytes - baseBytes));
+  payload.content = 'x'.repeat(Math.max(0, targetBytes - baseBytes));
   return card;
 }
 
