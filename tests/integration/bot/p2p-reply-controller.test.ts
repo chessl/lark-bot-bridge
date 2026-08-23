@@ -101,11 +101,15 @@ describe('P2P OMP Reply', () => {
         data: expect.objectContaining({ msg_type: 'interactive', reply_in_thread: false }),
       }),
     );
+    const replyCall = h.channel.rawClient.im.v1.message.reply.mock.calls[0]?.[0];
+    expect(replyCardId(replyCall)).toBe('card_1');
     expect(h.channel.createdCards).toHaveLength(1);
     expect(h.channel.sent).toHaveLength(0);
     expect(h.channel.streams).toHaveLength(0);
 
     const finalUpdate = h.channel.updates.at(-1);
+    expect(h.channel.updates.every((update) => update.cardId === 'card_1')).toBe(true);
+    expect(finalUpdate?.cardId).toBe('card_1');
     expect(JSON.stringify(finalUpdate?.card)).toContain('FINAL_REPLY_SENTINEL');
     expect(finalUpdate?.card).toMatchObject({ config: { streaming_mode: true } });
 
@@ -344,6 +348,23 @@ function message(messageId: string, content: string): NormalizedMessage {
     mentionedBot: false,
     createTime: 1760000001000,
   } as unknown as NormalizedMessage;
+}
+
+function replyCardId(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || !('data' in input)) return undefined;
+  const data = input.data;
+  if (!data || typeof data !== 'object' || !('content' in data)) return undefined;
+  if (typeof data.content !== 'string') return undefined;
+  let content: unknown;
+  try {
+    content = JSON.parse(data.content);
+  } catch {
+    return undefined;
+  }
+  if (!content || typeof content !== 'object' || !('data' in content)) return undefined;
+  const cardData = content.data;
+  if (!cardData || typeof cardData !== 'object' || !('card_id' in cardData)) return undefined;
+  return typeof cardData.card_id === 'string' ? cardData.card_id : undefined;
 }
 
 function operationSequence(input: unknown): number | undefined {
