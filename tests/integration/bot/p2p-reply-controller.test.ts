@@ -1,9 +1,11 @@
 import type * as LarkChannelModule from '@larksuite/channel';
-import type { NormalizedMessage } from '@larksuite/channel';
+import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { AgentEvent } from '../../../src/agent/types.js';
+import { OmpReplyController } from '../../../src/bot/omp-reply-controller.js';
+import { createRunState, type RunState } from '../../../src/card/run-state.js';
 import type { Controls } from '../../../src/commands/index.js';
 import {
   createDefaultProfileConfig,
@@ -435,7 +437,7 @@ describe('P2P OMP Reply', () => {
 
   it('captures the 12/13 Reasoning and 20/21 Tools boundaries with cumulative totals', async () => {
     const events: FakeAgentEvents = [
-      ...Array.from({ length: 13 }, (_, index) => ({
+      ...Array.from({ length: 12 }, (_, index) => ({
         type: 'reasoning' as const,
         content: `REASON_${String(index + 1).padStart(2, '0')}_END`,
       })),
@@ -450,8 +452,8 @@ describe('P2P OMP Reply', () => {
       { type: 'done', terminationReason: 'normal' },
     ];
     const reasoningBoundary = controllableEventGate(12);
-    const toolsBoundary = controllableEventGate(34);
-    const overflowBoundary = controllableEventGate(35);
+    const toolsBoundary = controllableEventGate(33);
+    const overflowBoundary = controllableEventGate(34);
     const h = await createHarness({
       events,
       eventGates: [reasoningBoundary, toolsBoundary, overflowBoundary],
@@ -482,9 +484,8 @@ describe('P2P OMP Reply', () => {
 
     const twentyOutbound = JSON.stringify(twenty);
     expect(twentyOutbound).not.toContain('REASON\\\\_01\\\\_END');
-    expect(twentyOutbound).not.toContain('REASON\\\\_02\\\\_END');
-    expect(twentyOutbound).toContain('REASON\\\\_03\\\\_END');
-    expect(twentyOutbound).toContain('中间过程（14 条）');
+    expect(twentyOutbound).toContain('REASON\\\\_02\\\\_END');
+    expect(twentyOutbound).toContain('中间过程（13 条）');
     expect(twentyOutbound).toContain(`${'X'.repeat(599)}…`);
     expect(twentyOutbound.match(/运行操作/g)).toHaveLength(19);
     expect(twentyOutbound).toContain('读取信息');
@@ -503,6 +504,50 @@ describe('P2P OMP Reply', () => {
     await vi.waitFor(() =>
       expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledOnce(),
     );
+  });
+
+  it('captures exact 200-element and would-be 201-element controller projections', async () => {
+    const reasoningEntries = Array.from({ length: 98 }, (_, index) => `REASON_${index + 1}`);
+    const exactState: RunState = {
+      ...createRunState(),
+      reasoningEntries,
+      reasoningTotal: reasoningEntries.length,
+    };
+    const overState: RunState = {
+      ...exactState,
+      metrics: { ...exactState.metrics, modelId: 'gpt-element-boundary' },
+    };
+    const exactChannel = createFakeLarkChannel();
+    const overChannel = createFakeLarkChannel();
+    const target = {
+      chatId: 'oc_element_budget',
+      messageId: 'om_element_budget',
+      replyInThread: false,
+    } as const;
+
+    await new OmpReplyController({
+      channel: exactChannel as unknown as LarkChannel,
+      target,
+    }).open(exactState);
+    await new OmpReplyController({
+      channel: overChannel as unknown as LarkChannel,
+      target,
+    }).open(overState);
+
+    const exact = exactChannel.createdCards[0];
+    const over = overChannel.createdCards[0];
+    const overOutbound = JSON.stringify(over);
+
+    expect(totalCardElements(exact)).toBe(200);
+    expect(JSON.stringify(exact)).not.toContain('"element_id":"metrics"');
+    expect(totalCardElements(exact) + 1).toBe(201);
+    expect(totalCardElements(over)).toBe(199);
+    expect(overOutbound).toContain('"element_id":"metrics"');
+    expect(overOutbound).not.toContain('"content":"REASON\\\\_1"');
+    expect(overOutbound).toContain('REASON\\\\_2');
+    expect(overOutbound).toContain('中间过程（98 条）');
+    expect(exactChannel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+    expect(overChannel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
   });
 
   it('captures an exact 30 KB terminal card with metrics, marker, and one IM Reply', async () => {
