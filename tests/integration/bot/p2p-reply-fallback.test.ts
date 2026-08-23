@@ -50,6 +50,7 @@ interface FakeLarkChannel {
         message: {
           get: Mock<(...args: unknown[]) => Promise<unknown>>;
           reply: Mock<(input: unknown) => Promise<unknown>>;
+          patch: Mock<(input: unknown) => Promise<unknown>>;
         };
         messageReaction: {
           create: Mock<(...args: unknown[]) => Promise<unknown>>;
@@ -85,7 +86,7 @@ type FixtureOptions = {
   reply?: (input: unknown, attempt: number) => Promise<unknown>;
   update?: (input: unknown, attempt: number) => Promise<unknown>;
   close?: (input: unknown, attempt: number) => Promise<unknown>;
-  patch?: (messageId: string, card: object, attempt: number) => Promise<void>;
+  patch?: (messageId: string, card: object, attempt: number) => Promise<unknown>;
 };
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -268,9 +269,7 @@ describe('P2P OMP Reply safe fallback', () => {
     const h = await createHarness({
       events: terminalEvents('PATCH_FAILURE_SENTINEL'),
       update: async () => ({ code: 230001, msg: 'rejected' }),
-      patch: async () => {
-        throw Object.assign(new Error('static patch rejected'), { code: 230002 });
-      },
+      patch: async () => ({ code: 230002, msg: 'static patch rejected' }),
     });
     await startTestBridge(h);
 
@@ -406,6 +405,17 @@ function createFakeLarkChannel(options: FixtureOptions): FakeLarkChannel {
     closeAttempt++;
     return options.close ? options.close(input, closeAttempt) : { code: 0 };
   });
+  const patch = vi.fn(async (input: unknown) => {
+    const messageId = requestMessageId(input);
+    const content = replyContent(input);
+    if (!messageId || !content) throw new Error('invalid captured message patch');
+    const card: unknown = JSON.parse(content);
+    if (!card || typeof card !== 'object') throw new Error('invalid captured static card');
+    operations.push('message:patch');
+    patches.push({ messageId, card });
+    patchAttempt++;
+    return options.patch ? options.patch(messageId, card, patchAttempt) : { code: 0 };
+  });
 
   return {
     handlers,
@@ -429,6 +439,7 @@ function createFakeLarkChannel(options: FixtureOptions): FakeLarkChannel {
           message: {
             get: vi.fn(async () => ({ data: { items: [] } })),
             reply,
+            patch,
           },
           messageReaction: {
             create: vi.fn(async () => ({ data: { reaction_id: 'reaction_1' } })),
@@ -515,12 +526,14 @@ function replyInputs(channel: FakeLarkChannel): unknown[] {
 
 function replyType(input: unknown): string | undefined {
   const data = requestData(input);
-  return typeof data?.msg_type === 'string' ? data.msg_type : undefined;
+  return data && 'msg_type' in data && typeof data.msg_type === 'string'
+    ? data.msg_type
+    : undefined;
 }
 
 function replyContent(input: unknown): string {
   const data = requestData(input);
-  return typeof data?.content === 'string' ? data.content : '';
+  return data && 'content' in data && typeof data.content === 'string' ? data.content : '';
 }
 
 function replyCardId(input: unknown): string | undefined {
@@ -536,10 +549,16 @@ function replyCardId(input: unknown): string | undefined {
   return typeof data.card_id === 'string' ? data.card_id : undefined;
 }
 
-function requestData(input: unknown): Record<string, unknown> | undefined {
+function requestData(input: unknown): object | undefined {
   if (!input || typeof input !== 'object' || !('data' in input)) return undefined;
-  const data = input.data;
-  return data && typeof data === 'object' ? data : undefined;
+  return input.data && typeof input.data === 'object' ? input.data : undefined;
+}
+
+function requestMessageId(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || !('path' in input)) return undefined;
+  const path = input.path;
+  if (!path || typeof path !== 'object' || !('message_id' in path)) return undefined;
+  return typeof path.message_id === 'string' ? path.message_id : undefined;
 }
 
 function responseMessageId(result: unknown): string | undefined {
@@ -551,7 +570,9 @@ function responseMessageId(result: unknown): string | undefined {
 
 function operationSequence(input: unknown): number | undefined {
   const data = requestData(input);
-  return typeof data?.sequence === 'number' ? data.sequence : undefined;
+  return data && 'sequence' in data && typeof data.sequence === 'number'
+    ? data.sequence
+    : undefined;
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void> {

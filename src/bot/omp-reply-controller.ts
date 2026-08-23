@@ -41,7 +41,7 @@ type ReplyTransport = 'managed' | 'inline' | 'markdown';
 type ReplyRequest = Parameters<LarkChannel['rawClient']['im']['v1']['message']['reply']>[0];
 type UpdateRequest = Parameters<LarkChannel['rawClient']['cardkit']['v1']['card']['update']>[0];
 type CloseRequest = Parameters<LarkChannel['rawClient']['cardkit']['v1']['card']['settings']>[0];
-type PatchRequest = Parameters<LarkChannel['updateCard']>;
+type PatchRequest = Parameters<LarkChannel['rawClient']['im']['v1']['message']['patch']>[0];
 
 interface Projection {
   card: object;
@@ -333,7 +333,10 @@ export class OmpReplyController {
       kind: 'patch',
       terminal,
       projection,
-      request: [messageId, projection.card],
+      request: {
+        path: { message_id: messageId },
+        data: { content: projection.serialized },
+      } satisfies PatchRequest,
       attempts: 0,
       exhausted: false,
     };
@@ -415,8 +418,10 @@ export class OmpReplyController {
       }
 
       if (operation.kind === 'patch') {
-        await this.#channel.updateCard(...operation.request);
-        return 'success';
+        const result = await this.#channel.rawClient.im.v1.message.patch(operation.request);
+        const code = result.code;
+        if (code === 0) return 'success';
+        return typeof code === 'number' ? 'rejected' : 'unknown';
       }
 
       const result =
