@@ -173,6 +173,7 @@ export interface StartChannelDeps {
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
   controls: Controls;
+  deliveryJournal?: OmpDeliveryJournal;
   appPaths?: Pick<
     AppPaths,
     | 'rootDir'
@@ -270,9 +271,12 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   };
 
   const channel = createLarkChannel(opts);
-  const deliveryJournal = deps.appPaths?.activeDeliveriesFile
-    ? new OmpDeliveryJournal({ path: deps.appPaths.activeDeliveriesFile })
-    : undefined;
+  const deliveryJournal =
+    deps.deliveryJournal ??
+    (deps.appPaths?.activeDeliveriesFile
+      ? new OmpDeliveryJournal({ path: deps.appPaths.activeDeliveriesFile })
+      : undefined);
+  await deliveryJournal?.load();
   let deliveryRecoveryActivated = false;
   const activateDeliveryRecovery = async (): Promise<void> => {
     if (!deliveryJournal || deliveryRecoveryActivated) return;

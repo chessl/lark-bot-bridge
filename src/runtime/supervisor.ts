@@ -2,6 +2,7 @@ import pkg from '../../package.json';
 import { OmpAdapter } from '../agent/omp/adapter';
 import type { OmpRunEngine } from '../agent/types';
 import { type BridgeChannel, startChannel as realStartChannel } from '../bot/channel';
+import { OmpDeliveryJournal } from '../bot/omp-delivery-journal';
 import type { Controls } from '../commands';
 import type { AppPaths } from '../config/app-paths';
 import type { ProfileConfig } from '../config/profile-schema';
@@ -53,6 +54,7 @@ class ManagedProfile {
   entry!: ProcessEntry;
   startedAt = '';
   private restarting = false;
+  private readonly deliveryJournal: OmpDeliveryJournal;
 
   constructor(
     readonly profile: string,
@@ -66,7 +68,11 @@ class ManagedProfile {
     private workspaces: WorkspaceStore,
     private startChannelFn: StartChannelFn,
     private onExitCommand: (profile: string) => void,
-  ) {}
+  ) {
+    this.deliveryJournal = new OmpDeliveryJournal({
+      path: this.appPaths.activeDeliveriesFile,
+    });
+  }
 
   get appId(): string {
     return this.cfg.accounts.app.id;
@@ -95,6 +101,7 @@ class ManagedProfile {
         registryFile: this.appPaths.userRegistryFile,
       });
       this.controls = this.makeControls(this.appPaths, this.cfg, this.profileConfig);
+      await this.deliveryJournal.load();
       this.bridge = await this.startChannelFn({
         cfg: this.cfg,
         agent: this.agent,
@@ -102,6 +109,7 @@ class ManagedProfile {
         sessionCatalog: this.sessionCatalog,
         workspaces: this.workspaces,
         controls: this.controls,
+        deliveryJournal: this.deliveryJournal,
         appPaths: this.appPaths,
       });
       const botName = this.bridge.channel.botIdentity?.name;
@@ -212,6 +220,7 @@ class ManagedProfile {
         sessionCatalog: this.sessionCatalog,
         workspaces: this.workspaces,
         controls: nextControls,
+        deliveryJournal: this.deliveryJournal,
         appPaths: nextRuntime.appPaths,
         deferDeliveryRecovery: true,
       });
