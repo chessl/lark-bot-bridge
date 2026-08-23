@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline/promises';
 import { createLarkChannel, type LarkChannel } from '@larksuite/channel';
+import { LoggerLevel } from '@larksuiteoapi/node-sdk';
 import { resolveAppSecret } from '../config/secret-resolver';
 import { resolveProfileRuntime } from '../runtime/profile-runtime';
 
@@ -31,7 +32,6 @@ interface RuntimeDetails {
   contextUsed?: number;
   contextWindow?: number;
 }
-
 
 interface PrototypeState {
   status: RunStatus;
@@ -76,7 +76,7 @@ const channel = createLarkChannel({
       ? 'https://open.larksuite.com'
       : 'https://open.feishu.cn',
   source: 'unified-reply-prototype',
-  loggerLevel: 'error',
+  loggerLevel: LoggerLevel.error,
 });
 if (args.closeCardId) {
   const interrupted: PrototypeState = {
@@ -95,7 +95,6 @@ if (args.closeCardId) {
   process.exit(0);
 }
 if (!args.messageId) throw new Error('missing --message');
-
 
 const target = await inspectTarget(channel, args.messageId);
 const state: PrototypeState = {
@@ -199,7 +198,7 @@ try {
           channel,
           replied.data?.thread_id ?? target.threadId,
           target.chatId,
-          args.messageId,
+          target.messageId,
           messageId,
           cardId,
         );
@@ -352,7 +351,6 @@ function applyDeepSeekProbe(current: PrototypeState): void {
     tools: current.toolTotal,
   };
 }
-
 
 async function project(
   targetChannel: LarkChannel,
@@ -528,7 +526,8 @@ function renderCard(current: PrototypeState): object {
         {
           tag: 'text_tag',
           text: { tag: 'plain_text', content: statusLabel(current.status) },
-          color: current.status === 'done' ? 'green' : current.status === 'running' ? 'blue' : 'red',
+          color:
+            current.status === 'done' ? 'green' : current.status === 'running' ? 'blue' : 'red',
         },
       ],
     },
@@ -548,7 +547,7 @@ function renderCard(current: PrototypeState): object {
           element_id: 'answer',
           content: terminal
             ? `**${escapeMarkdown(current.finalAnswer ?? statusLabel(current.status))}**`
-            : '**正在完成请求**\n<font color=\'grey\'>Final Reply 会在确认后原位出现。</font>',
+            : "**正在完成请求**\n<font color='grey'>Final Reply 会在确认后原位出现。</font>",
           text_size: 'body',
         },
         ...(runtime.length
@@ -569,12 +568,7 @@ function renderCard(current: PrototypeState): object {
             : "<font color='grey'>运行统计暂不可得</font>",
           text_size: 'caption',
         },
-        activityPanel(
-          'tools',
-          `🔧 调用工具 ${current.toolTotal} 次`,
-          !terminal,
-          toolElements,
-        ),
+        activityPanel('tools', `🔧 调用工具 ${current.toolTotal} 次`, !terminal, toolElements),
       ],
     },
   };
@@ -615,7 +609,9 @@ function runtimeParts(details: RuntimeDetails): string[] {
   return [
     details.model,
     details.effort ? `effort ${details.effort}` : undefined,
-    percent !== undefined ? `ctx ${percent < 10 ? percent.toFixed(1) : Math.round(percent)}%` : undefined,
+    percent !== undefined
+      ? `ctx ${percent < 10 ? percent.toFixed(1) : Math.round(percent)}%`
+      : undefined,
   ].filter((part): part is string => part !== undefined);
 }
 

@@ -99,6 +99,7 @@ async function createHarness(): Promise<{
       postDoneExitGraceMs: 1,
       workspaces,
       profile: 'work',
+      profileConfig: () => profileConfig,
       now: () => 1_700_000_000_000,
     }),
     workspaces,

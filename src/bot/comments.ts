@@ -399,7 +399,6 @@ function commentRunRejectedReply(rejectReason: {
     case 'access-denied':
     case 'folder-allowlist-unverified':
     case 'required-attachment-rejected':
-    case 'unsupported-agent-access':
       return undefined;
     default:
       return `工作目录不可用：${rejectReason.userVisible}`;

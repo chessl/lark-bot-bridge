@@ -480,10 +480,6 @@ async function handleResume(args: string, ctx: CommandContext): Promise<void> {
     return applyResume(rest, ctx);
   }
 
-  // Default: list recent sessions
-  const n = Number.parseInt(sub, 10);
-  const limit = Number.isFinite(n) && n > 0 && n <= 20 ? n : 5;
-
   const cwd = selectedResumeCwd(ctx);
   if (!cwd) {
     await reply(ctx, '请先使用 /cd <path> 选择工作目录，再查看或恢复会话。');
@@ -569,7 +565,6 @@ function pruneResumeCandidates(now = Date.now()): void {
     if (candidate.expiresAt <= now) resumeCandidates.delete(nonce);
   }
 }
-
 
 function effectiveWorkspaceCwd(ctx: CommandContext): string | undefined {
   return ctx.workspaces.cwdFor(ctx.scope) ?? ctx.controls.profileConfig.workspaces.default;

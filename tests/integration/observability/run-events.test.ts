@@ -25,7 +25,6 @@ describe('run observability events', () => {
       policy: policy(h.tmp.workspace),
       observability: {
         profile: 'work',
-        agent: 'omp',
         source: 'im',
         stage: 'submit',
       },

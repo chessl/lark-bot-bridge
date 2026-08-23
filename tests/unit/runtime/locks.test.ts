@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveAppPaths } from '../../../src/config/app-paths';
-import { withProfileAndAppLocks } from '../../../src/runtime/locks';
 import type { RuntimeLockConflictError } from '../../../src/runtime/locks';
+import { withProfileAndAppLocks } from '../../../src/runtime/locks';
 
 const roots: string[] = [];
 
@@ -38,15 +38,30 @@ describe('runtime locks', () => {
     const personal = resolveAppPaths({ rootDir: root, profile: 'personal' });
 
     await withProfileAndAppLocks(work, 'cli_test', async () => {
-      await expect(withProfileAndAppLocks(work, 'cli_other', async () => {})).rejects.toMatchObject({
-        kind: 'profile',
-        meta: { profile: 'work', pid: process.pid },
-      } satisfies Partial<RuntimeLockConflictError>);
+      await expect(withProfileAndAppLocks(work, 'cli_other', async () => {})).rejects.toMatchObject(
+        {
+          kind: 'profile',
+          meta: {
+            kind: 'profile',
+            target: work.profileLockFile,
+            profile: 'work',
+            pid: process.pid,
+            startedAt: expect.any(String),
+          },
+        } satisfies Partial<RuntimeLockConflictError>,
+      );
       await expect(
         withProfileAndAppLocks(personal, 'cli_test', async () => {}),
       ).rejects.toMatchObject({
         kind: 'app',
-        meta: { profile: 'work', appId: 'cli_test', pid: process.pid },
+        meta: {
+          kind: 'app',
+          target: work.appLockFile('cli_test'),
+          profile: 'work',
+          appId: 'cli_test',
+          pid: process.pid,
+          startedAt: expect.any(String),
+        },
       } satisfies Partial<RuntimeLockConflictError>);
     });
   });
