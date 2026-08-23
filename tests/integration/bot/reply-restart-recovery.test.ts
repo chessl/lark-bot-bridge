@@ -336,6 +336,25 @@ describe('OMP Reply restart recovery', () => {
               },
             },
           },
+          {
+            ...knownDelivery('run_known_missing_transport'),
+            transport: undefined,
+          },
+          {
+            ...knownDelivery('run_patch_missing_transport'),
+            transport: undefined,
+            deliveryState: 'unknown',
+            pending: {
+              kind: 'patch',
+              terminal: true,
+              uuid: 'uuid_patch',
+              sequence: 0,
+              request: {
+                path: { message_id: 'om_run_patch_missing_transport' },
+                data: { content: '{}' },
+              },
+            },
+          },
         ],
       }),
       { mode: 0o600 },
@@ -345,6 +364,8 @@ describe('OMP Reply restart recovery', () => {
     await activateOmpReplyRecovery({ channel: fake.channel, journal: mismatch, now: () => NOW });
     expect(mismatchFailures).toEqual([
       { runId: 'run_identity_mismatch', reason: 'corrupt-journal-entry' },
+      { runId: 'run_known_missing_transport', reason: 'corrupt-journal-entry' },
+      { runId: 'run_patch_missing_transport', reason: 'corrupt-journal-entry' },
     ]);
     expect(fake.reply).not.toHaveBeenCalled();
     expect(fake.update).not.toHaveBeenCalled();

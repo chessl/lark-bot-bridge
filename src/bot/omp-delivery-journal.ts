@@ -255,6 +255,7 @@ function isConsistentActiveDelivery(entry: ActiveDelivery): boolean {
     return false;
   }
   if (entry.deliveryState === 'no_message' && entry.messageId) return false;
+  if (entry.deliveryState === 'message_known' && entry.transport === undefined) return false;
   if (entry.transport === 'managed' && entry.deliveryState === 'message_known' && !entry.cardId) {
     return false;
   }
@@ -278,6 +279,7 @@ function isConsistentActiveDelivery(entry: ActiveDelivery): boolean {
   }
   if (pending.kind === 'patch') {
     return (
+      entry.transport !== undefined &&
       entry.messageId !== undefined &&
       pending.request.path.message_id === entry.messageId &&
       entry.time.messageKnownAtMs !== undefined
