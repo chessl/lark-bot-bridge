@@ -102,7 +102,7 @@ describe('/status and /doctor diagnostics', () => {
     expect(opts.sessionId).toBeUndefined();
     expect(opts.images).toEqual([]);
     expect(opts.prompt).toContain('OK');
-    const output = lastStreamCardJson(h.channel);
+    const output = lastMarkdownOrText(h.channel);
     expect(output).toContain('self-check');
     expect(output).toContain('profile');
     expect(output).toContain('Oh My Pi');
@@ -110,6 +110,8 @@ describe('/status and /doctor diagnostics', () => {
     expect(output).toContain('policy check: ok access=full');
     expect(output).toContain('agent echo check');
     expect(output).toContain('OK');
+    expect(h.channel.streams).toHaveLength(0);
+    expect(h.channel.sent).toHaveLength(1);
   });
 
   it('lets final_text replace accumulated echo deltas', async () => {
@@ -124,7 +126,7 @@ describe('/status and /doctor diagnostics', () => {
 
     await expect(h.run('/doctor')).resolves.toBe(true);
 
-    expect(lastStreamCardJson(h.channel)).toContain('agent echo check: FINAL');
+    expect(lastMarkdownOrText(h.channel)).toContain('agent echo check: FINAL');
   });
 
   it('presents an interrupted diagnostic run as interrupted', async () => {
@@ -132,18 +134,9 @@ describe('/status and /doctor diagnostics', () => {
 
     await expect(h.run('/doctor')).resolves.toBe(true);
 
-    expect(lastStreamCardJson(h.channel)).toContain('已被中断');
+    expect(lastMarkdownOrText(h.channel)).toContain('agent echo check: interrupted');
   });
 
-  it('stops the diagnostic when streaming fails before consuming events', async () => {
-    const h = await createHarness({ configuredWorkspace: true, streamFailure: true });
-
-    await expect(h.run('/doctor')).resolves.toBe(true);
-
-    expect(h.agent.runs[0]?.stopped).toBe(true);
-    expect(h.activeRuns.get('chat-1:doctor')).toBeUndefined();
-    expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
-  });
 
   it('uses the profile default workspace when the chat has no bound cwd', async () => {
     const h = await createHarness({
@@ -224,15 +217,9 @@ async function createHarness(options: {
   startupFailure?: boolean;
   events?: FakeAgentEvents;
   interrupt?: boolean;
-  streamFailure?: boolean;
 }): Promise<Harness> {
   const tmp = await createTmpProfile('doctor-status-');
   const channel = createFakeChannel();
-  if (options.streamFailure) {
-    channel.stream = async () => {
-      throw new Error('stream failed');
-    };
-  }
   const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   const activeRuns = new ActiveRuns();
@@ -380,12 +367,6 @@ function lastMarkdownOrText(channel: FakeChannel): string {
   return value as string;
 }
 
-function lastStreamCardJson(channel: FakeChannel): string {
-  const stream = channel.streams.at(-1);
-  expect(stream).toBeDefined();
-  const initial = (stream?.input as { card?: { initial?: unknown } } | undefined)?.card?.initial;
-  return JSON.stringify(stream?.cardUpdates.at(-1) ?? initial);
-}
 
 function jsonStringContent(value: string): string {
   return JSON.stringify(value).slice(1, -1);

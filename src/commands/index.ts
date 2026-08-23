@@ -29,7 +29,6 @@ import {
   sendManagedCard,
   updateManagedCard,
 } from '../card/managed';
-import { renderOmpReplyCard } from '../card/omp-reply-renderer';
 import {
   finalizeIfRunning,
   initialState,
@@ -946,68 +945,29 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
       });
 
     try {
-      // In group / topic chats other members would see the result card. Ack
-      // in-channel, deliver the actual analysis privately to the operator's
-      // open_id (Lark auto-opens the p2p chat with the bot).
+      // Group and Topic diagnostics stay private: acknowledge in-channel, then
+      // send the buffered report to the operator's open_id.
       const isP2p = ctx.chatMode === 'p2p';
       if (!isP2p) {
         await reply(ctx, '🔍 已收到诊断请求，分析结果将私信发给你。');
       }
 
+      let state: RunState = initialState;
+      let echoText = '';
+      for await (const evt of run.events) {
+        if (run.wasInterrupted()) break;
+        if (evt.type === 'system' || evt.type === 'usage') continue;
+        if (evt.type === 'text') echoText += evt.delta;
+        if (evt.type === 'final_text') echoText = evt.content;
+        state = reduce(state, evt);
+        if (state.terminal !== 'running') break;
+      }
+      state = run.wasInterrupted() ? markInterrupted(state) : finalizeIfRunning(state);
+      const report = doctorReport(formatDoctorEchoStatus(echoText, state));
       if (isP2p) {
-        // Streaming card path — operator is the only viewer in p2p.
-        await ctx.channel.stream(
-          ctx.msg.chatId,
-          {
-            card: {
-              initial: renderOmpReplyCard(withDoctorReport(initialState, doctorReport('pending'))),
-              producer: async (ctrl) => {
-                let state: RunState = initialState;
-                let echoText = '';
-                const echoStatus = (): string => formatDoctorEchoStatus(echoText, state);
-                const flush = (): Promise<void> =>
-                  ctrl.update(renderOmpReplyCard(withDoctorReport(state, doctorReport(echoStatus()))));
-                for await (const evt of run.events) {
-                  if (run.wasInterrupted()) break;
-                  if (evt.type === 'system' || evt.type === 'usage') continue;
-                  if (evt.type === 'text') echoText += evt.delta;
-                  if (evt.type === 'final_text') echoText = evt.content;
-                  state = reduce(state, evt);
-                  await flush();
-                  // Stop at the terminal event instead of waiting for OMP's
-                  // process cleanup tail to close stdout.
-                  if (state.terminal !== 'running') break;
-                }
-                state = run.wasInterrupted() ? markInterrupted(state) : finalizeIfRunning(state);
-                await flush();
-              },
-            },
-          },
-          { replyTo: ctx.msg.messageId },
-        );
+        await reply(ctx, report);
       } else {
-        // Group / topic: buffer to completion, then DM the final card to the
-        // operator. No live streaming — the group should see nothing past the
-        // ack reply above.
-        let state: RunState = initialState;
-        let echoText = '';
-        for await (const evt of run.events) {
-          if (run.wasInterrupted()) break;
-          if (evt.type === 'system' || evt.type === 'usage') continue;
-          if (evt.type === 'text') echoText += evt.delta;
-          if (evt.type === 'final_text') echoText = evt.content;
-          state = reduce(state, evt);
-          if (state.terminal !== 'running') break;
-        }
-        state = run.wasInterrupted() ? markInterrupted(state) : finalizeIfRunning(state);
-        // Send a one-shot interactive card by open_id. Lark routes it to the
-        // user's p2p chat with the bot (auto-creates it if needed); other
-        // group members never see this payload.
-        await ctx.channel.send(ctx.msg.senderId, {
-          card: renderOmpReplyCard(
-            withDoctorReport(state, doctorReport(formatDoctorEchoStatus(echoText, state))),
-          ),
-        });
+        await ctx.channel.send(ctx.msg.senderId, { markdown: report });
       }
     } finally {
       const active = ctx.scopedRuns.activeMetadata(run.metadata.scopeId);
@@ -1059,16 +1019,12 @@ function buildDoctorReport(
   ].join('\n');
 }
 
-function withDoctorReport(state: RunState, report: string): RunState {
-  return { ...state, finalText: report };
-}
 
 function formatDoctorEchoStatus(echoText: string, state: RunState): string {
+  if (state.terminal !== 'running' && state.terminal !== 'done') return state.terminal;
   const trimmed = echoText.trim();
   if (trimmed) return trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
-  if (state.terminal === 'running') return 'pending';
-  if (state.terminal === 'done') return 'empty';
-  return state.terminal;
+  return state.terminal === 'running' ? 'pending' : 'empty';
 }
 
 async function handleHelp(_args: string, ctx: CommandContext): Promise<void> {

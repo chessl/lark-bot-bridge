@@ -36,7 +36,6 @@ interface MessageHandlerMap {
 interface FakeLarkChannel {
   handlers: MessageHandlerMap;
   createdCards: object[];
-  updates: Array<{ cardId: string; card: object; sequence: number }>;
   sent: unknown[];
   streams: unknown[];
   botIdentity: { openId: string; name: string };
@@ -58,7 +57,14 @@ interface FakeLarkChannel {
         };
       };
     };
-    cardkit: { v1: { card: { settings: Mock<(input: unknown) => Promise<unknown>> } } };
+    cardkit: {
+      v1: {
+        card: {
+          update: Mock<(input: unknown) => Promise<unknown>>;
+          settings: Mock<(input: unknown) => Promise<unknown>>;
+        };
+      };
+    };
   };
   on(handlers: MessageHandlerMap): void;
   connect(): Promise<void>;
@@ -66,7 +72,6 @@ interface FakeLarkChannel {
   getChatMode(chatId: string): Promise<'group' | 'topic'>;
   getConnectionStatus(): { state: 'connected'; reconnectAttempts: number };
   createCard(card: object): Promise<{ cardId: string }>;
-  updateCardById(cardId: string, card: object, sequence: number): Promise<void>;
   send(chatId: string, content: unknown, options?: unknown): Promise<{ messageId: string }>;
   stream(chatId: string, input: unknown, options?: unknown): Promise<void>;
 }
@@ -270,14 +275,12 @@ async function startTestBridge(harness: {
 function createFakeLarkChannel(chatMode: 'group' | 'topic'): FakeLarkChannel {
   const handlers: MessageHandlerMap = {};
   const createdCards: object[] = [];
-  const updates: FakeLarkChannel['updates'] = [];
   const sent: unknown[] = [];
   const streams: unknown[] = [];
 
   return {
     handlers,
     createdCards,
-    updates,
     sent,
     streams,
     botIdentity: { openId: 'ou_bot', name: 'Bridge' },
@@ -303,7 +306,14 @@ function createFakeLarkChannel(chatMode: 'group' | 'topic'): FakeLarkChannel {
           },
         },
       },
-      cardkit: { v1: { card: { settings: vi.fn(async () => ({ code: 0 })) } } },
+      cardkit: {
+        v1: {
+          card: {
+            update: vi.fn(async () => ({ code: 0 })),
+            settings: vi.fn(async () => ({ code: 0 })),
+          },
+        },
+      },
     },
     on(nextHandlers) {
       Object.assign(handlers, nextHandlers);
@@ -319,9 +329,6 @@ function createFakeLarkChannel(chatMode: 'group' | 'topic'): FakeLarkChannel {
     async createCard(card) {
       createdCards.push(card);
       return { cardId: 'card_1' };
-    },
-    async updateCardById(cardId, card, sequence) {
-      updates.push({ cardId, card, sequence });
     },
     async send(_chatId, content) {
       sent.push(content);
