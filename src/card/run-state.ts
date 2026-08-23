@@ -190,15 +190,18 @@ function upsertTool(state: RunState, id: string, rawName: string): RunState {
   const visible = existing !== undefined;
   const alreadyKnown = visible || known.includes(id);
   const { name, action } = safeToolLabel(rawName);
-  let blocks = visible
-    ? state.blocks.map((block) =>
-        block.kind === 'tool' && block.tool.id === id
-          ? { kind: 'tool' as const, tool: { id, name, action, status: 'running' as const } }
-          : block,
-      )
-    : alreadyKnown
-      ? state.blocks
-      : [...state.blocks, { kind: 'tool' as const, tool: { id, name, action, status: 'running' } }];
+  let blocks: Block[];
+  if (visible) {
+    blocks = state.blocks.map((block): Block =>
+      block.kind === 'tool' && block.tool.id === id
+        ? { kind: 'tool', tool: { id, name, action, status: 'running' } }
+        : block,
+    );
+  } else if (alreadyKnown) {
+    blocks = state.blocks;
+  } else {
+    blocks = [...state.blocks, { kind: 'tool', tool: { id, name, action, status: 'running' } }];
+  }
   blocks = trimToolBlocks(blocks);
   return {
     ...state,
@@ -212,11 +215,11 @@ function upsertTool(state: RunState, id: string, rawName: string): RunState {
 function finishTool(state: RunState, id: string, isError: boolean): RunState {
   if (!(state.knownToolIds ?? []).includes(id)) return state;
   let changed = false;
-  const blocks = state.blocks.map((block) => {
+  const blocks = state.blocks.map((block): Block => {
     if (block.kind !== 'tool' || block.tool.id !== id) return block;
     changed = true;
     return {
-      kind: 'tool' as const,
+      kind: 'tool',
       tool: { ...block.tool, input: undefined, output: undefined, status: isError ? 'error' : 'done' },
     };
   });
@@ -235,10 +238,12 @@ function pushActivity(state: RunState, activity: LifecycleActivity): RunState {
 
 function popActivity(state: RunState, kind: LifecycleKind): RunState {
   const stack = [...(state.activityStack ?? [])];
-  const index = stack.findLastIndex((activity) => activity.kind === kind);
-  if (index < 0) return state;
-  stack.splice(index, 1);
-  return { ...state, activityStack: stack };
+  for (let index = stack.length - 1; index >= 0; index--) {
+    if (stack[index]?.kind !== kind) continue;
+    stack.splice(index, 1);
+    return { ...state, activityStack: stack };
+  }
+  return state;
 }
 
 function terminateNormally(state: RunState): RunState {

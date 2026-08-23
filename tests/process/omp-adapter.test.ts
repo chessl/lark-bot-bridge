@@ -37,11 +37,8 @@ describe('OmpAdapter process contract', () => {
 
     expect(await collect(run.events)).toEqual([
       { type: 'system', sessionId: 'omp-session-1', model: 'openai/gpt-test' },
-      { type: 'thinking', delta: 'checking' },
-      { type: 'text', delta: 'hello ' },
-      { type: 'text', delta: 'user' },
-      { type: 'tool_use', id: 'tool-1', name: 'read', input: { path: 'README.md' } },
-      { type: 'tool_result', id: 'tool-1', output: 'done', isError: false },
+      { type: 'final_text', content: 'hello user' },
+      { type: 'reasoning', content: 'approved reasoning' },
       {
         type: 'usage',
         inputTokens: 10,
@@ -50,6 +47,8 @@ describe('OmpAdapter process contract', () => {
         reasoningOutputTokens: undefined,
         costUsd: 0.01,
       },
+      { type: 'tool_use', id: 'tool-1', name: 'read', input: { path: 'README.md' } },
+      { type: 'tool_result', id: 'tool-1', output: 'done', isError: false },
       { type: 'done', sessionId: 'omp-session-1', terminationReason: 'normal' },
     ]);
     expect(await run.waitForExit(2000)).toBe(true);
@@ -190,7 +189,7 @@ rl.on('line', (line) => {
     console.log(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'user' } }));
     console.log(JSON.stringify({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'read', args: { path: 'README.md' } }));
     console.log(JSON.stringify({ type: 'tool_execution_end', toolCallId: 'tool-1', result: { content: [{ type: 'text', text: 'done' }] } }));
-    console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'hello user' }], usage: { input: 10, output: 4, cacheRead: 2, cost: { total: 0.01 } } } }));
+    console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'approved reasoning' }, { type: 'text', text: 'hello user' }], usage: { input: 10, output: 4, cacheRead: 2, cost: { total: 0.01 } } } }));
     console.log(JSON.stringify({ type: 'agent_end', isTerminal: false }));
     console.log(JSON.stringify({ type: 'agent_end', isTerminal: true }));
   }
