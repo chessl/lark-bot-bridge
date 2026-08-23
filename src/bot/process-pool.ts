@@ -1,10 +1,9 @@
 import { log } from '../core/logger';
 
 /**
- * FIFO concurrency cap for claude runs. Especially useful in topic-group
- * scenarios where each topic spawns its own run — without a cap, a single
- * busy group could trivially explode to dozens of concurrent claude
- * subprocesses, drowning RAM and Anthropic API rate limit.
+ * FIFO concurrency cap for OMP runs. Especially useful in topic groups where
+ * each topic starts its own subprocess and a busy group could otherwise
+ * exhaust local resources.
  *
  * Use:
  *   const pool = new ProcessPool();

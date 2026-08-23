@@ -1,20 +1,16 @@
 import pkg from '../../package.json';
-import type { AgentAdapter } from '../agent/types';
+import { OmpAdapter } from '../agent/omp/adapter';
+import type { OmpRunEngine } from '../agent/types';
 import { type BridgeChannel, startChannel as realStartChannel } from '../bot/channel';
 import type { Controls } from '../commands';
 import type { AppPaths } from '../config/app-paths';
-import type { AgentKind, ProfileConfig } from '../config/profile-schema';
+import type { ProfileConfig } from '../config/profile-schema';
 import { type AppConfig, isComplete } from '../config/schema';
 import { log } from '../core/logger';
 import { refreshOwnerControls } from '../policy/owner';
 import { SessionCatalog } from '../session/catalog';
 import { SessionStore } from '../session/store';
 import { WorkspaceStore } from '../workspace/store';
-import {
-  assertReconnectAgentKindUnchanged,
-  createRuntimeAgent,
-  releaseRuntimeLocks,
-} from './agent-runtime';
 import {
   type AcquiredRuntimeLock,
   acquireAppRuntimeLock,
@@ -38,7 +34,6 @@ export interface SupervisorOptions {
 
 export interface ManagedStatus {
   profile: string;
-  agentKind: AgentKind;
   online: boolean;
   pid: number;
   startedAt?: string;
@@ -65,7 +60,7 @@ class ManagedProfile {
     private configPath: string,
     private cfg: AppConfig,
     private profileConfig: ProfileConfig,
-    private agent: AgentAdapter,
+    private agent: OmpRunEngine,
     private sessions: SessionStore,
     private sessionCatalog: SessionCatalog,
     private workspaces: WorkspaceStore,
@@ -88,16 +83,13 @@ class ManagedProfile {
     // this.locks and gets released by the catch — otherwise it would leak and
     // a retry in the same process would fail to re-lock.
     this.locks = [];
-    this.locks.push(await acquireProfileRuntimeLock(this.appPaths, this.profileConfig.agentKind));
-    this.locks.push(
-      await acquireAppRuntimeLock(this.appPaths, this.appId, this.profileConfig.agentKind),
-    );
+    this.locks.push(await acquireProfileRuntimeLock(this.appPaths));
+    this.locks.push(await acquireAppRuntimeLock(this.appPaths, this.appId));
     try {
       this.entry = await register({
         appId: this.appId,
         tenant: this.cfg.accounts.app.tenant,
         profileName: this.appPaths.profile,
-        agentKind: this.profileConfig.agentKind,
         configPath: this.configPath,
         version: pkg.version,
         registryFile: this.appPaths.userRegistryFile,
@@ -148,7 +140,6 @@ class ManagedProfile {
   status(pid: number): ManagedStatus {
     return {
       profile: this.profile,
-      agentKind: this.profileConfig.agentKind,
       online: true,
       pid,
       startedAt: this.startedAt,
@@ -200,21 +191,18 @@ class ManagedProfile {
       });
       const next = nextRuntime.cfg;
       if (!isComplete(next)) throw new Error('config incomplete after change');
-      assertReconnectAgentKindUnchanged(
-        this.profileConfig.agentKind,
-        nextRuntime.profileConfig.agentKind,
-      );
-      const nextAgent = createRuntimeAgent(nextRuntime.profileConfig, nextRuntime.appPaths);
+      const nextAgent = new OmpAdapter({
+        binary: nextRuntime.profileConfig.omp.binaryPath,
+        ...(nextRuntime.profileConfig.omp.profile
+          ? { profile: nextRuntime.profileConfig.omp.profile }
+          : {}),
+      });
       const availability = await nextAgent.checkAvailability();
       if (!availability.ok) throw availability.error;
 
       const appChanged = next.accounts.app.id !== this.cfg.accounts.app.id;
       if (appChanged) {
-        nextAppLock = await acquireAppRuntimeLock(
-          nextRuntime.appPaths,
-          next.accounts.app.id,
-          nextRuntime.profileConfig.agentKind,
-        );
+        nextAppLock = await acquireAppRuntimeLock(nextRuntime.appPaths, next.accounts.app.id);
       }
       const nextControls = this.makeControls(nextRuntime.appPaths, next, nextRuntime.profileConfig);
       const nextBridge = await this.startChannelFn({
@@ -311,7 +299,10 @@ export class Supervisor {
       }
     }
 
-    const agent = createRuntimeAgent(profileConfig, appPaths);
+    const agent = new OmpAdapter({
+      binary: profileConfig.omp.binaryPath,
+      ...(profileConfig.omp.profile ? { profile: profileConfig.omp.profile } : {}),
+    });
     if (this.opts.runAgentPreflight !== false) {
       const availability = await agent.checkAvailability();
       if (!availability.ok) throw availability.error;
@@ -371,4 +362,8 @@ export class Supervisor {
   unregisterAllSync(): void {
     for (const m of this.managed.values()) m.unregisterSelfSync();
   }
+}
+
+async function releaseRuntimeLocks(locks: AcquiredRuntimeLock[]): Promise<void> {
+  for (const lock of locks) await lock.release().catch(() => undefined);
 }

@@ -9,7 +9,7 @@ import {
   type BridgePromptTopicMessage,
   buildAgentPrompt,
 } from '../agent/prompt';
-import type { AgentAdapter, AgentEvent } from '../agent/types';
+import type { AgentEvent, OmpRunEngine } from '../agent/types';
 import { CallbackAuth } from '../card/callback-auth';
 import { CallbackNonceStore } from '../card/callback-store';
 import { handleCardAction } from '../card/dispatcher';
@@ -159,7 +159,7 @@ export interface BridgeChannel {
 
 export interface StartChannelDeps {
   cfg: AppConfig;
-  agent: AgentAdapter;
+  agent: OmpRunEngine;
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
@@ -588,7 +588,7 @@ async function sendForwardFetchFailedHint(
 
 interface IntakeDeps {
   channel: LarkChannel;
-  agent: AgentAdapter;
+  agent: OmpRunEngine;
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
@@ -872,15 +872,14 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // for this scope (never on the first run) and the selection actually
   // changed. The scoped-run seam owns translating this preference into the
   // adapter's model argument.
-  const agentKind = controls.profileConfig.agentKind;
   const modelPref = controls.profileConfig.preferences.model;
-  const modelSelection = normalizeModelSelection(agentKind, modelPref);
+  const modelSelection = normalizeModelSelection(modelPref);
   const prevModel = lastRunModelByScope.get(scope);
   const modelSwitched = prevModel !== undefined && prevModel !== modelSelection;
   lastRunModelByScope.set(scope, modelSelection);
   const extraInstructions = modelSwitched
     ? [
-        `用户刚把本会话使用的模型切换为「${modelLabel(agentKind, modelPref)}」。` +
+        `用户刚把本会话使用的模型切换为「${modelLabel(modelPref)}」。` +
           '之前的对话里可能提到别的模型,请以当前模型为准;若被问到你用的是什么模型,据此回答。',
       ]
     : undefined;
@@ -993,7 +992,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       }
     : {};
 
-  // For non-card modes Claude's output doesn't surface visually until either
+  // For non-card modes OMP output does not surface visually until either
   // a first streamed token (markdown mode) or the whole run ends (text mode).
   // Add a "Typing" reaction to the triggering message as an instant ack, but
   // never let that outbound API call block agent event draining.
@@ -1083,38 +1082,21 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           }
         },
       );
-      try {
-        await awaitRenderAwareStream({
-          mode: replyMode,
-          progress,
-          renderDone,
-          producerStarted: () => producerStarted,
-          fallback: async (state) => {
-            if (controls.profileConfig.agentKind === 'codex') return;
-            if (renderText(filterForPrefs(state)).trim() === '') return;
-            await channel.send(
-              chatId,
-              { card: renderCard(filterForPrefs(state), cardRenderOptions) },
-              sendOpts,
-            );
-          },
-        });
-      } catch (err) {
-        if (controls.profileConfig.agentKind !== 'codex') throw err;
-        log.fail('stream', err, { mode: replyMode, step: 'progress-stream' });
-      }
+      await awaitRenderAwareStream({
+        mode: replyMode,
+        progress,
+        renderDone,
+        producerStarted: () => producerStarted,
+        fallback: async (state) => {
+          if (renderText(filterForPrefs(state)).trim() === '') return;
+          await channel.send(
+            chatId,
+            { card: renderCard(filterForPrefs(state), cardRenderOptions) },
+            sendOpts,
+          );
+        },
+      });
       await recallIfEmptyStreamedReply(channel, progress, filterForPrefs(latestState), scope);
-      if (controls.profileConfig.agentKind === 'codex') {
-        await sendFinalReply({
-          channel,
-          chatId,
-          scope,
-          state: finalReplyState(progress, filterForPrefs(latestState)),
-          replyMode,
-          sendOpts,
-          cardRenderOptions,
-        });
-      }
     } else if (replyMode === 'markdown') {
       let latestState: RunState = initialState;
       let producerStarted = false;
@@ -1147,36 +1129,17 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           }
         },
       );
-      try {
-        await awaitRenderAwareStream({
-          mode: replyMode,
-          progress,
-          renderDone,
-          producerStarted: () => producerStarted,
-          fallback: async (state) => {
-            if (controls.profileConfig.agentKind === 'codex') return;
-            const body = renderText(filterForPrefs(state));
-            if (body.trim()) {
-              await channel.send(chatId, { markdown: body }, sendOpts);
-            }
-          },
-        });
-      } catch (err) {
-        if (controls.profileConfig.agentKind !== 'codex') throw err;
-        log.fail('stream', err, { mode: replyMode, step: 'progress-stream' });
-      }
+      await awaitRenderAwareStream({
+        mode: replyMode,
+        progress,
+        renderDone,
+        producerStarted: () => producerStarted,
+        fallback: async (state) => {
+          const body = renderText(filterForPrefs(state));
+          if (body.trim()) await channel.send(chatId, { markdown: body }, sendOpts);
+        },
+      });
       await recallIfEmptyStreamedReply(channel, progress, filterForPrefs(latestState), scope);
-      if (controls.profileConfig.agentKind === 'codex') {
-        await sendFinalReply({
-          channel,
-          chatId,
-          scope,
-          state: finalReplyState(progress, filterForPrefs(latestState)),
-          replyMode,
-          sendOpts,
-          cardRenderOptions,
-        });
-      }
     } else {
       // text mode: drain the agent stream without sending anything during
       // the run, then post the final rendered text once as a plain markdown
@@ -1192,10 +1155,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         channel,
         chatId,
         scope,
-        state:
-          controls.profileConfig.agentKind === 'codex'
-            ? finalAnswerOnlyState(filterForPrefs(finalState))
-            : filterForPrefs(finalState),
+        state: filterForPrefs(finalState),
         replyMode,
         sendOpts,
         cardRenderOptions,
@@ -1231,9 +1191,7 @@ interface LazyProgressStream {
  *
  * The SDK starts a stream eagerly: `channel.stream(...)` sends a card before
  * the producer runs, and finishes it with a "(no content)" placeholder when the
- * producer never supplied any text. A Codex round that only produces a final
- * answer (delivered separately by `sendFinalReply`) used to hit exactly that:
- * an empty card sat in the chat for seconds until `recall-empty` cleaned it up.
+ * producer never supplied any text.
  */
 function createLazyProgressStream(
   scope: string,
@@ -1284,31 +1242,6 @@ function shouldOpenProgressStream(state: RunState): boolean {
   return renderText({ ...state, footer: null }).trim() !== '';
 }
 
-/**
- * What Codex's dedicated final reply may carry, given what the progress stream
- * already put on screen.
- *
- * `finalAnswerOnlyState` falls back to the run's text blocks when Codex held
- * nothing back for the end — correct where nothing was streamed (CoT, text
- * mode, a stream we gave up on), but those blocks are already visible once a
- * stream rendered them, and repeating them posts the same words a second time.
- * Codex leaves the answer in `blocks` more often than it looks: any abnormal
- * turn end (`turn.failed`, or the process exiting before `turn.completed`)
- * flushes the pending message as text instead of `final_text`.
- *
- * Terminal notices are dropped for the same reason — the stream rendered them.
- */
-function finalReplyState(progress: LazyProgressStream, state: RunState): RunState {
-  if (!progress.opened() || progress.abandoned()) return finalAnswerOnlyState(state);
-  return {
-    ...state,
-    blocks: state.finalText ? [{ kind: 'text', content: state.finalText, streaming: false }] : [],
-    reasoning: { content: '', active: false },
-    footer: null,
-    terminal: 'done',
-    errorMsg: undefined,
-  };
-}
 
 /**
  * Backstop for a progress stream that was opened on real content and still
@@ -1466,7 +1399,7 @@ async function processAgentStream(
 ): Promise<RunState> {
   let state: RunState = initialState;
 
-  // Idle watchdog: claude going silent for `idleTimeoutMs` is treated as
+  // Idle watchdog: OMP going silent for `idleTimeoutMs` is treated as
   // "presumed hung", we stop() and surface a timeout marker on the card.
   //
   // BUT — the agent can legitimately be silent while a long-running tool call
@@ -1534,9 +1467,8 @@ async function processAgentStream(
         log.info('card', 'transition', { footer: state.footer, terminal: state.terminal });
       }
       await flush(state);
-      // Stop iterating as soon as we have a terminal state. Some claude
-      // versions don't close stdout immediately after the result event, which
-      // would leave the for-await waiting forever otherwise.
+      // Stop iterating as soon as we have a terminal state; the OMP process may
+      // still need a short cleanup tail before stdout closes.
       if (state.terminal !== 'running') break;
     }
   } finally {
@@ -1545,7 +1477,7 @@ async function processAgentStream(
 
   // If state already reached a terminal event (done/error/etc.) before the
   // watchdog or interrupt could land, don't clobber it — that real terminal
-  // wins. This avoids "claude finished but flush was slow → timer fired
+  // wins. This avoids "OMP finished but flush was slow → timer fired
   // mid-flush → user sees 'idle_timeout' on a successful run".
   if (state.terminal === 'running') {
     if (idleFired) {
@@ -1599,9 +1531,8 @@ async function awaitRenderAwareStream(input: {
     return;
   }
 
-  // Nothing durable ever showed up, so no progress message was opened at all
-  // (the common Codex final-only round). Whatever the run ended with still has
-  // to reach the user as a standalone reply.
+  // Nothing durable ever showed up, so no progress message was opened.
+  // Whatever the run ended with still has to reach the user as a standalone reply.
   if (!input.progress.opened()) {
     log.info('outbound', 'progress-stream-skipped', { mode: input.mode });
     await runFallbackReply(input.mode, first.state, input.fallback);

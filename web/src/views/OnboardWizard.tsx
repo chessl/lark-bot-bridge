@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { apiGet, apiPost } from "@/lib/api";
-import type { AgentKind, OnboardState } from "@/lib/types";
+import type { OnboardState } from "@/lib/types";
 
 // New-profile wizard: scan a Feishu QR to create a fresh app (same flow as the
 // CLI `registerApp` wizard). The QR renders immediately; once scanned, the user
@@ -20,31 +20,28 @@ function uniqueName(base: string, existing: string[]): string {
 }
 
 export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => void }) {
-  const [agentKind, setAgentKind] = useState<AgentKind>("claude");
   const [profileName, setProfileName] = useState("");
   const [botName, setBotName] = useState("");
-  const [detected, setDetected] = useState<AgentKind[]>([]);
+  const [ompAvailable, setOmpAvailable] = useState(true);
   const [existing, setExisting] = useState<string[]>([]);
   const [qr, setQr] = useState<{ sessionId: string; qrUrl: string; expireIn: number } | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
 
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const scanned = useRef(false);
-  const naming = useRef({ agentKind, existing });
+  const naming = useRef({ existing });
 
   useEffect(() => {
     apiGet<OnboardState>("/api/onboard/state")
       .then((s) => {
-        setDetected(s.detectedAgents);
+        setOmpAvailable(s.ompAvailable);
         setExisting(s.profiles);
-        const firstDetected = s.detectedAgents[0];
-        if (firstDetected && !s.detectedAgents.includes("claude")) setAgentKind(firstDetected);
       })
       .catch(() => {});
   }, []);
   useEffect(() => {
-    naming.current = { agentKind, existing };
-  }, [agentKind, existing]);
+    naming.current = { existing };
+  }, [existing]);
 
   const stopPolling = useCallback(() => {
     clearInterval(timer.current ?? undefined);
@@ -65,7 +62,7 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
         // App created — prefill the profile name from the scanned app's name.
         setBotName(s.botName ?? "");
         setProfileName(
-          s.suggestedProfile || uniqueName(naming.current.agentKind, naming.current.existing),
+          s.suggestedProfile || uniqueName("omp", naming.current.existing),
         );
         setPhase("confirm");
       } else if (s.status === "error") {
@@ -102,7 +99,6 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
     try {
       const r = await apiPost<{ profile: string }>("/api/profiles/qr/finish", {
         sessionId: qr.sessionId,
-        agentKind,
         profile: profileName.trim(),
       });
       toast.success(`profile「${r.profile}」已创建`);
@@ -126,21 +122,6 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
           <span aria-hidden="true">✓</span> 应用已创建{botName ? `：${botName}` : ""}，确认后完成
         </div>
         <div className="space-y-1.5">
-          <label className="text-sm font-medium leading-none" htmlFor="onboard-agent">
-            AI Agent
-          </label>
-          <select
-            id="onboard-agent"
-            className="h-9 w-full cursor-pointer rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
-            value={agentKind}
-            onChange={(e) => setAgentKind(e.target.value as AgentKind)}
-          >
-            <option value="claude">Claude Code</option>
-            <option value="codex">Codex</option>
-            <option value="omp">Oh My Pi</option>
-          </select>
-        </div>
-        <div className="space-y-1.5">
           <label className="text-sm font-medium leading-none" htmlFor="onboard-profile">
             Profile 名称
           </label>
@@ -148,7 +129,7 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
             id="onboard-profile"
             value={profileName}
             onChange={(e) => setProfileName(e.target.value)}
-            placeholder={agentKind}
+            placeholder="omp"
           />
           {existing.includes(profileName.trim()) && (
             <p className="text-xs text-destructive">
@@ -199,9 +180,9 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
           </Button>
         )}
       </div>
-      {detected.length === 0 && (
+      {!ompAvailable && (
         <p className="text-center text-xs text-muted-foreground">
-          未检测到已安装的 agent，请确保 claude、codex 或 omp 已安装。
+          未检测到 OMP，请先安装 omp 或设置 LARK_CHANNEL_OMP_BIN。
         </p>
       )}
       <p className="text-center text-xs text-muted-foreground">

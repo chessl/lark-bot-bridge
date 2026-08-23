@@ -40,8 +40,8 @@ describe('bot run observability', () => {
       (line) => line.phase === 'run' && line.event === 'started',
     );
     expect(started).toMatchObject({
-      profile: 'claude',
-      agent: 'claude',
+      profile: 'work',
+      agent: 'omp',
       source: 'im',
       stage: 'submit',
     });
@@ -67,7 +67,6 @@ async function createHarness(): Promise<{
     events: [{ type: 'done', terminationReason: 'normal' }],
   });
   const base = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: {
       app: {
         id: 'cli_test',
@@ -99,8 +98,7 @@ async function createHarness(): Promise<{
       createRunId: () => 'run-1',
       postDoneExitGraceMs: 1,
       workspaces,
-      profile: 'claude',
-      profileConfig: () => profileConfig,
+      profile: 'work',
       now: () => 1_700_000_000_000,
     }),
     workspaces,

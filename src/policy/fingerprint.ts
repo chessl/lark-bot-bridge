@@ -1,15 +1,12 @@
 import { createHash } from 'node:crypto';
-import type { ProfileConfig, SandboxMode } from '../config/profile-schema';
+import type { ProfileConfig } from '../config/profile-schema';
 import { canonicalizeJcs } from '../session/jcs';
 
 export interface FingerprintInputV2 {
   cwdRealpath: string;
-  sandbox: SandboxMode;
   accessPolicyDigest: string;
   resourceScopeDigest: string;
   attachmentPolicyShapeDigest: string;
-  codexHome?: string;
-  inheritCodexHome: boolean;
 }
 
 export interface ResourceScopeDigestInput {
@@ -36,12 +33,9 @@ export function policyFingerprint(input: FingerprintInputV2): string {
   return digestCanonical({
     version: 2,
     cwdRealpath: input.cwdRealpath,
-    sandbox: input.sandbox,
     accessPolicyDigest: input.accessPolicyDigest,
     resourceScopeDigest: input.resourceScopeDigest,
     attachmentPolicyShapeDigest: input.attachmentPolicyShapeDigest,
-    codexHome: input.codexHome ?? null,
-    inheritCodexHome: input.inheritCodexHome,
   });
 }
 

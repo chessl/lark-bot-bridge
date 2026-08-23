@@ -1,5 +1,4 @@
 import { resolveAppPaths } from '../config/app-paths';
-import type { AgentKind } from '../config/profile-schema';
 import { loadRootConfig, saveRootConfig, withConfigFileLock } from '../config/profile-store';
 import { listAllProfiles } from '../runtime/profile-discovery';
 import { HttpError } from './http';
@@ -7,7 +6,6 @@ import type { UiSupervisor } from './types';
 
 export interface ProfileSummary {
   name: string;
-  agentKind: AgentKind;
   active: boolean;
   /** Whether the supervisor currently hosts this profile's channel. */
   running: boolean;
@@ -16,7 +14,6 @@ export interface ProfileSummary {
 export interface BotSummary {
   id: string;
   profileName: string;
-  agentKind: AgentKind;
   botName?: string;
   appId?: string;
   pid: number;
@@ -30,7 +27,6 @@ export function listBots(supervisor: UiSupervisor, version: string, now: number)
   return supervisor.list().map((s) => ({
     id: s.profile,
     profileName: s.profile,
-    agentKind: s.agentKind,
     botName: s.botName,
     appId: s.appId,
     pid: s.pid,
@@ -40,7 +36,7 @@ export function listBots(supervisor: UiSupervisor, version: string, now: number)
   }));
 }
 
-/** All profiles with agent kind, active flag, and whether the supervisor hosts them. */
+/** All profiles with active and supervisor status. */
 export async function listProfiles(
   supervisor: UiSupervisor,
   rootDir?: string,
@@ -48,7 +44,6 @@ export async function listProfiles(
   const profiles = await listAllProfiles(rootDir).catch(() => []);
   return profiles.map((p) => ({
     name: p.name,
-    agentKind: p.agentKind,
     active: p.active,
     running: supervisor.isOnline(p.name),
   }));

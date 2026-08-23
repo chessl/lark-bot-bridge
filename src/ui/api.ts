@@ -7,12 +7,7 @@ import {
   saveAccessConfig,
   savePreferencesConfig,
 } from '../config/config-ops';
-import type {
-  AgentKind,
-  MeetingConfig,
-  ProfileAccess,
-  ProfileMode,
-} from '../config/profile-schema';
+import type { MeetingConfig, ProfileAccess, ProfileMode } from '../config/profile-schema';
 import { loadRootConfig, runtimeProfileConfig } from '../config/profile-store';
 import {
   type AppPreferences,
@@ -55,7 +50,6 @@ export class ApiError extends HttpError {}
 /** The settings payload the SPA reads and writes. */
 export interface ConfigView {
   profile: string;
-  agentKind: AgentKind;
   mode: ProfileMode;
   model: string;
   models: { value: string; label: string }[];
@@ -79,14 +73,12 @@ export interface ConfigView {
 }
 
 export function buildConfigView(state: MutableProfileState, live = false): ConfigView {
-  const agentKind = state.profileConfig.agentKind;
   const ms = getRunIdleTimeoutMs(state.cfg);
   return {
     profile: state.profile,
-    agentKind,
     mode: state.profileConfig.mode,
-    model: normalizeModelSelection(agentKind, state.cfg.preferences?.model),
-    models: supportedModels(agentKind),
+    model: normalizeModelSelection(state.cfg.preferences?.model),
+    models: supportedModels(),
     messageReply: getMessageReplyMode(state.cfg),
     showToolCalls: getShowToolCalls(state.cfg),
     cotMessages: getCotMessages(state.cfg),
@@ -127,7 +119,6 @@ export async function loadProfileState(
 export function buildStatus(rt: UiRuntime, channel: LarkChannel | undefined, version: string) {
   return {
     profile: rt.profile,
-    agentKind: rt.profileConfig.agentKind,
     mode: rt.profileConfig.mode,
     version,
     connected: Boolean(channel?.botIdentity?.name),
@@ -207,17 +198,15 @@ interface ParsedConfig {
  */
 function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfig {
   const fv = asRecord(body);
-  const agentKind = state.profileConfig.agentKind;
 
   const mode: ProfileMode =
     fv.mode === 'team' || fv.mode === 'personal' ? fv.mode : state.profileConfig.mode;
 
   const rawModel = typeof fv.model === 'string' ? fv.model : '';
-  const modelValid =
-    rawModel !== '' && supportedModels(agentKind).some((m) => m.value === rawModel);
+  const modelValid = rawModel !== '' && supportedModels().some((m) => m.value === rawModel);
   const modelSelection = modelValid
     ? rawModel
-    : normalizeModelSelection(agentKind, state.cfg.preferences?.model);
+    : normalizeModelSelection(state.cfg.preferences?.model);
   const model = modelSelection === DEFAULT_MODEL ? undefined : modelSelection;
 
   const messageReply: MessageReplyMode =

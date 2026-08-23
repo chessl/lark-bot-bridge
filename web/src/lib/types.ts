@@ -1,5 +1,5 @@
 export type { KnownChat } from "../../../src/bot/lark-info";
-export type { AgentKind, MeetingConfig, ProfileMode } from "../../../src/config/profile-schema";
+export type { MeetingConfig, ProfileMode } from "../../../src/config/profile-schema";
 export type {
   CotMessagesMode as CotMessages,
   MessageReplyMode as MessageReply,

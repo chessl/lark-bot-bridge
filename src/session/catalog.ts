@@ -1,16 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { AgentCapabilityId } from '../agent/capability';
 import { defaultAppPaths } from '../config/app-paths';
 import { log } from '../core/logger';
 
-export type CatalogAgentId = AgentCapabilityId;
 export type SessionCatalogStatus = 'active' | 'archived';
 
 export interface SessionCatalogIdentity {
   scopeId: string;
-  agentId: CatalogAgentId;
   cwdRealpath: string;
   policyFingerprint: string;
 }
@@ -19,15 +16,13 @@ export interface SessionCatalogEntry extends SessionCatalogIdentity {
   key: string;
   status: SessionCatalogStatus;
   updatedAt: number;
-  sessionId?: string;
-  threadId?: string;
+  sessionId: string;
   lastSummary?: string;
 }
 
 export interface UpsertSessionCatalogInput extends SessionCatalogIdentity {
   now?: number;
-  sessionId?: string;
-  threadId?: string;
+  sessionId: string;
   lastSummary?: string;
 }
 
@@ -48,19 +43,14 @@ const DEFAULT_MAX_ENTRIES_PER_PROFILE = 1000;
 const KEY_SEPARATOR = '\x1f';
 
 export function sessionCatalogKey(input: SessionCatalogIdentity): string {
-  return [input.scopeId, input.agentId, input.cwdRealpath, input.policyFingerprint].join(
-    KEY_SEPARATOR,
-  );
+  return [input.scopeId, input.cwdRealpath, input.policyFingerprint].join(KEY_SEPARATOR);
 }
 
 export class SessionCatalog {
   private data = new Map<string, SessionCatalogEntry>();
   private saving: Promise<void> = Promise.resolve();
-  private readonly path: string;
 
-  constructor(path = defaultAppPaths.sessionCatalogFile) {
-    this.path = path;
-  }
+  constructor(private readonly path = defaultAppPaths.sessionCatalogFile) {}
 
   async load(): Promise<void> {
     try {
@@ -72,8 +62,7 @@ export class SessionCatalog {
       this.data.clear();
       for (const item of raw) {
         const entry = normalizeEntry(item);
-        if (!entry) continue;
-        this.data.set(entry.key, entry);
+        if (entry) this.data.set(entry.key, entry);
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
@@ -84,31 +73,21 @@ export class SessionCatalog {
 
   activeFor(input: SessionCatalogIdentity): SessionCatalogEntry | undefined {
     const entry = this.data.get(sessionCatalogKey(input));
-    if (!entry || entry.status !== 'active') return undefined;
-    if (!matchesIdentity(entry, input)) return undefined;
-    if (!isValidAgentEntry(entry)) {
-      log.warn('session-catalog', 'damaged-entry', {
-        key: entry.key,
-        agentId: entry.agentId,
-      });
-      return undefined;
-    }
+    if (!entry || entry.status !== 'active' || !matchesIdentity(entry, input)) return undefined;
     return { ...entry };
   }
 
   upsertActive(input: UpsertSessionCatalogInput): SessionCatalogEntry {
-    assertAgentIdentity(input);
+    if (!input.sessionId) throw new Error('OMP catalog entries require sessionId');
     const key = sessionCatalogKey(input);
     const entry: SessionCatalogEntry = {
       key,
       scopeId: input.scopeId,
-      agentId: input.agentId,
       cwdRealpath: input.cwdRealpath,
       policyFingerprint: input.policyFingerprint,
       status: 'active',
       updatedAt: input.now ?? Date.now(),
-      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      ...(input.threadId ? { threadId: input.threadId } : {}),
+      sessionId: input.sessionId,
       ...(input.lastSummary ? { lastSummary: input.lastSummary } : {}),
     };
     this.data.set(key, entry);
@@ -149,15 +128,11 @@ export class SessionCatalog {
       const scoped = [...this.data.values()]
         .filter((entry) => entry.scopeId === scopeId)
         .sort((a, b) => b.updatedAt - a.updatedAt);
-      for (const entry of scoped.slice(maxEntriesPerScope)) {
-        this.data.delete(entry.key);
-      }
+      for (const entry of scoped.slice(maxEntriesPerScope)) this.data.delete(entry.key);
     }
 
     const all = [...this.data.values()].sort((a, b) => b.updatedAt - a.updatedAt);
-    for (const entry of all.slice(maxEntriesPerProfile)) {
-      this.data.delete(entry.key);
-    }
+    for (const entry of all.slice(maxEntriesPerProfile)) this.data.delete(entry.key);
     this.schedulePersist();
   }
 
@@ -210,53 +185,32 @@ function normalizeEntry(input: unknown): SessionCatalogEntry | undefined {
   if (
     typeof raw.key !== 'string' ||
     typeof raw.scopeId !== 'string' ||
-    (raw.agentId !== 'claude' && raw.agentId !== 'codex' && raw.agentId !== 'omp') ||
     typeof raw.cwdRealpath !== 'string' ||
     typeof raw.policyFingerprint !== 'string' ||
     (raw.status !== 'active' && raw.status !== 'archived') ||
-    typeof raw.updatedAt !== 'number'
+    typeof raw.updatedAt !== 'number' ||
+    typeof raw.sessionId !== 'string'
   ) {
     return undefined;
   }
-  return {
+  const entry: SessionCatalogEntry = {
     key: raw.key,
     scopeId: raw.scopeId,
-    agentId: raw.agentId,
     cwdRealpath: raw.cwdRealpath,
     policyFingerprint: raw.policyFingerprint,
     status: raw.status,
     updatedAt: raw.updatedAt,
-    ...(typeof raw.sessionId === 'string' ? { sessionId: raw.sessionId } : {}),
-    ...(typeof raw.threadId === 'string' ? { threadId: raw.threadId } : {}),
+    sessionId: raw.sessionId,
     ...(typeof raw.lastSummary === 'string' ? { lastSummary: raw.lastSummary } : {}),
   };
+  return entry.key === sessionCatalogKey(entry) ? entry : undefined;
 }
 
 function matchesIdentity(entry: SessionCatalogEntry, input: SessionCatalogIdentity): boolean {
   return (
     entry.scopeId === input.scopeId &&
-    entry.agentId === input.agentId &&
     entry.cwdRealpath === input.cwdRealpath &&
     entry.policyFingerprint === input.policyFingerprint &&
     entry.key === sessionCatalogKey(input)
   );
-}
-
-function isValidAgentEntry(entry: SessionCatalogEntry): boolean {
-  if (entry.agentId === 'codex') return Boolean(entry.threadId) && !entry.sessionId;
-  return Boolean(entry.sessionId) && !entry.threadId;
-}
-
-function assertAgentIdentity(input: UpsertSessionCatalogInput): void {
-  if (input.agentId === 'codex') {
-    if (!input.threadId || input.sessionId) {
-      throw new Error('Codex catalog entries require threadId and must not include sessionId');
-    }
-    return;
-  }
-  if (!input.sessionId || input.threadId) {
-    throw new Error(
-      `${input.agentId} catalog entries require sessionId and must not include threadId`,
-    );
-  }
 }

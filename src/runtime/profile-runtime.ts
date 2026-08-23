@@ -1,20 +1,16 @@
 import { dirname } from 'node:path';
-import * as p from '@clack/prompts';
 import { runRegistrationWizard } from '../bot/wizard';
-import { type DetectedAgent, detectInstalledAgents } from '../cli/agent-detection';
 import { createBootstrapProfileConfig } from '../cli/profile-bootstrap';
 import { promptPassword } from '../cli/prompt';
 import { type AppPaths, defaultAppPaths, resolveAppPaths } from '../config/app-paths';
 import { setSecret } from '../config/keystore';
 import {
-  type AgentKind,
   type CreateDefaultProfileConfigInput,
   createDefaultProfileConfig,
   type ProfileConfig,
   type RootConfig,
 } from '../config/profile-schema';
 import {
-  agentKindFromString,
   createRootConfig,
   loadRootConfig,
   readActiveProfile,
@@ -30,19 +26,15 @@ import { validateAppCredentials } from '../utils/feishu-auth';
 export interface ResolveProfileRuntimeOptions {
   config?: string;
   profile?: string;
-  agent?: string;
   workspace?: string;
   appId?: string;
   appSecret?: string;
   tenant?: string;
   allowBootstrap?: boolean;
-  selectAgent?: (
-    detected: DetectedAgent[],
-  ) => AgentKind | undefined | Promise<AgentKind | undefined>;
 }
 
 export interface ProfileRuntime {
-  cfg: AppConfig & { agentKind?: AgentKind };
+  cfg: AppConfig & ProfileConfig;
   profileConfig: ProfileConfig;
   configPath: string;
   appPaths: AppPaths;
@@ -57,44 +49,16 @@ export interface MaterializeEnvSecretForServiceOptions {
 const ENV_SECRET_TEMPLATE_RE = /^\$\{[A-Z][A-Z0-9_]{0,127}\}$/;
 
 export function createRuntimeProfileConfig(input: CreateDefaultProfileConfigInput): ProfileConfig {
-  return createDefaultProfileConfig({
-    ...input,
-    ...(input.agentKind === 'codex'
-      ? { codex: input.codex ?? { binaryPath: process.env.LARK_CHANNEL_CODEX_BIN ?? 'codex' } }
-      : {}),
-    ...(input.agentKind === 'omp'
-      ? { omp: input.omp ?? { binaryPath: process.env.LARK_CHANNEL_OMP_BIN ?? 'omp' } }
-      : {}),
-  });
+  return createDefaultProfileConfig(input);
 }
 
 export async function resolveProfileRuntime(
   opts: ResolveProfileRuntimeOptions,
 ): Promise<ProfileRuntime> {
   const rootDir = opts.config ? dirname(opts.config) : undefined;
-  const requestedAgent = agentKindFromString(opts.agent);
   const explicitProfile = opts.profile;
   const activeProfile = explicitProfile ?? (await readActiveProfile(rootDir));
-  let profile = activeProfile ?? requestedAgent;
-  if (!profile && opts.allowBootstrap) {
-    const detected = await detectInstalledAgents();
-    if (detected.length === 0) {
-      throw new Error('no supported local agent found; install claude, codex, or omp first');
-    }
-    if (detected.length > 1) {
-      const selected = await selectDetectedAgent(detected, opts.selectAgent);
-      if (!selected) {
-        throw new Error(formatAmbiguousAgentSelectionError(detected));
-      }
-      profile = selected;
-    } else {
-      profile = detected[0]?.kind;
-    }
-  }
-  if (!profile && !opts.allowBootstrap) {
-    throw new Error('active profile is required');
-  }
-  profile ??= defaultAppPaths.profile;
+  let profile = activeProfile ?? defaultAppPaths.profile;
   let appPaths = resolveAppPaths({ rootDir, profile });
   const configPath = opts.config ?? appPaths.configFile;
 
@@ -110,7 +74,6 @@ export async function resolveProfileRuntime(
         return bootstrapProfileIntoExistingRoot({
           rootConfig,
           profile,
-          requestedAgent,
           opts,
           appPaths,
           configPath,
@@ -118,27 +81,20 @@ export async function resolveProfileRuntime(
       }
       throw new Error(`profile not found: ${profile}`);
     }
-    assertRequestedAgentMatchesExistingProfile(profile, profileConfig, requestedAgent);
     assertBootstrapAppMatchesExistingProfile(opts, profile, profileConfig);
     const cfg = runtimeProfileConfig(rootConfig, profile);
     return { cfg, profileConfig, configPath, appPaths, profile };
   }
 
-  if (!opts.allowBootstrap) {
-    throw new Error('config not initialized');
-  }
-  const bootstrapAgent = resolveBootstrapAgent(requestedAgent, profile) ?? 'claude';
-  const workspace = opts.workspace;
+  if (!opts.allowBootstrap) throw new Error('config not initialized');
   const fresh = await resolveBootstrapAppConfig(opts);
   const encrypted = await encryptedConfigForProfile(fresh, appPaths);
   const profileConfig = await createBootstrapProfileConfig({
-    agentKind: bootstrapAgent,
     accounts: encrypted.accounts,
     preferences: encrypted.preferences,
     secrets: encrypted.secrets,
-    workspace,
+    workspace: opts.workspace,
     defaultWorkspace: appPaths.defaultWorkspaceDir,
-    codexHomeDir: appPaths.codexHomeDir,
   });
   const root = createRootConfig(profile, profileConfig, encrypted.secrets);
   await saveRootConfig(root, configPath);
@@ -149,24 +105,19 @@ export async function resolveProfileRuntime(
 async function bootstrapProfileIntoExistingRoot(args: {
   rootConfig: RootConfig;
   profile: string;
-  requestedAgent: AgentKind | undefined;
   opts: ResolveProfileRuntimeOptions;
   appPaths: AppPaths;
   configPath: string;
 }): Promise<ProfileRuntime> {
-  const { rootConfig, profile, requestedAgent, opts, appPaths, configPath } = args;
-  const bootstrapAgent = resolveBootstrapAgent(requestedAgent, profile) ?? 'claude';
-  const workspace = opts.workspace;
+  const { rootConfig, profile, opts, appPaths, configPath } = args;
   const fresh = await resolveBootstrapAppConfig(opts);
   const encrypted = await encryptedConfigForProfile(fresh, appPaths);
   const profileConfig = await createBootstrapProfileConfig({
-    agentKind: bootstrapAgent,
     accounts: encrypted.accounts,
     preferences: encrypted.preferences,
     secrets: encrypted.secrets,
-    workspace,
+    workspace: opts.workspace,
     defaultWorkspace: appPaths.defaultWorkspaceDir,
-    codexHomeDir: appPaths.codexHomeDir,
   });
   const nextRoot: RootConfig = {
     ...rootConfig,
@@ -175,10 +126,7 @@ async function bootstrapProfileIntoExistingRoot(args: {
       : {}),
     profiles: {
       ...rootConfig.profiles,
-      [profile]: {
-        ...profileConfig,
-        secrets: undefined,
-      },
+      [profile]: { ...profileConfig, secrets: undefined },
     },
   };
   await saveRootConfig(nextRoot, configPath);
@@ -190,15 +138,6 @@ async function bootstrapProfileIntoExistingRoot(args: {
     appPaths,
     profile,
   };
-}
-
-function resolveBootstrapAgent(
-  requestedAgent: AgentKind | undefined,
-  profile: string | undefined,
-): AgentKind | undefined {
-  if (requestedAgent) return requestedAgent;
-  if (profile === 'codex' || profile === 'omp') return profile;
-  return undefined;
 }
 
 async function resolveBootstrapAppConfig(opts: ResolveProfileRuntimeOptions): Promise<AppConfig> {
@@ -228,11 +167,7 @@ async function resolveBootstrapAppConfig(opts: ResolveProfileRuntimeOptions): Pr
   if (!result.ok) {
     throw new Error(`app credentials validation failed: ${result.reason ?? 'unknown'}`);
   }
-  if (result.botName) {
-    console.log(`✓ 应用凭证校验通过: ${result.botName}`);
-  } else {
-    console.log('✓ 应用凭证校验通过');
-  }
+  console.log(result.botName ? `✓ 应用凭证校验通过: ${result.botName}` : '✓ 应用凭证校验通过');
   return {
     accounts: {
       app: {
@@ -266,20 +201,6 @@ function assertBootstrapAppMatchesExistingProfile(
   );
 }
 
-function assertRequestedAgentMatchesExistingProfile(
-  profile: string,
-  profileConfig: ProfileConfig,
-  requestedAgent: AgentKind | undefined,
-): void {
-  if (!requestedAgent || profileConfig.agentKind === requestedAgent) return;
-  throw new Error(
-    `profile ${profile} already exists with agentKind ${profileConfig.agentKind}, ` +
-      `but this command requested --agent ${requestedAgent}. ` +
-      `Profile names are labels; to use the existing ${profileConfig.agentKind} profile, omit --agent. ` +
-      `To recreate it as ${requestedAgent}, remove profile ${profile} first.`,
-  );
-}
-
 export async function materializeEnvSecretForService(
   opts: MaterializeEnvSecretForServiceOptions = {},
 ): Promise<boolean> {
@@ -291,93 +212,25 @@ export async function materializeEnvSecretForService(
   const configPath = opts.config ?? appPaths.configFile;
 
   const rootConfig = await loadRootConfig(configPath);
-  if (rootConfig) {
-    if (!explicitProfile && !activeProfile) {
-      profile = rootConfig.activeProfile;
-      appPaths = resolveAppPaths({ rootDir, profile });
-    }
-    const profileConfig = rootConfig.profiles[profile];
-    if (!profileConfig) throw new Error(`profile not found: ${profile}`);
-    const cfg = runtimeProfileConfig(rootConfig, profile);
-    if (!isEnvBackedSecret(cfg.accounts.app.secret)) return false;
-
-    const encrypted = await encryptedConfigForResolvedSecret(
-      cfg,
-      await resolveAppSecret(cfg, appPaths),
-      appPaths,
-    );
-    rootConfig.profiles[profile] = {
-      ...profileConfig,
-      accounts: encrypted.accounts,
-    };
-    if (encrypted.secrets) rootConfig.secrets = encrypted.secrets;
-    await saveRootConfig(rootConfig, configPath);
-    return true;
+  if (!rootConfig) return false;
+  if (!explicitProfile && !activeProfile) {
+    profile = rootConfig.activeProfile;
+    appPaths = resolveAppPaths({ rootDir, profile });
   }
+  const profileConfig = rootConfig.profiles[profile];
+  if (!profileConfig) throw new Error(`profile not found: ${profile}`);
+  const cfg = runtimeProfileConfig(rootConfig, profile);
+  if (!isEnvBackedSecret(cfg.accounts.app.secret)) return false;
 
-  return false;
-}
-
-function formatAmbiguousAgentSelectionError(
-  detected: Array<{ kind: AgentKind; binaryPath: string }>,
-): string {
-  const lines = detected.map((agent) => `  - ${agent.kind}: ${agent.binaryPath}`);
-  return [
-    '检测到多个本地 agent，请使用 --agent <claude|codex|omp> 指定要初始化哪一个。',
-    '已检测到：',
-    ...lines,
-  ].join('\n');
-}
-
-async function selectDetectedAgent(
-  detected: DetectedAgent[],
-  selector: ResolveProfileRuntimeOptions['selectAgent'],
-): Promise<AgentKind | undefined> {
-  const selected = selector
-    ? await selector(detected)
-    : await promptForDetectedAgentSelection(detected);
-  if (!selected) return undefined;
-  return detected.some((agent) => agent.kind === selected) ? selected : undefined;
-}
-
-async function promptForDetectedAgentSelection(
-  detected: DetectedAgent[],
-): Promise<AgentKind | undefined> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return undefined;
-  p.intro('选择本地 agent');
-  const selected = await p.select<AgentKind>({
-    message: '检测到多个本地 agent，本次要初始化哪一个？',
-    options: detected.map((agent) => ({
-      value: agent.kind,
-      label: displayAgentKind(agent.kind),
-      hint: agent.binaryPath,
-    })),
-    initialValue: detected[0]?.kind,
-  });
-  if (p.isCancel(selected)) {
-    p.cancel('已取消 agent 选择。');
-    throw new UserCancelledError('已取消启动。');
-  }
-  p.outro(`已选择 ${displayAgentKind(selected)}`);
-  return selected;
-}
-
-class UserCancelledError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'UserCancelledError';
-  }
-}
-
-function displayAgentKind(kind: AgentKind): string {
-  switch (kind) {
-    case 'claude':
-      return 'Claude Code';
-    case 'codex':
-      return 'Codex CLI';
-    case 'omp':
-      return 'Oh My Pi';
-  }
+  const encrypted = await encryptedConfigForResolvedSecret(
+    cfg,
+    await resolveAppSecret(cfg, appPaths),
+    appPaths,
+  );
+  rootConfig.profiles[profile] = { ...profileConfig, accounts: encrypted.accounts };
+  if (encrypted.secrets) rootConfig.secrets = encrypted.secrets;
+  await saveRootConfig(rootConfig, configPath);
+  return true;
 }
 
 async function encryptedConfigForProfile(

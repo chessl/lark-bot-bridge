@@ -3,11 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
 import { ScopedRuns } from '../../../src/bot/run-flow.js';
-import {
-  type AgentKind,
-  createDefaultProfileConfig,
-  type ProfileConfig,
-} from '../../../src/config/profile-schema.js';
+import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
 import { SessionCatalog } from '../../../src/session/catalog.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
@@ -15,163 +11,82 @@ import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js'
 
 const cleanups: Array<() => Promise<void>> = [];
 
-describe('agent-aware run-flow resume', () => {
+describe('OMP run-flow resume', () => {
   afterEach(async () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
   });
 
-  it('resumes Claude only when scope, agent, cwd, and policy fingerprint match', async () => {
-    const h = await createHarness('claude');
+  it('resumes a catalog session when scope, cwd, and policy fingerprint match', async () => {
+    const h = await createHarness();
     const first = await start(h);
     expect(first.ok).toBe(true);
     if (!first.ok) throw new Error('expected initial run');
     await collect(first.run.events);
-
     h.catalog.upsertActive({
       scopeId: 'chat-1',
-      agentId: 'claude',
       cwdRealpath: first.run.metadata.cwdRealpath,
       policyFingerprint: first.run.metadata.policyFingerprint,
-      sessionId: 'sess-catalog',
-      now: 1000,
-    });
-
-    const second = await start(h);
-
-    expect(second.ok).toBe(true);
-    if (!second.ok) throw new Error('expected resumed run');
-    expect(second.run.metadata.resumeFrom).toBe('sess-catalog');
-    expect(h.agent.runOptions[1]).toMatchObject({
-      sessionId: 'sess-catalog',
-      threadId: undefined,
-    });
-  });
-
-  it('resumes Codex threads from the catalog', async () => {
-    const h = await createHarness('codex');
-    const probe = await start(h);
-    expect(probe.ok).toBe(true);
-    if (!probe.ok) throw new Error('expected probe run');
-    await collect(probe.run.events);
-    h.catalog.upsertActive({
-      scopeId: 'chat-1',
-      agentId: 'codex',
-      cwdRealpath: probe.run.metadata.cwdRealpath,
-      policyFingerprint: probe.run.metadata.policyFingerprint,
-      threadId: 'thread-catalog',
-      now: 1000,
+      sessionId: 'omp-session-catalog',
+      now: 1_000,
     });
 
     const resumed = await start(h);
-
     expect(resumed.ok).toBe(true);
     if (!resumed.ok) throw new Error('expected resumed run');
-    expect(resumed.run.metadata.resumeFrom).toBe('thread-catalog');
-    expect(h.agent.runOptions[1]).toMatchObject({
-      sessionId: undefined,
-      threadId: 'thread-catalog',
-    });
-  });
-
-  it('resumes OMP sessions through the agent-aware catalog', async () => {
-    const h = await createHarness('omp');
-    const first = await start(h);
-    expect(first.ok).toBe(true);
-    if (!first.ok) throw new Error('expected initial OMP run');
-    await collect(first.run.events);
-    h.catalog.upsertActive({
-      scopeId: 'chat-1',
-      agentId: 'omp',
-      cwdRealpath: first.run.metadata.cwdRealpath,
-      policyFingerprint: first.run.metadata.policyFingerprint,
-      sessionId: 'omp-session-catalog',
-      now: 1000,
-    });
-
-    const resumed = await start(h);
-    expect(resumed.ok).toBe(true);
-    if (!resumed.ok) throw new Error('expected resumed OMP run');
     expect(resumed.run.metadata.resumeFrom).toBe('omp-session-catalog');
-    expect(h.agent.runOptions[1]).toMatchObject({
-      sessionId: 'omp-session-catalog',
-      threadId: undefined,
-    });
+    expect(h.agent.runOptions[1]?.sessionId).toBe('omp-session-catalog');
   });
 
   it('does not resume when the policy fingerprint changes', async () => {
-    const h = await createHarness('claude');
+    const h = await createHarness();
     const first = await start(h);
     expect(first.ok).toBe(true);
     if (!first.ok) throw new Error('expected initial run');
     await collect(first.run.events);
     h.catalog.upsertActive({
       scopeId: 'chat-1',
-      agentId: 'claude',
       cwdRealpath: first.run.metadata.cwdRealpath,
       policyFingerprint: 'stale-fingerprint',
-      sessionId: 'sess-stale',
-      now: 1000,
+      sessionId: 'omp-session-stale',
+      now: 1_000,
     });
 
-    const second = await start(h);
-
-    expect(second.ok).toBe(true);
-    if (!second.ok) throw new Error('expected fresh run');
-    expect(second.run.metadata.resumeFrom).toBeUndefined();
-    expect(h.agent.runOptions[1]).toMatchObject({
-      sessionId: undefined,
-      threadId: undefined,
-    });
+    const fresh = await start(h);
+    expect(fresh.ok).toBe(true);
+    if (!fresh.ok) throw new Error('expected fresh run');
+    expect(fresh.run.metadata.resumeFrom).toBeUndefined();
+    expect(h.agent.runOptions[1]?.sessionId).toBeUndefined();
   });
 
-  it('persists system session identifiers while callers only observe events', async () => {
-    const claude = await createHarness('claude');
-    claude.agent.setEvents([
-      { type: 'system', sessionId: 'sess-recorded' },
-      { type: 'done', terminationReason: 'normal' },
+  it('persists the session identifier emitted by OMP', async () => {
+    const h = await createHarness();
+    h.agent.setEvents([
+      { type: 'system', sessionId: 'omp-session-recorded' },
+      { type: 'done', sessionId: 'omp-session-recorded', terminationReason: 'normal' },
     ]);
-    const claudeRun = await start(claude);
-    expect(claudeRun.ok).toBe(true);
-    if (!claudeRun.ok) throw new Error('expected claude run');
-    await collect(claudeRun.run.events);
+    const started = await start(h);
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error('expected run');
+    await collect(started.run.events);
 
     expect(
-      claude.catalog.activeFor({
+      h.catalog.activeFor({
         scopeId: 'chat-1',
-        agentId: 'claude',
-        cwdRealpath: claudeRun.run.metadata.cwdRealpath,
-        policyFingerprint: claudeRun.run.metadata.policyFingerprint,
+        cwdRealpath: started.run.metadata.cwdRealpath,
+        policyFingerprint: started.run.metadata.policyFingerprint,
       }),
-    ).toMatchObject({ sessionId: 'sess-recorded' });
-
-    const codex = await createHarness('codex');
-    codex.agent.setEvents([
-      { type: 'system', threadId: 'thread-recorded' },
-      { type: 'done', terminationReason: 'normal' },
-    ]);
-    const codexRun = await start(codex);
-    expect(codexRun.ok).toBe(true);
-    if (!codexRun.ok) throw new Error('expected codex run');
-    await collect(codexRun.run.events);
-
-    expect(
-      codex.catalog.activeFor({
-        scopeId: 'chat-1',
-        agentId: 'codex',
-        cwdRealpath: codexRun.run.metadata.cwdRealpath,
-        policyFingerprint: codexRun.run.metadata.policyFingerprint,
-      }),
-    ).toMatchObject({ threadId: 'thread-recorded' });
+    ).toMatchObject({ sessionId: 'omp-session-recorded' });
   });
-  it('separates execution admission scope from workspace and resumable session scope', async () => {
-    const h = await createHarness('claude');
+
+  it('separates execution admission scope from resumable session scope', async () => {
+    const h = await createHarness();
     const sessionScopeId = 'thread-session';
     h.workspaces.setCwd(sessionScopeId, h.tmp.workspace);
     h.agent.setEvents([
       [{ type: 'done', terminationReason: 'normal' }],
       [
-        { type: 'system', sessionId: 'sess-persisted' },
-        { type: 'done', terminationReason: 'normal' },
+        { type: 'system', sessionId: 'omp-session-persisted' },
+        { type: 'done', sessionId: 'omp-session-persisted', terminationReason: 'normal' },
       ],
     ]);
 
@@ -184,14 +99,13 @@ describe('agent-aware run-flow resume', () => {
       access: { ok: true, reason: 'allowed-user' },
     });
     expect(first.ok).toBe(true);
-    if (!first.ok) throw new Error('expected first scoped run');
+    if (!first.ok) throw new Error('expected first run');
     await collect(first.run.events);
     h.catalog.upsertActive({
       scopeId: sessionScopeId,
-      agentId: 'claude',
       cwdRealpath: first.run.metadata.cwdRealpath,
       policyFingerprint: first.run.metadata.policyFingerprint,
-      sessionId: 'sess-resume',
+      sessionId: 'omp-session-resume',
     });
 
     const second = await h.scopedRuns.start({
@@ -203,19 +117,16 @@ describe('agent-aware run-flow resume', () => {
       access: { ok: true, reason: 'allowed-user' },
     });
     expect(second.ok).toBe(true);
-    if (!second.ok) throw new Error('expected second scoped run');
-    expect(second.run.metadata.resumeFrom).toBe('sess-resume');
-    expect(h.agent.runOptions[1]?.sessionId).toBe('sess-resume');
+    if (!second.ok) throw new Error('expected second run');
+    expect(second.run.metadata.resumeFrom).toBe('omp-session-resume');
     await collect(second.run.events);
-
     expect(
       h.catalog.activeFor({
         scopeId: sessionScopeId,
-        agentId: 'claude',
         cwdRealpath: second.run.metadata.cwdRealpath,
         policyFingerprint: second.run.metadata.policyFingerprint,
       }),
-    ).toMatchObject({ sessionId: 'sess-persisted' });
+    ).toMatchObject({ sessionId: 'omp-session-persisted' });
     expect(h.catalog.entries().some((entry) => entry.scopeId === 'comment-run-2')).toBe(false);
   });
 });
@@ -229,25 +140,18 @@ interface ResumeHarness {
   profileConfig: ProfileConfig;
 }
 
-async function createHarness(agentKind: AgentKind): Promise<ResumeHarness> {
-  const tmp = await createTmpProfile(`resume-${agentKind}-test-`);
+async function createHarness(): Promise<ResumeHarness> {
+  const tmp = await createTmpProfile('resume-omp-test-');
   const agent = new FakeAgentAdapter({
-    id: agentKind,
-    displayName: agentKind,
     events: [[{ type: 'done', terminationReason: 'normal' }]],
   });
   const profileConfig = createDefaultProfileConfig({
-    agentKind,
     accounts: {
-      app: {
-        id: 'cli_test',
-        secret: '${APP_SECRET}',
-        tenant: 'feishu',
-      },
+      app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' },
     },
-    ...(agentKind === 'codex' ? { codex: { binaryPath: '/usr/local/bin/codex' } } : {}),
-    ...(agentKind === 'omp' ? { omp: { binaryPath: '/usr/local/bin/omp' } } : {}),
+    omp: { binaryPath: '/usr/local/bin/omp' },
   });
+  profileConfig.workspaces.default = tmp.workspace;
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   workspaces.setCwd('chat-1', tmp.workspace);
   const catalog = new SessionCatalog(join(tmp.profile, 'session-catalog.json'));
@@ -265,25 +169,19 @@ async function createHarness(agentKind: AgentKind): Promise<ResumeHarness> {
       createRunId: () => `run-${agent.runOptions.length + 1}`,
       sessionCatalog: catalog,
       workspaces,
-      profile: agentKind,
+      profile: 'work',
       profileConfig: () => profileConfig,
-      now: () => 1000,
+      now: () => 1_000,
     }),
     workspaces,
     catalog,
-    profileConfig: {
-      ...profileConfig,
-      workspaces: {
-        ...profileConfig.workspaces,
-        default: tmp.workspace,
-      },
-    },
+    profileConfig,
   };
 }
 
 async function collect(events: AsyncIterable<unknown>): Promise<void> {
   for await (const _event of events) {
-    /* drain */
+    // Drain the run so catalog persistence completes.
   }
 }
 

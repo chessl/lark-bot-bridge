@@ -24,8 +24,8 @@ describe('run observability events', () => {
       scopeId: 'chat-1',
       policy: policy(h.tmp.workspace),
       observability: {
-        profile: 'claude',
-        agent: 'claude',
+        profile: 'work',
+        agent: 'omp',
         source: 'im',
         stage: 'submit',
       },
@@ -40,8 +40,8 @@ describe('run observability events', () => {
     ]);
     expect(lines[0]).toMatchObject({
       runId: 'run-1',
-      profile: 'claude',
-      agent: 'claude',
+      profile: 'work',
+      agent: 'omp',
       scope: 'chat-1',
       source: 'im',
       stage: 'submit',
@@ -87,9 +87,7 @@ function policy(cwd: string): RunPolicyAllow {
     prompt: 'hello',
     requestedCwd: cwd,
     cwdRealpath: cwd,
-    accessMode: 'read-only',
-    sandbox: 'read-only',
-    permissionMode: 'plan',
+    accessMode: 'full',
     access: { ok: true, reason: 'allowed-user' },
     attachments: [],
     policyFingerprint: 'fp',

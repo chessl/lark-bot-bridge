@@ -97,7 +97,7 @@ describe('markdown stream startup failures', () => {
       }),
     );
     expect(lastMarkdown(h.channel)).toContain('agent 失败');
-    expect(lastMarkdown(h.channel)).toContain('codex exited with code 1');
+    expect(lastMarkdown(h.channel)).toContain('omp exited with code 1');
   });
 
   it('does not wait for the working reaction before draining a failed agent run', async () => {
@@ -130,7 +130,7 @@ describe('markdown stream startup failures', () => {
           { type: 'text', delta: 'progress update' },
           {
             type: 'error',
-            message: 'codex exited with code 1: Error loading config.toml',
+            message: 'omp exited with code 1: Error loading profile',
             terminationReason: 'failed',
           },
         ],
@@ -208,10 +208,9 @@ describe('markdown stream startup failures', () => {
   });
 
   it('opens no progress stream for a final-only round', async () => {
-    // The regression this guards: Codex answering without any commentary. The
-    // SDK sends its streaming card as soon as `stream()` is called and finishes
-    // an empty one with "(no content)", so the user saw that placeholder for a
-    // few seconds, watched it get recalled, and only then got the answer.
+    // OMP may answer without commentary. The SDK sends its streaming card as
+    // soon as `stream()` is called and finishes an empty one with "(no content)",
+    // so the bridge must avoid opening a progress stream for a final-only round.
     const streamCalls: unknown[] = [];
     const h = await createHarness({
       events: [
@@ -234,11 +233,10 @@ describe('markdown stream startup failures', () => {
     expect(lastMarkdown(h.channel)).toContain('FINAL_ONLY_SENTINEL');
   });
 
-  it('does not repeat streamed text as the final reply when Codex held nothing back', async () => {
-    // Codex only reserves its *last* message as `final_text`; an abnormal turn
-    // end (turn.failed, or the process dying before turn.completed) flushes it
-    // as a text block instead. Those blocks are already on screen, so the
-    // dedicated final reply must not post the same words a second time.
+  it('does not repeat streamed text as the final reply when OMP held nothing back', async () => {
+    // An abnormal turn can flush answer text as ordinary text blocks. Those
+    // blocks are already on screen, so the dedicated final reply must not post
+    // the same words a second time.
     const visibleProgress: string[] = [];
     const h = await createHarness({
       events: [
@@ -274,7 +272,6 @@ describe('markdown stream startup failures', () => {
     // once as the card that lands a moment later.
     const visibleProgress: string[] = [];
     const h = await createHarness({
-      agentKind: 'claude',
       events: [
         { type: 'text', delta: 'ANSWER_ONCE' },
         { type: 'done', terminationReason: 'normal' },
@@ -309,7 +306,6 @@ describe('markdown stream startup failures', () => {
     const gate = deferred<void>();
     const setContent = vi.fn(async () => {});
     const h = await createHarness({
-      agentKind: 'claude',
       events: [
         { type: 'text', delta: 'ANSWER_ONCE' },
         { type: 'done', terminationReason: 'normal' },
@@ -453,8 +449,6 @@ async function createHarness(
     /** One run's events, or one array per run. */
     events?: FakeAgentEvents;
     messageReply?: 'card' | 'markdown' | 'text';
-    /** Codex holds its answer back for a dedicated final reply; Claude streams it. */
-    agentKind?: 'claude' | 'codex';
   } = {},
 ): Promise<{
   tmp: TmpProfile;
@@ -468,7 +462,6 @@ async function createHarness(
   const tmp = await createTmpProfile('markdown-stream-startup-failure-');
   const workspace = await realpath(tmp.workspace);
   const baseProfileConfig = createDefaultProfileConfig({
-    agentKind: options.agentKind ?? 'codex',
     accounts: {
       app: {
         id: 'cli_test',
@@ -479,9 +472,7 @@ async function createHarness(
     access: {
       allowedUsers: ['ou_user'],
     },
-    codex: {
-      binaryPath: '/usr/local/bin/codex',
-    },
+    omp: { binaryPath: '/usr/local/bin/omp' },
     ...(options.messageReply ? { preferences: { messageReply: options.messageReply } } : {}),
   });
   const profileConfig = {
@@ -494,13 +485,11 @@ async function createHarness(
   const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   const agent = new FakeAgentAdapter({
-    id: 'codex',
-    displayName: 'Codex',
     events: options.events ?? [
       [
         {
           type: 'error',
-          message: 'codex exited with code 1: Error loading config.toml',
+          message: 'omp exited with code 1: Error loading profile',
           terminationReason: 'failed',
         },
       ],
@@ -634,7 +623,7 @@ function deferred<T>(): {
 
 function createControls(profileConfig: ReturnType<typeof createDefaultProfileConfig>) {
   return {
-    profile: 'codex',
+    profile: 'work',
     profileConfig,
     ownerRefreshState: 'unknown' as const,
     async refreshOwner() {},

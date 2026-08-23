@@ -1,5 +1,4 @@
 import type { NormalizedMessage } from '@larksuite/channel';
-import { capabilityForProfile } from '../agent/capability';
 import type { Controls } from '../commands';
 import type { AccessDecision } from '../policy/access';
 import { evaluateRunPolicy } from '../policy/run-policy';
@@ -21,7 +20,6 @@ export async function commandSessionCatalogIdentity(input: {
   if (!requestedCwd) return undefined;
   const workspace = await resolveWorkingDirectory(requestedCwd);
   if (!workspace.ok) return undefined;
-  const capability = capabilityForProfile(input.controls.profileConfig);
   const policy = evaluateRunPolicy({
     scope: {
       source: 'im',
@@ -34,16 +32,12 @@ export async function commandSessionCatalogIdentity(input: {
     requestedCwd,
     cwdRealpath: workspace.cwdRealpath,
     access: input.access,
-    capability,
     profileConfig: input.controls.profileConfig,
     now: Date.now(),
-    codexHome: input.controls.profileConfig.codex?.codexHome,
-    inheritCodexHome: input.controls.profileConfig.codex?.inheritCodexHome,
   });
   if (!policy.ok) return undefined;
   return {
     scopeId: input.scope,
-    agentId: capability.agentId,
     cwdRealpath: workspace.cwdRealpath,
     policyFingerprint: policy.policyFingerprint,
   };

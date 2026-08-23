@@ -14,16 +14,15 @@ import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { log } from '../../core/logger';
 import { mergeProcessEnv, type SpawnedProcessByStdio, spawnProcess } from '../../platform/spawn';
-import { SpawnFailed } from '../../runtime/errors';
 import { buildBridgeSystemPrompt } from '../bridge-system-prompt';
 import type { NativeMcpEndpoint } from '../native-tools';
 import { type AgentAvailability, checkAgentAvailability } from '../preflight';
 import type {
-  AgentAdapter,
   AgentBotIdentity,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
+  OmpRunEngine,
 } from '../types';
 import { OmpRpcFrameDecoder, OmpRpcTranslator } from './rpc';
 
@@ -41,7 +40,7 @@ interface OmpMcpPatch {
   refs: number;
 }
 
-export class OmpAdapter implements AgentAdapter {
+export class OmpAdapter implements OmpRunEngine {
   readonly id = 'omp';
   readonly displayName = 'Oh My Pi';
 
@@ -69,13 +68,6 @@ export class OmpAdapter implements AgentAdapter {
   }
 
   async start(opts: AgentRunOptions): Promise<AgentRun> {
-    if (opts.sandbox && opts.sandbox !== 'danger-full-access') {
-      throw new SpawnFailed(
-        'OMP currently requires full access because its RPC mode does not expose an enforceable workspace sandbox',
-        undefined,
-        'agent-prepare-failed',
-      );
-    }
     if (!opts.cwd) throw new Error('cwd is required for OmpAdapter.start');
 
     const systemPromptFile = writeSystemPromptFile(buildBridgeSystemPrompt(this.botIdentity));

@@ -16,7 +16,7 @@ describe('attachment run flow', () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
   });
 
-  it('passes accepted image attachment paths to Codex adapter image args only', async () => {
+  it('passes accepted image attachment paths to OMP image args', async () => {
     const h = await createHarness();
 
     const result = await h.scopedRuns.start({
@@ -63,12 +63,9 @@ async function createHarness(): Promise<{
 }> {
   const tmp = await createTmpProfile('attachment-run-flow-');
   const agent = new FakeAgentAdapter({
-    id: 'codex',
-    displayName: 'Codex',
     events: [{ type: 'done', terminationReason: 'normal' }],
   });
   const profileConfig = createDefaultProfileConfig({
-    agentKind: 'codex',
     accounts: {
       app: {
         id: 'cli_test',
@@ -76,9 +73,7 @@ async function createHarness(): Promise<{
         tenant: 'feishu',
       },
     },
-    codex: {
-      binaryPath: '/usr/local/bin/codex',
-    },
+    omp: { binaryPath: '/usr/local/bin/omp' },
   });
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   workspaces.setCwd('chat-1', tmp.workspace);
@@ -96,7 +91,7 @@ async function createHarness(): Promise<{
       activeRuns: new ActiveRuns(),
       createRunId: () => 'run-1',
       workspaces,
-      profile: 'codex',
+      profile: 'work',
       profileConfig: () => profileConfig,
       now: () => 1000,
     }),

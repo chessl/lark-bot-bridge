@@ -164,7 +164,7 @@ describe('Bridge command contracts', () => {
     expect(lastMarkdown(h.channel)).toContain(await realpath(file));
   });
 
-  it('keeps Claude resume history details out of group chats', async () => {
+  it('keeps resume details out of group chats', async () => {
     const h = await createHarness();
 
     await expect(h.run('/resume', { chatMode: 'group' })).resolves.toBe(true);
@@ -328,10 +328,8 @@ async function createHarness(): Promise<Harness> {
 
 function appConfig(defaultWorkspace: string): ProfileConfig {
   const config = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
     access: { admins: ['ou-admin'] },
-    permissions: { defaultAccess: 'read-only', maxAccess: 'workspace' },
     preferences: { maxConcurrentRuns: 2 },
   });
   config.workspaces.default = defaultWorkspace;

@@ -12,7 +12,6 @@ export interface AppPaths {
   profilesDir: string;
   trashDir: string;
   profileDir: string;
-  codexHomeDir: string;
   defaultWorkspaceDir: string;
   configFile: string;
   sessionsFile: string;
@@ -45,7 +44,7 @@ export interface AppPaths {
   userAuthLockTarget(appId: string): string;
 }
 
-const DEFAULT_PROFILE = 'claude';
+const DEFAULT_PROFILE = 'omp';
 
 export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
   const rootDir =
@@ -65,7 +64,6 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
     profilesDir,
     trashDir: join(rootDir, '.trash'),
     profileDir,
-    codexHomeDir: join(profileDir, 'codex-home'),
     defaultWorkspaceDir: join(`${rootDir}-workspaces`, profile, 'default'),
     configFile: join(rootDir, 'config.json'),
     sessionsFile,

@@ -39,12 +39,12 @@ beforeEach(async () => {
   roots.push(root);
   const configPath = join(root, 'config.json');
 
-  // claude (cli_a), work (cli_b), dup (cli_b — same app as work).
-  await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
+  // personal (cli_a), work (cli_b), dup (cli_b — same app as work).
+  await mkdir(join(root, 'profiles', 'personal'), { recursive: true });
   await saveRootConfig(
     createRootConfig(
-      'claude',
-      createDefaultProfileConfig({ agentKind: 'claude', accounts: { app: app('cli_a') } }),
+      'personal',
+      createDefaultProfileConfig({ accounts: { app: app('cli_a') } }),
     ),
     configPath,
   );
@@ -55,7 +55,6 @@ beforeEach(async () => {
   ] as const) {
     await mkdir(join(root, 'profiles', name), { recursive: true });
     rc.profiles[name] = createDefaultProfileConfig({
-      agentKind: 'claude',
       accounts: { app: app(id) },
     });
   }
@@ -76,36 +75,36 @@ afterEach(async () => {
 
 describe('Supervisor', () => {
   it('starts a profile in-process and lists it online', async () => {
-    await sup.startProfile('claude');
-    expect(sup.isOnline('claude')).toBe(true);
-    expect(started).toContain('claude');
+    await sup.startProfile('personal');
+    expect(sup.isOnline('personal')).toBe(true);
+    expect(started).toContain('personal');
     const list = sup.list();
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({
-      profile: 'claude',
+      profile: 'personal',
       online: true,
       pid: process.pid,
-      botName: 'bot-claude',
+      botName: 'bot-personal',
     });
   });
 
   it('hosts multiple profiles at once', async () => {
-    await sup.startProfile('claude');
+    await sup.startProfile('personal');
     await sup.startProfile('work');
     expect(
       sup
         .list()
         .map((s) => s.profile)
         .sort(),
-    ).toEqual(['claude', 'work']);
+    ).toEqual(['personal', 'work']);
   });
 
   it('stops one profile without affecting others or the process', async () => {
-    await sup.startProfile('claude');
+    await sup.startProfile('personal');
     await sup.startProfile('work');
-    await sup.stopProfile('claude');
-    expect(sup.isOnline('claude')).toBe(false);
-    expect(disconnected).toContain('claude');
+    await sup.stopProfile('personal');
+    expect(sup.isOnline('personal')).toBe(false);
+    expect(disconnected).toContain('personal');
     expect(sup.isOnline('work')).toBe(true); // supervisor + other profile still up
   });
 
@@ -116,8 +115,8 @@ describe('Supervisor', () => {
   });
 
   it('startProfile is idempotent', async () => {
-    await sup.startProfile('claude');
-    await sup.startProfile('claude');
-    expect(started.filter((p) => p === 'claude')).toHaveLength(1);
+    await sup.startProfile('personal');
+    await sup.startProfile('personal');
+    expect(started.filter((p) => p === 'personal')).toHaveLength(1);
   });
 });

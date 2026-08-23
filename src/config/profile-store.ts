@@ -3,12 +3,7 @@ import { dirname, join } from 'node:path';
 import * as lockfile from 'proper-lockfile';
 import { writeFileAtomic } from '../platform/atomic-write';
 import { resolveAppPaths } from './app-paths';
-import {
-  type AgentKind,
-  normalizeProfileConfig,
-  type ProfileConfig,
-  type RootConfig,
-} from './profile-schema';
+import { normalizeProfileConfig, type ProfileConfig, type RootConfig } from './profile-schema';
 import type { AppConfig } from './schema';
 
 export async function loadRootConfig(path: string): Promise<RootConfig | undefined> {
@@ -44,15 +39,12 @@ export function formatRootConfig(root: RootConfig): string {
 
 type StoredProfileConfig = Pick<
   ProfileConfig,
-  | 'agentKind'
   | 'mode'
   | 'accounts'
   | 'secrets'
   | 'preferences'
   | 'access'
   | 'workspaces'
-  | 'permissions'
-  | 'codex'
   | 'omp'
   | 'attachments'
   | 'meeting'
@@ -77,16 +69,13 @@ function serializeRootConfig(root: RootConfig): StoredRootConfig {
 
 function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
   return {
-    agentKind: profile.agentKind,
     mode: profile.mode,
     accounts: profile.accounts,
     ...(profile.secrets ? { secrets: profile.secrets } : {}),
     preferences: profile.preferences,
     access: profile.access,
     workspaces: profile.workspaces,
-    permissions: profile.permissions,
-    ...(profile.codex ? { codex: profile.codex } : {}),
-    ...(profile.omp ? { omp: profile.omp } : {}),
+    omp: profile.omp,
     attachments: profile.attachments,
     meeting: profile.meeting,
   };
@@ -237,10 +226,4 @@ async function pathExists(path: string): Promise<boolean> {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw err;
   }
-}
-
-export function agentKindFromString(value: string | undefined): AgentKind | undefined {
-  if (value === 'claude' || value === 'codex' || value === 'omp') return value;
-  if (value === undefined) return undefined;
-  throw new Error(`unsupported agent: ${value}`);
 }

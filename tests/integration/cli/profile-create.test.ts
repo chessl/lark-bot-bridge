@@ -1,176 +1,26 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runProfileCreate } from '../../../src/cli/commands/profile';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import { getSecret } from '../../../src/config/keystore';
-import {
-  type AgentKind,
-  createDefaultProfileConfig,
-  type RootConfig,
-} from '../../../src/config/profile-schema';
-import { loadRootConfig } from '../../../src/config/profile-store';
+import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import { secretKeyForApp } from '../../../src/config/schema';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
 
+const roots: string[] = [];
 const auth = vi.hoisted(() => ({
-  validateAppCredentials: vi.fn(async () => ({ ok: true, botName: 'Claude Work' })),
+  validateAppCredentials: vi.fn(async () => ({ ok: true, botName: 'Work Bot' })),
 }));
 
 vi.mock('../../../src/utils/feishu-auth', () => ({
   validateAppCredentials: auth.validateAppCredentials,
 }));
 
-const roots: string[] = [];
-
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
-
-describe('profile create command', () => {
-  it('creates a named profile from existing app credentials in an initialized root', async () => {
-    const root = await makeRoot();
-    const workspace = join(root, 'workspace');
-    await mkdir(workspace, { recursive: true });
-    await writeProfiles(root, 'codex-dev', ['codex-dev']);
-
-    await runProfileCreate('claude-work', {
-      rootDir: root,
-      agent: 'claude',
-      workspace,
-      appId: 'cli_claude_work',
-      appSecret: 'manual-secret',
-      tenant: 'feishu',
-    });
-
-    const savedText = await readFile(join(root, 'config.json'), 'utf8');
-    const saved = JSON.parse(savedText) as RootConfig;
-    const appPaths = resolveAppPaths({ rootDir: root, profile: 'claude-work' });
-    const secret = await getSecret(secretKeyForApp('cli_claude_work'), appPaths);
-    const workspaceRealpath = await realpath(workspace);
-
-    expect(auth.validateAppCredentials).toHaveBeenCalledWith(
-      'cli_claude_work',
-      'manual-secret',
-      'feishu',
-    );
-    expect(saved.activeProfile).toBe('codex-dev');
-    expect(saved.profiles['codex-dev']?.agentKind).toBe('codex');
-    expect(saved.profiles['claude-work']?.agentKind).toBe('claude');
-    expect(saved.profiles['claude-work']?.workspaces.default).toBe(workspaceRealpath);
-    expect(savedText).not.toContain('manual-secret');
-    expect(secret).toBe('manual-secret');
-  });
-
-  it('creates a named Codex profile that can write inside the default workspace by default', async () => {
-    const root = await makeRoot();
-    const workspace = join(root, 'workspace');
-    await mkdir(workspace, { recursive: true });
-    await writeProfiles(root, 'claude', ['claude']);
-    const codex = await writeVersionExecutable(root, 'codex', 'codex 1.2.3');
-    const oldCodexBin = process.env.LARK_CHANNEL_CODEX_BIN;
-    process.env.LARK_CHANNEL_CODEX_BIN = codex;
-
-    try {
-      await runProfileCreate('codex-dev', {
-        rootDir: root,
-        agent: 'codex',
-        workspace,
-        appId: 'cli_codex_dev',
-        appSecret: 'manual-secret',
-        tenant: 'feishu',
-      });
-    } finally {
-      if (oldCodexBin === undefined) {
-        delete process.env.LARK_CHANNEL_CODEX_BIN;
-      } else {
-        process.env.LARK_CHANNEL_CODEX_BIN = oldCodexBin;
-      }
-    }
-
-    const configPath = join(root, 'config.json');
-    const saved = JSON.parse(await readFile(configPath, 'utf8'));
-    expect(saved.profiles['codex-dev']?.agentKind).toBe('codex');
-
-    const loaded = await loadRootConfig(configPath);
-    expect(loaded?.profiles['codex-dev']?.permissions).toEqual({
-      defaultAccess: 'full',
-      maxAccess: 'full',
-    });
-  });
-
-  it('refuses to overwrite an existing profile', async () => {
-    const root = await makeRoot();
-    await writeProfiles(root, 'claude', ['claude']);
-
-    await expect(
-      runProfileCreate('claude', {
-        rootDir: root,
-        agent: 'claude',
-        appId: 'cli_other',
-        appSecret: 'manual-secret',
-      }),
-    ).rejects.toThrow(/profile already exists/);
-  });
-
-  it('explains how to recover when an existing profile has the wrong agent', async () => {
-    const root = await makeRoot();
-    await writeProfiles(root, 'codex', ['codex']);
-    const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as RootConfig;
-    saved.profiles.codex = createDefaultProfileConfig({
-      agentKind: 'claude',
-      accounts: {
-        app: {
-          id: 'cli_codex',
-          secret: '${APP_SECRET}',
-          tenant: 'feishu',
-        },
-      },
-    });
-    await writeFile(join(root, 'config.json'), `${JSON.stringify(saved, null, 2)}\n`, 'utf8');
-
-    let error: Error | undefined;
-    try {
-      await runProfileCreate('codex', {
-        rootDir: root,
-        agent: 'codex',
-        appId: 'cli_codex_new',
-        appSecret: 'manual-secret',
-      });
-    } catch (err) {
-      if (!(err instanceof Error)) throw err;
-      error = err;
-    }
-
-    expect(error).toBeDefined();
-    const message = error?.message ?? '';
-    expect(message).toContain('profile codex already exists with agentKind claude');
-    expect(message).toContain('profile create requested --agent codex');
-    expect(message).toContain('Profile names are labels');
-    expect(message).toContain('choose another name');
-    expect(message).toContain('remove profile codex');
-  });
-
-  it('creates a named profile without requiring a user workspace', async () => {
-    const root = await makeRoot();
-    await writeProfiles(root, 'codex-dev', ['codex-dev']);
-
-    await runProfileCreate('claude-managed', {
-      rootDir: root,
-      agent: 'claude',
-      appId: 'cli_claude_managed',
-      appSecret: 'manual-secret',
-      tenant: 'feishu',
-    });
-
-    const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as RootConfig;
-    const managed = await realpath(
-      resolveAppPaths({ rootDir: root, profile: 'claude-managed' }).defaultWorkspaceDir,
-    );
-    expect(saved.profiles['claude-managed']?.workspaces.default).toBe(managed);
-  });
 });
 
 async function makeRoot(): Promise<string> {
@@ -179,32 +29,92 @@ async function makeRoot(): Promise<string> {
   return root;
 }
 
+async function withOmp<T>(root: string, fn: (binaryPath: string) => Promise<T>): Promise<T> {
+  const binaryPath = await writeVersionExecutable(join(root, 'bin'), 'omp', 'omp 1.0');
+  const previous = process.env.LARK_CHANNEL_OMP_BIN;
+  process.env.LARK_CHANNEL_OMP_BIN = binaryPath;
+  try {
+    return await fn(binaryPath);
+  } finally {
+    if (previous === undefined) delete process.env.LARK_CHANNEL_OMP_BIN;
+    else process.env.LARK_CHANNEL_OMP_BIN = previous;
+  }
+}
+
+describe('profile create', () => {
+  it('adds a named OMP profile without changing the active profile', async () => {
+    const root = await makeRoot();
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    await writeProfiles(root, 'personal', ['personal']);
+
+    await withOmp(root, async (binaryPath) => {
+      await runProfileCreate('work', {
+        rootDir: root,
+        workspace,
+        appId: 'cli_work',
+        appSecret: 'manual-secret',
+        tenant: 'feishu',
+      });
+
+      const savedText = await readFile(join(root, 'config.json'), 'utf8');
+      const saved = JSON.parse(savedText) as RootConfig;
+      const appPaths = resolveAppPaths({ rootDir: root, profile: 'work' });
+      expect(saved.activeProfile).toBe('personal');
+      expect(saved.profiles.work?.omp.binaryPath).toBe(await realpath(binaryPath));
+      expect(saved.profiles.work?.workspaces.default).toBe(await realpath(workspace));
+      expect(savedText).not.toContain('manual-secret');
+      await expect(getSecret(secretKeyForApp('cli_work'), appPaths)).resolves.toBe('manual-secret');
+    });
+  });
+
+  it('rejects duplicate profile names without rewriting config', async () => {
+    const root = await makeRoot();
+    await writeProfiles(root, 'work', ['work']);
+    const configPath = join(root, 'config.json');
+    const before = await readFile(configPath, 'utf8');
+
+    await expect(
+      runProfileCreate('work', {
+        rootDir: root,
+        appId: 'cli_other',
+        appSecret: 'manual-secret',
+      }),
+    ).rejects.toThrow('profile already exists: work');
+    expect(await readFile(configPath, 'utf8')).toBe(before);
+  });
+
+  it('reports a missing OMP executable', async () => {
+    const root = await makeRoot();
+    await writeProfiles(root, 'personal', ['personal']);
+    const previous = process.env.LARK_CHANNEL_OMP_BIN;
+    process.env.LARK_CHANNEL_OMP_BIN = join(root, 'missing-omp');
+    try {
+      await expect(
+        runProfileCreate('work', {
+          rootDir: root,
+          appId: 'cli_work',
+          appSecret: 'manual-secret',
+        }),
+      ).rejects.toMatchObject({ diagnostic: { agentId: 'omp' } });
+    } finally {
+      if (previous === undefined) delete process.env.LARK_CHANNEL_OMP_BIN;
+      else process.env.LARK_CHANNEL_OMP_BIN = previous;
+    }
+  });
+});
+
 async function writeProfiles(root: string, activeProfile: string, names: string[]): Promise<void> {
   const profiles: RootConfig['profiles'] = {};
   for (const name of names) {
-    const agentKind: AgentKind = name.startsWith('codex') ? 'codex' : 'claude';
     profiles[name] = createDefaultProfileConfig({
-      agentKind,
       accounts: {
-        app: {
-          id: `cli_${name.replace(/[^A-Za-z0-9]/g, '_')}`,
-          secret: '${APP_SECRET}',
-          tenant: 'feishu',
-        },
+        app: { id: `cli_${name}`, secret: 'secret', tenant: 'feishu' },
       },
-      ...(agentKind === 'codex' ? { codex: { binaryPath: 'codex' } } : {}),
+      omp: { binaryPath: '/usr/local/bin/omp' },
     });
     await mkdir(join(root, 'profiles', name), { recursive: true });
   }
-  const config: RootConfig = {
-    schemaVersion: 2,
-    activeProfile,
-    profiles,
-  };
-  await writeJson(join(root, 'config.json'), config);
-}
-
-async function writeJson(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  const config: RootConfig = { schemaVersion: 2, activeProfile, profiles };
+  await writeFile(join(root, 'config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 }

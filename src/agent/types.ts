@@ -1,11 +1,9 @@
-import type { ClaudePermissionMode, CodexSandboxMode } from '../config/permissions';
 import type { NativeMcpEndpoint } from './native-tools';
 import type { AgentAvailability } from './preflight';
 
-export type { ClaudePermissionMode } from '../config/permissions';
 
 export type AgentEvent =
-  | { type: 'system'; sessionId?: string; threadId?: string; cwd?: string; model?: string }
+  | { type: 'system'; sessionId?: string; cwd?: string; model?: string }
   | { type: 'text'; delta: string }
   | { type: 'final_text'; content: string }
   | { type: 'thinking'; delta: string }
@@ -22,23 +20,18 @@ export type AgentEvent =
   | {
       type: 'done';
       sessionId?: string;
-      threadId?: string;
       terminationReason: 'normal' | 'interrupted' | 'timeout';
     }
   | { type: 'error'; message: string; terminationReason: 'failed' | 'interrupted' | 'timeout' };
 
-export const CLAUDE_DEFAULT_PERMISSION_MODE: ClaudePermissionMode = 'bypassPermissions';
 
 export interface AgentRunOptions {
   runId: string;
   prompt: string;
   cwd?: string;
   sessionId?: string;
-  threadId?: string;
   model?: string;
   images?: readonly string[];
-  sandbox?: CodexSandboxMode;
-  permissionMode?: ClaudePermissionMode;
   nativeMcp?: NativeMcpEndpoint;
   /**
    * Grace period (ms) between SIGTERM and SIGKILL when stop() is called on
@@ -57,11 +50,8 @@ export interface AgentRun {
    * Resolves true if it exited within the window, false if the timer
    * fired first (caller usually wants to fall back to stop()).
    *
-   * Use this after a terminal stream event (`done` / `error`): the
-   * stream-json `result` line arrives before claude has actually closed
-   * stdout — there's a brief telemetry/cleanup tail in between. Calling
-   * stop() in that window forces a SIGTERM and the run exits with code
-   * 143 instead of 0; waiting it out lets it exit cleanly.
+   * Use this after a terminal stream event (`done` / `error`) to allow the
+   * OMP subprocess to close cleanly before the caller falls back to stop().
    */
   waitForExit(timeoutMs: number): Promise<boolean>;
 }
@@ -76,14 +66,10 @@ export interface AgentBotIdentity {
   name?: string;
 }
 
-export interface AgentAdapter {
-  readonly id: string;
-  readonly displayName: string;
+export interface OmpRunEngine {
+  readonly id: 'omp';
+  readonly displayName: 'Oh My Pi';
   checkAvailability(): Promise<AgentAvailability>;
-  /**
-   * Late-bound identity injection: the adapter is constructed before the
-   * channel connects, so the channel calls this once botIdentity is known.
-   */
   setBotIdentity(identity: AgentBotIdentity): void;
   start(opts: AgentRunOptions): Promise<AgentRun>;
 }

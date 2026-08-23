@@ -85,7 +85,7 @@ export function ProfileDetail({ profile, onBack }: { profile: string; onBack: ()
           </span>
         </Button>
         <h1 className="text-2xl font-semibold">{profile}</h1>
-        {info && <Badge variant="secondary">{info.agentKind}</Badge>}
+        {info && <Badge variant="secondary">OMP</Badge>}
         {running ? <Badge variant="success">在线</Badge> : <Badge variant="outline">未运行</Badge>}
         {!running && (
           <Button className="ml-auto" size="sm" disabled={starting} onClick={start}>

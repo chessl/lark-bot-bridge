@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => ({ start: vi.fn() }));
 /** A real ProfileConfig — capability resolution reads more than `agentKind`. */
 function profileConfig(meeting: MeetingConfig) {
   const pc = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: { app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' } },
   });
   pc.meeting = meeting;

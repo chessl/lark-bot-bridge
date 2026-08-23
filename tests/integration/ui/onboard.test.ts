@@ -1,13 +1,23 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { writeNewProfile } from '../../../src/ui/onboard';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadRootConfig } from '../../../src/config/profile-store';
+import { writeNewProfile } from '../../../src/ui/onboard';
+import { writeVersionExecutable } from '../../helpers/fake-executable';
 
 const roots: string[] = [];
+let previousOmp: string | undefined;
+
+beforeEach(async () => {
+  previousOmp = process.env.LARK_CHANNEL_OMP_BIN;
+  const binRoot = await tmpRoot();
+  process.env.LARK_CHANNEL_OMP_BIN = await writeVersionExecutable(binRoot, 'omp', 'omp 1.0');
+});
 
 afterEach(async () => {
+  if (previousOmp === undefined) delete process.env.LARK_CHANNEL_OMP_BIN;
+  else process.env.LARK_CHANNEL_OMP_BIN = previousOmp;
   await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
 });
 
@@ -17,41 +27,35 @@ async function tmpRoot(): Promise<string> {
   return root;
 }
 
-describe('writeNewProfile (new-profile is additive)', () => {
+describe('writeNewProfile', () => {
   it('refuses to overwrite an existing profile and lets a new name coexist', async () => {
     const root = await tmpRoot();
     const base = {
-      profile: 'claude',
-      agentKind: 'claude' as const,
+      profile: 'personal',
       appSecret: 'secret',
       tenant: 'feishu' as const,
       workspace: root,
     };
 
-    const first = await writeNewProfile({ ...base, appId: 'cli_a' }, root);
-    expect(first.profile).toBe('claude');
-
-    // Same name → refuse (do NOT clobber the existing profile).
+    expect((await writeNewProfile({ ...base, appId: 'cli_a' }, root)).profile).toBe('personal');
     await expect(writeNewProfile({ ...base, appId: 'cli_b' }, root)).rejects.toThrow(/已存在/);
+    expect((await loadRootConfig(join(root, 'config.json')))?.profiles.personal?.accounts.app.id).toBe(
+      'cli_a',
+    );
 
-    // The existing profile still points at the original app.
-    const afterCollision = (await loadRootConfig(join(root, 'config.json')))!;
-    expect(afterCollision.profiles.claude?.accounts.app.id).toBe('cli_a');
-
-    // A different name is added alongside.
-    const second = await writeNewProfile({ ...base, profile: 'work', appId: 'cli_b' }, root);
-    expect(second.profile).toBe('work');
-    const root2 = (await loadRootConfig(join(root, 'config.json')))!;
-    expect(Object.keys(root2.profiles).sort()).toEqual(['claude', 'work']);
+    expect(
+      (await writeNewProfile({ ...base, profile: 'work', appId: 'cli_b' }, root)).profile,
+    ).toBe('work');
+    const config = await loadRootConfig(join(root, 'config.json'));
+    expect(Object.keys(config?.profiles ?? {}).sort()).toEqual(['personal', 'work']);
+    expect(config?.profiles.work?.omp.binaryPath).toBe(process.env.LARK_CHANNEL_OMP_BIN);
   });
 
-  it('creates a profile with a Unicode (Chinese) name from the scanned bot name', async () => {
+  it('creates a profile with a Unicode name', async () => {
     const root = await tmpRoot();
-
     const created = await writeNewProfile(
       {
         profile: '助手',
-        agentKind: 'claude',
         appId: 'cli_nimo',
         appSecret: 'secret',
         tenant: 'feishu',
@@ -60,16 +64,16 @@ describe('writeNewProfile (new-profile is additive)', () => {
       root,
     );
     expect(created.profile).toBe('助手');
-
-    const cfg = (await loadRootConfig(join(root, 'config.json')))!;
-    expect(cfg.profiles['助手']?.accounts.app.id).toBe('cli_nimo');
+    expect((await loadRootConfig(join(root, 'config.json')))?.profiles.助手?.accounts.app.id).toBe(
+      'cli_nimo',
+    );
   });
 
-  it('rejects a path-unsafe profile name with a clear 400 (not a 500)', async () => {
+  it('rejects a path-unsafe profile name with a clear 400', async () => {
     const root = await tmpRoot();
     await expect(
       writeNewProfile(
-        { profile: 'a/b', agentKind: 'claude', appId: 'cli_x', appSecret: 's', tenant: 'feishu' },
+        { profile: 'a/b', appId: 'cli_x', appSecret: 's', tenant: 'feishu' },
         root,
       ),
     ).rejects.toMatchObject({ status: 400 });

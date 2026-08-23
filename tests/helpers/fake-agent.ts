@@ -1,9 +1,9 @@
 import type {
-  AgentAdapter,
   AgentBotIdentity,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
+  OmpRunEngine,
 } from '../../src/agent/types.js';
 
 export interface FakeAgentRun extends AgentRun {
@@ -54,9 +54,9 @@ class FakeRun implements FakeAgentRun {
 
 export type FakeAgentEvents = readonly AgentEvent[] | readonly (readonly AgentEvent[])[];
 
-export class FakeAgentAdapter implements AgentAdapter {
-  readonly id: string;
-  readonly displayName: string;
+export class FakeAgentAdapter implements OmpRunEngine {
+  readonly id = 'omp';
+  readonly displayName = 'Oh My Pi';
   readonly runs: FakeAgentRun[] = [];
   readonly runOptions: AgentRunOptions[] = [];
   botIdentity: AgentBotIdentity | undefined;
@@ -65,14 +65,10 @@ export class FakeAgentAdapter implements AgentAdapter {
 
   constructor(
     options: {
-      id?: string;
-      displayName?: string;
       events?: FakeAgentEvents;
       waitForExit?: boolean | readonly boolean[];
     } = {},
   ) {
-    this.id = options.id ?? 'fake-agent';
-    this.displayName = options.displayName ?? 'Fake Agent';
     this.#eventRuns = normalizeEventRuns(options.events ?? []);
     this.#waitForExitResults = normalizeWaitForExitResults(options.waitForExit);
   }

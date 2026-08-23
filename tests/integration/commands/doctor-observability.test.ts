@@ -32,8 +32,8 @@ describe('/doctor run observability', () => {
       (line) => line.phase === 'run' && line.event === 'started',
     );
     expect(started).toMatchObject({
-      profile: 'claude',
-      agent: 'claude',
+      profile: 'work',
+      agent: 'omp',
       source: 'doctor',
       stage: 'agent-probe',
     });
@@ -70,16 +70,13 @@ async function createHarness(): Promise<{
     ],
   });
   const profileConfig = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
     access: { admins: ['ou-admin'] },
-    permissions: { defaultAccess: 'read-only', maxAccess: 'workspace' },
   });
   profileConfig.workspaces.default = tmp.workspace;
   const controls = {
-    profile: 'claude',
+    profile: 'work',
     profileConfig,
-    botOwnerId: 'ou-owner',
     ownerRefreshState: 'ok',
     ownerRefreshedAt: 1_700_000_000_000,
     async refreshOwner() {},
@@ -94,9 +91,8 @@ async function createHarness(): Promise<{
     pool,
     activeRuns,
     workspaces,
-    profile: 'claude',
+    profile: 'work',
     profileConfig: () => profileConfig,
-    createRunId: () => 'doctor-run-1',
     now: () => 1_700_000_000_000,
     postDoneExitGraceMs: 1,
   });

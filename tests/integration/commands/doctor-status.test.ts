@@ -64,10 +64,9 @@ describe('/status and /doctor diagnostics', () => {
     expect(status).toContain('1/1 active');
     expect(status).toContain('owner API');
     expect(status).toContain('profile');
-    expect(status).toContain('claude');
-    expect(status).toContain('permission');
-    expect(status).toContain('plan');
-    expect(status).not.toContain('bypassPermissions');
+    expect(status).toContain('Oh My Pi');
+    expect(status).toContain('access');
+    expect(status).toContain('full');
   });
 
   it('runs only self-checks when no cwd is selected', async () => {
@@ -101,17 +100,14 @@ describe('/status and /doctor diagnostics', () => {
     const opts = h.agent.runOptions[0]!;
     await expect(realpath(h.tmp.workspace)).resolves.toBe(opts.cwd);
     expect(opts.sessionId).toBeUndefined();
-    expect(opts.threadId).toBeUndefined();
     expect(opts.images).toBeUndefined();
-    expect(opts.permissionMode).toBe('plan');
     expect(opts.prompt).toContain('OK');
     const output = lastStreamCardJson(h.channel);
     expect(output).toContain('self-check');
     expect(output).toContain('profile');
-    expect(output).toContain('claude');
+    expect(output).toContain('Oh My Pi');
     expect(output).toContain('workspace check');
-    expect(output).toContain('policy check: ok permission=plan');
-    expect(output).not.toContain('permission=bypassPermissions');
+    expect(output).toContain('policy check: ok access=full');
     expect(output).toContain('agent echo check');
     expect(output).toContain('OK');
   });
@@ -323,10 +319,8 @@ async function createHarness(options: {
 
 function appConfig(defaultWorkspace: string | undefined): ProfileConfig {
   const config = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
     access: { admins: ['ou-admin'] },
-    permissions: { defaultAccess: 'read-only', maxAccess: 'workspace' },
   });
   if (defaultWorkspace) config.workspaces.default = defaultWorkspace;
   return config;

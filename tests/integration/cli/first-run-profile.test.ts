@@ -1,8 +1,7 @@
-import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { detectInstalledAgents } from '../../../src/cli/agent-detection';
 import { createBootstrapProfileConfig } from '../../../src/cli/profile-bootstrap';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
 
@@ -18,142 +17,81 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe('first-run profile bootstrap', () => {
-  it('creates a Codex profile with a default workspace and inherited user Codex home', async () => {
+describe('OMP profile bootstrap', () => {
+  it('resolves the OMP binary and requested workspace', async () => {
     const root = await makeRoot();
     const workspace = join(root, 'workspace');
-    const codexHomeDir = join(root, 'profiles', 'codex-dev', 'codex-home');
     await mkdir(workspace, { recursive: true });
-    const codex = await writeVersionExecutable(root, 'codex', 'codex 1.2.3');
+    const omp = await writeVersionExecutable(root, 'omp', 'omp 1.2.3');
 
     const profile = await createBootstrapProfileConfig({
-      agentKind: 'codex',
-      accounts: { app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' } },
+      accounts: { app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' } },
       workspace,
-      codexBinaryPath: codex,
-      codexHomeDir,
+      ompBinaryPath: omp,
     });
 
-    const workspaceRealpath = await realpath(workspace);
-    expect(profile.agentKind).toBe('codex');
-    expect(profile.workspaces).toEqual({ default: workspaceRealpath });
-    expect(profile.codex).toMatchObject({
-      binaryPath: codex,
-      inheritCodexHome: true,
-    });
-    expect(profile.codex?.realpath).toBeUndefined();
-    expect(profile.codex?.version).toBeUndefined();
-    expect(profile.codex?.sha256).toBeUndefined();
-    expect(profile.permissions).toEqual({
-      defaultAccess: 'full',
-      maxAccess: 'full',
-    });
-    await expect(stat(codexHomeDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(profile.omp).toEqual({ binaryPath: omp });
+    expect(profile.workspaces).toEqual({ default: await realpath(workspace) });
   });
 
-  it('creates a profile without requiring a user workspace', async () => {
+  it('creates a managed default workspace when no user workspace is provided', async () => {
     const root = await makeRoot();
-    const defaultWorkspace = join(root, 'managed-workspaces', 'codex-dev', 'default');
-    const codexHomeDir = join(root, 'profiles', 'codex-dev', 'codex-home');
-    const codex = await writeVersionExecutable(root, 'codex', 'codex 1.2.3');
+    const defaultWorkspace = join(root, 'managed-workspaces', 'omp', 'default');
+    const omp = await writeVersionExecutable(root, 'omp', 'omp 1.2.3');
 
     const profile = await createBootstrapProfileConfig({
-      agentKind: 'codex',
-      accounts: { app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' } },
-      codexBinaryPath: codex,
-      codexHomeDir,
+      accounts: { app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' } },
+      ompBinaryPath: omp,
       defaultWorkspace,
     });
 
-    const defaultWorkspaceRealpath = await realpath(defaultWorkspace);
-    expect(profile.workspaces.default).toBe(defaultWorkspaceRealpath);
+    expect(profile.workspaces.default).toBe(await realpath(defaultWorkspace));
   });
 
-  it('reports missing Codex bootstrap binaries as agent preflight diagnostics', async () => {
+  it('reports missing OMP binaries as preflight diagnostics', async () => {
     const root = await makeRoot();
-    const missing = join(root, 'missing-codex');
+    const missing = join(root, 'missing-omp');
 
     await expect(
       createBootstrapProfileConfig({
-        agentKind: 'codex',
-        accounts: { app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' } },
-        codexBinaryPath: missing,
+        accounts: { app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' } },
+        ompBinaryPath: missing,
       }),
     ).rejects.toMatchObject({
       diagnostic: {
         code: 'agent-binary-not-found',
-        agentId: 'codex',
-        agentName: 'Codex CLI',
+        agentId: 'omp',
+        agentName: 'Oh My Pi',
         command: missing,
         binaryPath: missing,
       },
     });
   });
 
-  it('fails closed when a requested bootstrap workspace is not a directory', async () => {
+  it('fails closed when a requested workspace is not a directory', async () => {
     const root = await makeRoot();
     const file = join(root, 'not-a-dir');
+    const omp = await writeVersionExecutable(root, 'omp', 'omp 1.2.3');
     await writeFile(file, 'x', 'utf8');
 
     await expect(
       createBootstrapProfileConfig({
-        agentKind: 'claude',
-        accounts: { app: { id: 'cli_claude', secret: '${APP_SECRET}', tenant: 'feishu' } },
+        accounts: { app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' } },
         workspace: file,
+        ompBinaryPath: omp,
       }),
     ).rejects.toThrow(/路径不是目录/);
   });
 
-  it('accepts a requested bootstrap workspace without requiring git', async () => {
+  it('does not require a workspace', async () => {
     const root = await makeRoot();
-    const workspace = join(root, 'workspace');
-    await mkdir(workspace, { recursive: true });
+    const omp = await writeVersionExecutable(root, 'omp', 'omp 1.2.3');
 
-    const profile = await createBootstrapProfileConfig({
-      agentKind: 'claude',
-      accounts: { app: { id: 'cli_claude', secret: '${APP_SECRET}', tenant: 'feishu' } },
-      workspace,
-    });
-
-    await expect(realpath(workspace)).resolves.toBe(profile.workspaces.default);
-  });
-
-  it('leaves workspaces empty when neither explicit nor managed workspace is provided', async () => {
     await expect(
       createBootstrapProfileConfig({
-        agentKind: 'claude',
-        accounts: { app: { id: 'cli_claude', secret: '${APP_SECRET}', tenant: 'feishu' } },
+        accounts: { app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' } },
+        ompBinaryPath: omp,
       }),
-    ).resolves.toMatchObject({
-      workspaces: {},
-    });
-  });
-
-  it('detects available agents from PATH without inventing missing tools', async () => {
-    const root = await makeRoot();
-    const codex = await writeVersionExecutable(root, 'codex', 'codex 1.2.3');
-    const oldPath = process.env.PATH;
-    const oldClaude = process.env.LARK_CHANNEL_CLAUDE_BIN;
-    const oldCodex = process.env.LARK_CHANNEL_CODEX_BIN;
-    process.env.PATH = root;
-    process.env.LARK_CHANNEL_CLAUDE_BIN = 'missing-claude';
-    process.env.LARK_CHANNEL_CODEX_BIN = 'codex';
-    try {
-      await expect(detectInstalledAgents()).resolves.toEqual([
-        { kind: 'codex', binaryPath: codex },
-      ]);
-    } finally {
-      process.env.PATH = oldPath;
-      if (oldClaude === undefined) {
-        delete process.env.LARK_CHANNEL_CLAUDE_BIN;
-      } else {
-        process.env.LARK_CHANNEL_CLAUDE_BIN = oldClaude;
-      }
-      if (oldCodex === undefined) {
-        delete process.env.LARK_CHANNEL_CODEX_BIN;
-      } else {
-        process.env.LARK_CHANNEL_CODEX_BIN = oldCodex;
-      }
-    }
+    ).resolves.toMatchObject({ workspaces: {}, omp: { binaryPath: omp } });
   });
 });

@@ -238,7 +238,6 @@ async function createHarness(): Promise<{
   const tmp = await createTmpProfile('bot-at-bot-');
   const workspace = await realpath(tmp.workspace);
   const baseProfileConfig = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: {
       app: {
         id: 'cli_test',

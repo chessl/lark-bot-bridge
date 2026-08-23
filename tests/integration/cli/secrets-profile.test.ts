@@ -14,11 +14,7 @@ import {
   keystoreDerivedKeyCacheSize,
   setSecret,
 } from '../../../src/config/keystore';
-import {
-  type AgentKind,
-  createDefaultProfileConfig,
-  type RootConfig,
-} from '../../../src/config/profile-schema';
+import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import { secretKeyForApp } from '../../../src/config/schema';
 
 const roots: string[] = [];
@@ -128,9 +124,7 @@ describe('profile-aware secrets commands', () => {
 async function writeProfiles(root: string, activeProfile: string, names: string[]): Promise<void> {
   const profiles: RootConfig['profiles'] = {};
   for (const name of names) {
-    const agentKind: AgentKind = name.startsWith('codex') ? 'codex' : 'claude';
     profiles[name] = createDefaultProfileConfig({
-      agentKind,
       accounts: {
         app: {
           id: `cli_${name.replace(/[^A-Za-z0-9]/g, '_')}`,
@@ -138,7 +132,7 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
           tenant: 'feishu',
         },
       },
-      ...(agentKind === 'codex' ? { codex: { binaryPath: 'codex' } } : {}),
+      omp: { binaryPath: '/usr/local/bin/omp' },
     });
     await mkdir(join(root, 'profiles', name), { recursive: true });
   }

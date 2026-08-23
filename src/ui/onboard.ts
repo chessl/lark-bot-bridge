@@ -1,8 +1,8 @@
-import { detectInstalledAgents } from '../cli/agent-detection';
+import { resolveExecutablePath } from '../cli/executable';
 import { createBootstrapProfileConfig } from '../cli/profile-bootstrap';
 import { type AppPaths, resolveAppPaths } from '../config/app-paths';
 import { setSecret } from '../config/keystore';
-import type { AgentKind, ProfileConfig } from '../config/profile-schema';
+import type { ProfileConfig } from '../config/profile-schema';
 import {
   createRootConfig,
   loadRootConfig,
@@ -18,19 +18,24 @@ export interface OnboardState {
   hasConfig: boolean;
   activeProfile?: string;
   profiles: string[];
-  detectedAgents: AgentKind[];
+  ompAvailable: boolean;
 }
 
-/** Snapshot for the wizard's first render: existing profiles + installed agents. */
+/** Snapshot for the wizard's first render: existing profiles + OMP availability. */
 export async function onboardState(rootDir?: string): Promise<OnboardState> {
   const appPaths = resolveAppPaths({ rootDir });
   const root = await loadRootConfig(appPaths.configFile);
-  const detected = await detectInstalledAgents().catch(() => []);
+  const ompAvailable = await resolveExecutablePath(
+    process.env.LARK_CHANNEL_OMP_BIN ?? 'omp',
+  ).then(
+    () => true,
+    () => false,
+  );
   return {
     hasConfig: Boolean(root),
     activeProfile: root?.activeProfile || undefined,
     profiles: root ? Object.keys(root.profiles) : [],
-    detectedAgents: detected.map((d) => d.kind),
+    ompAvailable,
   };
 }
 
@@ -59,7 +64,6 @@ export async function onboardValidate(body: unknown) {
 
 export interface CreateProfileInput {
   profile: string;
-  agentKind: AgentKind;
   appId: string;
   appSecret: string;
   tenant: TenantBrand;
@@ -75,11 +79,8 @@ export interface CreateProfileInput {
  */
 export async function onboardCreate(body: unknown, rootDir?: string) {
   const fv = asRecord(body);
-  const agentKind: AgentKind =
-    fv.agentKind === 'codex' ? 'codex' : fv.agentKind === 'omp' ? 'omp' : 'claude';
   const input: CreateProfileInput = {
-    profile: String(fv.profile ?? '').trim() || agentKind,
-    agentKind,
+    profile: String(fv.profile ?? '').trim() || 'omp',
     appId: String(fv.appId ?? '').trim(),
     appSecret: String(fv.appSecret ?? '').trim(),
     tenant: readTenant(fv.tenant),
@@ -135,13 +136,11 @@ export async function writeNewProfile(
   let profileConfig: ProfileConfig;
   try {
     profileConfig = await createBootstrapProfileConfig({
-      agentKind: input.agentKind,
       accounts: encrypted.accounts,
       preferences: encrypted.preferences,
       secrets: encrypted.secrets,
       ...(input.workspace ? { workspace: input.workspace } : {}),
       defaultWorkspace: appPaths.defaultWorkspaceDir,
-      codexHomeDir: appPaths.codexHomeDir,
     });
   } catch (err) {
     throw new HttpError(400, err instanceof Error ? err.message : String(err));

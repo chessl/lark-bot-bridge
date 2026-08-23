@@ -1,5 +1,5 @@
 import type { CardActionEvent, LarkChannel, NormalizedMessage } from '@larksuite/channel';
-import type { AgentAdapter } from '../agent/types';
+import type { OmpRunEngine } from '../agent/types';
 import type { ChatModeCache } from '../bot/chat-mode-cache';
 import type { PendingQueue } from '../bot/pending-queue';
 import type { ScopedRuns } from '../bot/run-flow';
@@ -28,7 +28,7 @@ export interface CardDispatchDeps {
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
-  agent: AgentAdapter;
+  agent: OmpRunEngine;
   scopedRuns: ScopedRuns;
   controls: Controls;
   pending: PendingQueue;

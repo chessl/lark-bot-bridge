@@ -1,24 +1,17 @@
 import { mkdir, realpath } from 'node:fs/promises';
 import { AgentPreflightError } from '../agent/preflight';
-import {
-  type AgentKind,
-  createDefaultProfileConfig,
-  type ProfileConfig,
-} from '../config/profile-schema';
+import { createDefaultProfileConfig, type ProfileConfig } from '../config/profile-schema';
 import type { AppConfig } from '../config/schema';
 import { resolveWorkingDirectory } from '../policy/workspace';
-import { resolveExecutablePath } from './agent-detection';
+import { resolveExecutablePath } from './executable';
 
 export interface BootstrapProfileInput {
-  agentKind: AgentKind;
   accounts: AppConfig['accounts'];
   preferences?: AppConfig['preferences'];
   secrets?: AppConfig['secrets'];
   workspace?: string;
   defaultWorkspace?: string;
-  codexBinaryPath?: string;
   ompBinaryPath?: string;
-  codexHomeDir?: string;
 }
 
 export async function createBootstrapProfileConfig(
@@ -29,14 +22,7 @@ export async function createBootstrapProfileConfig(
     : input.defaultWorkspace
       ? await ensureManagedDefaultWorkspace(input.defaultWorkspace)
       : undefined;
-  const codex =
-    input.agentKind === 'codex'
-      ? await createBootstrapCodexConfig(input.codexBinaryPath)
-      : undefined;
-  const omp =
-    input.agentKind === 'omp' ? await createBootstrapOmpConfig(input.ompBinaryPath) : undefined;
   const profile = createDefaultProfileConfig({
-    agentKind: input.agentKind,
     accounts: input.accounts,
     preferences: input.preferences,
     access: {
@@ -44,18 +30,9 @@ export async function createBootstrapProfileConfig(
       requireMentionInGroup: input.preferences?.requireMentionInGroup,
     },
     secrets: input.secrets,
-    ...(codex ? { codex } : {}),
-    ...(omp ? { omp } : {}),
+    omp: await createBootstrapOmpConfig(input.ompBinaryPath),
   });
-  if (workspace) {
-    profile.workspaces = {
-      ...profile.workspaces,
-      default: workspace,
-    };
-  }
-  if (input.codexHomeDir && profile.codex?.inheritCodexHome === false) {
-    await mkdir(input.codexHomeDir, { recursive: true });
-  }
+  if (workspace) profile.workspaces = { ...profile.workspaces, default: workspace };
   return profile;
 }
 
@@ -70,30 +47,10 @@ async function ensureManagedDefaultWorkspace(path: string): Promise<string> {
   return realpath(path);
 }
 
-export async function createBootstrapCodexConfig(binaryPath: string | undefined) {
-  const command = binaryPath ?? process.env.LARK_CHANNEL_CODEX_BIN ?? 'codex';
-  let resolvedBinary: string;
-  try {
-    resolvedBinary = await resolveExecutablePath(command);
-  } catch (err) {
-    const errno = (err as NodeJS.ErrnoException).code;
-    throw new AgentPreflightError({
-      code: bootstrapBinaryErrorCode(errno),
-      agentId: 'codex',
-      agentName: 'Codex CLI',
-      command,
-      binaryPath: command,
-      errno,
-    });
-  }
-  return { binaryPath: resolvedBinary };
-}
-
 export async function createBootstrapOmpConfig(binaryPath: string | undefined) {
   const command = binaryPath ?? process.env.LARK_CHANNEL_OMP_BIN ?? 'omp';
-  let resolvedBinary: string;
   try {
-    resolvedBinary = await resolveExecutablePath(command);
+    return { binaryPath: await resolveExecutablePath(command) };
   } catch (err) {
     const errno = (err as NodeJS.ErrnoException).code;
     throw new AgentPreflightError({
@@ -105,7 +62,6 @@ export async function createBootstrapOmpConfig(binaryPath: string | undefined) {
       errno,
     });
   }
-  return { binaryPath: resolvedBinary };
 }
 
 function bootstrapBinaryErrorCode(errno: string | undefined) {

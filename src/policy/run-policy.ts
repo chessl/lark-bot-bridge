@@ -1,12 +1,3 @@
-import type { AgentCapability } from '../agent/capability';
-import {
-  type AccessMode,
-  accessToClaudePermissionMode,
-  accessToCodexSandbox,
-  type ClaudePermissionMode,
-  type CodexSandboxMode,
-  clampAccess,
-} from '../config/permissions';
 import type { ProfileConfig } from '../config/profile-schema';
 import type { AccessDecision } from './access';
 import {
@@ -51,11 +42,8 @@ export interface RunPolicyInput {
   requestedCwd: string;
   cwdRealpath: string;
   access: AccessDecision;
-  capability: AgentCapability;
   profileConfig: ProfileConfig;
   now: number;
-  codexHome?: string;
-  inheritCodexHome?: boolean;
   ttlMs?: number;
 }
 
@@ -64,9 +52,7 @@ export interface RunPolicyAllow {
   prompt: string;
   requestedCwd: string;
   cwdRealpath: string;
-  accessMode: AccessMode;
-  sandbox: CodexSandboxMode;
-  permissionMode: ClaudePermissionMode;
+  accessMode: 'full';
   access: AccessDecision;
   attachments: AgentAttachment[];
   policyFingerprint: string;
@@ -76,11 +62,7 @@ export interface RunPolicyAllow {
 export interface RunPolicyReject {
   ok: false;
   rejectReason: {
-    code:
-      | 'access-denied'
-      | 'folder-allowlist-unverified'
-      | 'required-attachment-rejected'
-      | 'unsupported-agent-access';
+    code: 'access-denied' | 'folder-allowlist-unverified' | 'required-attachment-rejected';
     userVisible: string;
   };
 }
@@ -90,9 +72,7 @@ export type RunPolicyResult = RunPolicyAllow | RunPolicyReject;
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
 
 export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
-  if (!input.access.ok) {
-    return reject('access-denied', '当前用户无权发起运行。');
-  }
+  if (!input.access.ok) return reject('access-denied', '当前用户无权发起运行。');
 
   if (
     input.scope.resourceBindings?.some((binding) => binding.kind === 'folder' && !binding.verified)
@@ -108,22 +88,6 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     return reject('required-attachment-rejected', '必需附件未通过校验，已拒绝运行。');
   }
 
-  const accessMode = clampAccess(
-    input.profileConfig.permissions.defaultAccess,
-    input.profileConfig.permissions.maxAccess,
-    input.capability.permissions.maxAccess,
-  );
-  if (
-    input.capability.permissions.supportedAccess &&
-    !input.capability.permissions.supportedAccess.includes(accessMode)
-  ) {
-    return reject(
-      'unsupported-agent-access',
-      `当前 ${input.capability.agentId} 运行时不支持 ${accessMode} 权限；请将该 profile 的默认权限设为 full。`,
-    );
-  }
-  const sandbox = accessToCodexSandbox(accessMode);
-  const permissionMode = accessToClaudePermissionMode(accessMode, input.profileConfig.permissions);
   const resourceDigest = resourceScopeDigest({
     source: input.scope.source,
     chatId: input.scope.chatId,
@@ -143,33 +107,19 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     prompt: input.prompt,
     requestedCwd: input.requestedCwd,
     cwdRealpath: input.cwdRealpath,
-    accessMode,
-    sandbox,
-    permissionMode,
+    accessMode: 'full',
     access: input.access,
     attachments: input.attachments,
     expiresAt: input.now + (input.ttlMs ?? DEFAULT_TTL_MS),
     policyFingerprint: policyFingerprint({
       cwdRealpath: input.cwdRealpath,
-      sandbox,
       accessPolicyDigest: accessDigest,
       resourceScopeDigest: resourceDigest,
       attachmentPolicyShapeDigest: attachmentDigest,
-      codexHome: input.codexHome,
-      inheritCodexHome: input.inheritCodexHome ?? false,
     }),
   };
 }
 
-function reject(
-  code: RunPolicyReject['rejectReason']['code'],
-  userVisible: string,
-): RunPolicyReject {
-  return {
-    ok: false,
-    rejectReason: {
-      code,
-      userVisible,
-    },
-  };
+function reject(code: RunPolicyReject['rejectReason']['code'], userVisible: string): RunPolicyReject {
+  return { ok: false, rejectReason: { code, userVisible } };
 }

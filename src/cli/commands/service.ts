@@ -20,7 +20,6 @@ import { type StopProcessEntryResult, stopProcessEntry } from './ps';
 
 export interface ServiceStartOptions {
   profile?: string;
-  agent?: string;
   workspace?: string;
   appId?: string;
   appSecret?: string;
@@ -155,7 +154,6 @@ async function ensureBridgeConfigured(
 > {
   const { cfg, profile, profileConfig, appPaths, configPath } = await resolveProfileRuntime({
     profile: opts.profile,
-    agent: opts.agent,
     workspace: opts.workspace,
     appId: opts.appId,
     appSecret: opts.appSecret,
@@ -192,7 +190,7 @@ async function assertLockNotHeldByAnotherRuntime(
     }
     const app = lock.meta.appId ? ` app=${lock.meta.appId}` : '';
     console.error(
-      `  holder: profile=${lock.meta.profile}${app} agent=${lock.meta.agentKind} pid=${lock.meta.pid} startedAt=${lock.meta.startedAt}`,
+      `  holder: profile=${lock.meta.profile}${app} pid=${lock.meta.pid} startedAt=${lock.meta.startedAt}`,
     );
 
     if (!opts.confirmStopRuntimeLockProcess && (!process.stdin.isTTY || !process.stdout.isTTY)) {
@@ -311,9 +309,8 @@ async function reportConnectAfter(
   const entry = await waitForServiceConnect(appId, profile, beforePids);
   if (entry) {
     const verbZh = verb === 'started' ? '已启动' : '已重启';
-    const agent = agentDisplay(entry.agentKind);
     console.log(
-      `✓ ${verbZh}  bot: ${entry.botName} (${entry.appId})  agent: ${agent.displayName} (${agent.id})  进程: ${entry.id}`,
+      `✓ ${verbZh}  bot: ${entry.botName} (${entry.appId})  engine: Oh My Pi (omp)  进程: ${entry.id}`,
     );
     return;
   }
@@ -535,16 +532,5 @@ async function maybeResolveProfileRuntime(
       return undefined;
     }
     throw err;
-  }
-}
-
-function agentDisplay(agentKind: ProcessEntry['agentKind']): { id: string; displayName: string } {
-  switch (agentKind) {
-    case 'claude':
-      return { id: 'claude', displayName: 'Claude Code' };
-    case 'codex':
-      return { id: 'codex', displayName: 'Codex CLI' };
-    case 'omp':
-      return { id: 'omp', displayName: 'Oh My Pi' };
   }
 }

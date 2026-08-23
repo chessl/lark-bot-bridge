@@ -28,7 +28,7 @@ describe('profile logger observability', () => {
       now: () => new Date('2026-05-25T12:34:56.000Z'),
     });
 
-    log.info('run', 'started', { runId: 'run-1', profile: 'claude', agent: 'claude' });
+    log.info('run', 'started', { runId: 'run-1', profile: 'work', agent: 'omp' });
     await flushLogger();
 
     expect(getLoggerConfig().retentionDays).toBe(30);
@@ -37,8 +37,8 @@ describe('profile logger observability', () => {
       phase: 'run',
       event: 'started',
       runId: 'run-1',
-      profile: 'claude',
-      agent: 'claude',
+      profile: 'work',
+      agent: 'omp',
     });
     expect(JSON.parse(text.trim()).ts).toMatch(
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/,

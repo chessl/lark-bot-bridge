@@ -79,38 +79,33 @@ export interface AppPreferences {
   /** Reply rendering mode for IM (group/p2p) messages. Default 'card'. */
   messageReply?: MessageReplyMode;
   /**
-   * Whether to render tool-call blocks (Bash / Read / Edit / ...) in the
-   * output. Default true. Turn off if you only care about Claude's final
-   * text answer and want to hide the "工具调用过程".
+   * Whether to render tool-call blocks in the output. Default true. Turn off
+   * to show only OMP's final text answer.
    */
   showToolCalls?: boolean;
   /**
-   * Model the underlying agent runs with, forwarded as `--model`. The catalog
-   * of valid values is agent-kind specific — see `agent/models.ts`. `undefined`
-   * or the `'default'` sentinel means "don't pass `--model`" so the agent
-   * CLI / account default applies. Default: unset.
+   * OMP model forwarded as `--model`. `undefined` or the `'default'` sentinel
+   * omits the flag so the OMP profile default applies.
    */
   model?: string;
   /** Whether to send a separate Lark COT process message before the final answer. */
   cotMessages?: CotMessagesMode;
   /**
-   * Cap on concurrent claude runs across all chats / topics. Excess runs
-   * queue FIFO. Default 10. Mostly relevant for topic groups where each
-   * topic can spawn its own run; capping protects RAM / token spend.
+   * Cap on concurrent OMP runs across all chats and topics. Excess runs queue
+   * FIFO. Default 10.
    */
   maxConcurrentRuns?: number;
   /**
-   * Global default idle-timeout for claude runs, in minutes. When set,
-   * if claude emits no stream event for this long the bridge kills the
-   * run as presumed-hung. Undefined / 0 = no timeout (the default — runs
-   * can hang indefinitely). Per-scope `/timeout` overrides this.
+   * Global default idle-timeout for OMP runs, in minutes. When set, a silent
+   * run is stopped as presumed hung. Undefined / 0 disables the timeout.
+   * Per-scope `/timeout` overrides this.
    */
   runIdleTimeoutMinutes?: number;
   /**
    * Whether the bot only responds to messages that @-mention it in groups
    * (regular and topic groups). p2p is always unrestricted. Default true:
    * groups are quiet unless the user @bot. Set false to let any group
-   * message reach Claude (the 0.1.21-and-earlier behavior).
+   * message reach OMP.
    *
    * @全员 is never responded to regardless (SDK `respondToMentionAll: false`).
    * Cloud-doc comments still require @-mention unconditionally.
@@ -184,8 +179,7 @@ export function getCotMessages(cfg: AppConfig): CotMessagesMode {
 export function getMaxConcurrentRuns(cfg: AppConfig): number {
   const raw = cfg.preferences?.maxConcurrentRuns;
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 1) return 10;
-  // Reasonable upper bound — at 50+ concurrent claudes the bot box is
-  // probably already RAM-starved. Clamp to keep typos from killing the box.
+  // Clamp typos before they exhaust the host with subprocesses.
   return Math.min(Math.floor(raw), 50);
 }
 
@@ -206,16 +200,8 @@ export function getRequireMentionInGroup(cfg: AppConfig): boolean {
 }
 
 /**
- * Resolve the global default idle-timeout in ms. Returns `undefined` when
- * disabled (the default). Clamps to [1, 120] minutes when set so a typo
- * can't lock the bot into a 1-second kill loop or wait forever to a number
- * the user didn't really mean.
- */
-/**
- * Grace period before SIGKILL fallback when stopping a claude subprocess.
- * Returns ms. Defaults to 5000 (5 seconds). Clamps to [100, 30000] so a
- * typo can't either make stop() effectively SIGKILL-immediate or hang for
- * minutes.
+ * Grace period before SIGKILL fallback when stopping an OMP subprocess.
+ * Defaults to 5000 ms and clamps to [100, 30000].
  */
 export function getAgentStopGraceMs(cfg: AppConfig): number {
   const raw = cfg.preferences?.agentStopGraceMs;
@@ -223,6 +209,7 @@ export function getAgentStopGraceMs(cfg: AppConfig): number {
   return Math.min(30_000, Math.max(100, Math.floor(raw)));
 }
 
+/** Resolve the OMP idle-timeout in ms, or `undefined` when disabled. */
 export function getRunIdleTimeoutMs(cfg: AppConfig): number | undefined {
   const raw = cfg.preferences?.runIdleTimeoutMinutes;
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;

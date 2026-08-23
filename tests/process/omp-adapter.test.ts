@@ -33,7 +33,6 @@ describe('OmpAdapter process contract', () => {
       runId: 'run-fresh',
       prompt: 'hello from lark',
       cwd,
-      sandbox: 'danger-full-access',
     });
 
     expect(await collect(run.events)).toEqual([
@@ -88,7 +87,6 @@ describe('OmpAdapter process contract', () => {
       sessionId: 'session-old',
       model: 'openai/gpt-test',
       images: [image],
-      sandbox: 'danger-full-access',
     });
     await collect(run.events);
     expect(await run.waitForExit(2000)).toBe(true);
@@ -126,7 +124,6 @@ describe('OmpAdapter process contract', () => {
         runId: 'run-mcp',
         prompt: 'use lark',
         cwd: await realpath(fake.dir),
-        sandbox: 'danger-full-access',
         nativeMcp,
       });
       await collect(run.events);
@@ -154,17 +151,6 @@ describe('OmpAdapter process contract', () => {
     }
   });
 
-  it('rejects non-full bridge access instead of weakening the sandbox contract', async () => {
-    const adapter = new OmpAdapter({ binary: 'omp' });
-    await expect(
-      adapter.start({
-        runId: 'run-read-only',
-        prompt: 'read',
-        cwd: process.cwd(),
-        sandbox: 'read-only',
-      }),
-    ).rejects.toThrow('requires full access');
-  });
 });
 
 async function createFakeOmp(): Promise<FakeOmp> {

@@ -1,14 +1,5 @@
-import {
-  type AccessMode,
-  type CodexSandboxMode,
-  normalizePermissions,
-  type PermissionConfig,
-} from './permissions';
 import type { AppCredentials, AppPreferences, MessageReplyMode, SecretsConfig } from './schema';
 
-export type AgentKind = 'claude' | 'codex' | 'omp';
-export type SandboxMode = CodexSandboxMode;
-export type { AccessMode, PermissionConfig };
 
 export interface ProfileAccess {
   allowedUsers: string[];
@@ -24,18 +15,6 @@ export interface ProfileAccess {
   chatRequireMention?: Record<string, boolean>;
 }
 
-export interface CodexConfig {
-  binaryPath: string;
-  realpath?: string;
-  version?: string;
-  sha256?: string;
-  owner?: number;
-  mode?: number;
-  codexHome?: string;
-  inheritCodexHome?: boolean;
-  ignoreUserConfig?: boolean;
-  ignoreRules?: boolean;
-}
 
 export interface OmpConfig {
   binaryPath: string;
@@ -106,7 +85,6 @@ export interface MeetingConfig {
 export type ProfileMode = 'personal' | 'team';
 
 export interface ProfileConfig {
-  agentKind: AgentKind;
   /** Deployment mode switch. Default 'personal'. See {@link ProfileMode}. */
   mode: ProfileMode;
   accounts: {
@@ -118,9 +96,7 @@ export interface ProfileConfig {
   workspaces: {
     default?: string;
   };
-  permissions: PermissionConfig;
-  codex?: CodexConfig;
-  omp?: OmpConfig;
+  omp: OmpConfig;
   attachments: AttachmentConfig;
   /** In-meeting agent settings. See {@link MeetingConfig}. */
   meeting: MeetingConfig;
@@ -134,7 +110,6 @@ export interface RootConfig {
 }
 
 export interface CreateDefaultProfileConfigInput {
-  agentKind: AgentKind;
   /** Deployment mode. Default 'personal'. */
   mode?: ProfileMode;
   accounts: {
@@ -142,14 +117,15 @@ export interface CreateDefaultProfileConfigInput {
   };
   preferences?: AppPreferences;
   access?: Partial<ProfileAccess>;
-  permissions?: Partial<PermissionConfig>;
-  codex?: CodexConfig;
   secrets?: SecretsConfig;
   omp?: OmpConfig;
 }
 
 export function createDefaultProfileConfig(input: CreateDefaultProfileConfigInput): ProfileConfig {
-  return normalizeProfileConfig(input);
+  return normalizeProfileConfig({
+    ...input,
+    omp: input.omp ?? { binaryPath: process.env.LARK_CHANNEL_OMP_BIN ?? 'omp' },
+  });
 }
 
 export function normalizeProfileConfig(input: unknown): ProfileConfig {
@@ -157,7 +133,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     throw new Error('profile config must be an object');
   }
   const raw = input as {
-    agentKind?: unknown;
     mode?: unknown;
     accounts?: unknown;
     secrets?: SecretsConfig;
@@ -166,41 +141,29 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     workspaces?: {
       default?: unknown;
     };
-    permissions?: Partial<PermissionConfig>;
-    codex?: CodexConfig;
     omp?: OmpConfig;
     attachments?: Partial<AttachmentConfig>;
     meeting?: unknown;
   };
 
-  if (raw.agentKind !== 'claude' && raw.agentKind !== 'codex' && raw.agentKind !== 'omp') {
-    throw new Error('agentKind must be claude, codex, or omp');
-  }
   const accounts = normalizeAccounts(raw.accounts);
-  if (raw.agentKind === 'codex' && !raw.codex) {
-    throw new Error('codex profile requires codex configuration');
-  }
-  if (raw.agentKind === 'omp' && !raw.omp) {
+  if (!raw.omp) {
     throw new Error('omp profile requires omp configuration');
   }
 
   const preferences = normalizePreferences(raw.preferences);
   const access = normalizeAccess(raw.access);
-  const permissions = normalizePermissions(raw.permissions);
   const workspaces = normalizeWorkspaces(raw.workspaces);
   const meeting = normalizeMeeting(raw.meeting);
 
   return {
-    agentKind: raw.agentKind,
     mode: raw.mode === 'team' ? 'team' : 'personal',
     accounts,
     ...(raw.secrets ? { secrets: raw.secrets } : {}),
     preferences,
     access,
     workspaces,
-    permissions,
-    ...(raw.codex ? { codex: normalizeCodex(raw.codex) } : {}),
-    ...(raw.omp ? { omp: normalizeOmp(raw.omp) } : {}),
+    omp: normalizeOmp(raw.omp),
     attachments: {
       maxCount: numberOr(raw.attachments?.maxCount, 10),
       maxBytes: numberOr(raw.attachments?.maxBytes, 100 * 1024 * 1024),
@@ -282,21 +245,6 @@ function normalizeWorkspaces(
   return defaultWorkspace ? { default: defaultWorkspace } : {};
 }
 
-function normalizeCodex(input: CodexConfig): CodexConfig {
-  const codex: CodexConfig = {
-    binaryPath: input.binaryPath,
-    ...(typeof input.realpath === 'string' ? { realpath: input.realpath } : {}),
-    ...(typeof input.version === 'string' ? { version: input.version } : {}),
-    ...(typeof input.sha256 === 'string' ? { sha256: input.sha256 } : {}),
-    ...(typeof input.owner === 'number' ? { owner: input.owner } : {}),
-    ...(typeof input.mode === 'number' ? { mode: input.mode } : {}),
-    ...(typeof input.codexHome === 'string' ? { codexHome: input.codexHome } : {}),
-    inheritCodexHome: input.inheritCodexHome !== false,
-    ignoreUserConfig: input.ignoreUserConfig === true,
-    ignoreRules: input.ignoreRules !== false,
-  };
-  return codex;
-}
 
 function normalizeOmp(input: OmpConfig): OmpConfig {
   if (typeof input.binaryPath !== 'string' || !input.binaryPath.trim()) {

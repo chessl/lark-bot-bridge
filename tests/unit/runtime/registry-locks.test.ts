@@ -30,8 +30,8 @@ describe('registry and runtime lock integration', () => {
     const registryFile = join(root, 'registry', 'processes.json');
     await writeJson(registryFile, {
       entries: [
-        entry({ id: 'stale-a', pid: 999_999_991, profileName: 'claude', appId: 'cli_old' }),
-        entry({ id: 'stale-b', pid: process.pid, profileName: 'codex-dev', appId: 'cli_other' }),
+        entry({ id: 'stale-a', pid: 999_999_991, profileName: 'work', appId: 'cli_old' }),
+        entry({ id: 'stale-b', pid: process.pid, profileName: 'personal', appId: 'cli_other' }),
       ],
     });
     const before = await readFile(registryFile, 'utf8');
@@ -42,8 +42,7 @@ describe('registry and runtime lock integration', () => {
     const registered = await register({
       appId: 'cli_new',
       tenant: 'feishu',
-      profileName: 'codex-dev',
-      agentKind: 'codex',
+      profileName: 'personal',
       configPath: join(root, 'config.json'),
       version: '0.1.32',
       registryFile,
@@ -55,8 +54,7 @@ describe('registry and runtime lock integration', () => {
     expect(persisted.entries.map((item) => item.id)).toEqual([registered.id]);
     expect(persisted.entries[0]).toMatchObject({
       appId: 'cli_new',
-      profileName: 'codex-dev',
-      agentKind: 'codex',
+      profileName: 'personal',
       pid: process.pid,
     });
   });
@@ -67,19 +65,17 @@ describe('registry and runtime lock integration', () => {
     const lockedEntry = entry({
       id: 'locked',
       pid: process.pid,
-      profileName: 'claude',
+      profileName: 'work',
       appId: 'cli_existing',
-      agentKind: 'claude',
     });
     await writeJson(registryFile, { entries: [lockedEntry] });
 
-    const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'claude' });
-    await withProfileAndAppLocks(lockedPaths, 'cli_existing', 'claude', async () => {
+    const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'work' });
+    await withProfileAndAppLocks(lockedPaths, 'cli_existing', async () => {
       const registered = await register({
         appId: 'cli_new',
         tenant: 'feishu',
-        profileName: 'codex-dev',
-        agentKind: 'codex',
+        profileName: 'personal',
         configPath: join(root, 'config.json'),
         version: '0.1.32',
         registryFile,
@@ -100,20 +96,18 @@ describe('registry and runtime lock integration', () => {
         entry({
           id: 'stale-same-app',
           pid: 999_999_992,
-          profileName: 'claude',
+          profileName: 'work',
           appId: 'cli_existing',
-          agentKind: 'claude',
         }),
       ],
     });
 
-    const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'claude' });
-    await withProfileAndAppLocks(lockedPaths, 'cli_existing', 'claude', async () => {
+    const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'work' });
+    await withProfileAndAppLocks(lockedPaths, 'cli_existing', async () => {
       const registered = await register({
         appId: 'cli_new',
         tenant: 'feishu',
-        profileName: 'codex-dev',
-        agentKind: 'codex',
+        profileName: 'personal',
         configPath: join(root, 'config.json'),
         version: '0.1.32',
         registryFile,
@@ -134,15 +128,14 @@ describe('registry and runtime lock integration', () => {
         entry({
           id: 'stale-same-app',
           pid: 999_999_992,
-          profileName: 'claude',
+          profileName: 'work',
           appId: 'cli_existing',
-          agentKind: 'claude',
         }),
       ],
     });
 
-    const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'claude' });
-    await withProfileAndAppLocks(lockedPaths, 'cli_existing', 'claude', async () => {
+    const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'work' });
+    await withProfileAndAppLocks(lockedPaths, 'cli_existing', async () => {
       await expect(sameAppLiveOthers('cli_existing', process.pid, registryFile)).resolves.toEqual(
         [],
       );
@@ -155,22 +148,20 @@ describe('registry and runtime lock integration', () => {
     const lockedEntry = entry({
       id: 'locked',
       pid: process.pid,
-      profileName: 'claude',
+      profileName: 'work',
       appId: 'cli_existing',
-      agentKind: 'claude',
     });
     await writeJson(registryFile, { entries: [lockedEntry] });
 
-    const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'claude' });
-    await withProfileAndAppLocks(lockedPaths, 'cli_existing', 'claude', async () => {
+    const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'work' });
+    await withProfileAndAppLocks(lockedPaths, 'cli_existing', async () => {
       await writeFile(runtimeLockMetaFile(lockedPaths.profileLockFile), 'not json', 'utf8');
 
       await expect(
         register({
           appId: 'cli_new',
           tenant: 'feishu',
-          profileName: 'codex-dev',
-          agentKind: 'codex',
+          profileName: 'personal',
           configPath: join(root, 'config.json'),
           version: '0.1.32',
           registryFile,
@@ -207,8 +198,7 @@ function entry(overrides: Partial<ProcessEntry>): ProcessEntry {
     configPath: '/tmp/config.json',
     startedAt: new Date().toISOString(),
     version: '0.1.32',
-    profileName: 'claude',
-    agentKind: 'claude',
+    profileName: 'work',
     ...overrides,
   };
 }

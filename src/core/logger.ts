@@ -510,14 +510,12 @@ export function newTraceId(): string {
 }
 
 /**
- * Scrub a log buffer of identifying / credential material before it leaves
- * the local machine — specifically, before /doctor feeds it to Claude (the
- * Anthropic API will see it) and before the analysis card lands in a
- * Feishu chat (the Lark server may cache card contents).
+ * Scrub a log buffer of identifying and credential material before `/doctor`
+ * submits it to OMP or posts the analysis card to Feishu.
  *
- * Conservative: keeps log structure intact so Claude can still correlate by
- * traceId / phase / event. Only the *values* of identifying fields shrink
- * to a last-6-char suffix, and known credential fields become [REDACTED].
+ * Conservative: keeps log structure intact so OMP can still correlate by
+ * traceId / phase / event. Only identifying values shrink to a last-6 suffix,
+ * and known credential fields become [REDACTED].
  *
  * Pattern-based on purpose — parsing each line as JSON would skip lines the
  * scrubber doesn't fully understand and is much slower for ~60KB of input.

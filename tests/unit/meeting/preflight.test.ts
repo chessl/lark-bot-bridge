@@ -85,10 +85,9 @@ describe('checkMeetingPreflight', () => {
     await saveRootConfig(
       {
         schemaVersion: 2,
-        activeProfile: 'claude',
+        activeProfile: 'work',
         profiles: {
-          claude: createDefaultProfileConfig({
-            agentKind: 'claude',
+          work: createDefaultProfileConfig({
             accounts: { app: { id: 'cli_test', secret: 'app-secret', tenant: 'feishu' } },
           }),
         },

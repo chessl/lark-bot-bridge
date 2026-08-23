@@ -223,18 +223,16 @@ async function writeRoot(
     activeProfile: 'claude',
     profiles: {
       claude: createDefaultProfileConfig({
-        agentKind: 'claude',
         accounts: {
           app: { id: 'cli_old', secret: '${APP_SECRET}', tenant: 'feishu' },
         },
         access: { admins: ['ou-admin'] },
       }),
       'codex-dev': createDefaultProfileConfig({
-        agentKind: 'codex',
         accounts: {
           app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' },
         },
-        codex: { binaryPath: 'codex' },
+        omp: { binaryPath: '/usr/local/bin/omp' },
       }),
     },
   };
