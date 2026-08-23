@@ -29,6 +29,7 @@
   "scripts": {
     "dev": "tsup --watch",
     "run": "pnpm build && node bin/lark-bot-bridge.mjs run",
+    "prototype:reply": "tsup src/card/unified-reply.prototype.ts --format esm --platform node --out-dir node_modules/.cache/lark-bot-bridge-reply-prototype && node node_modules/.cache/lark-bot-bridge-reply-prototype/unified-reply.prototype.js",
     "start": "pnpm build && node bin/lark-bot-bridge.mjs start",
     "build:web": "vite build web",
     "build": "pnpm build:web && tsup",
