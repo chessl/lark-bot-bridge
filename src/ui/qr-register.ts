@@ -3,8 +3,8 @@ import { registerApp } from '@larksuite/channel';
 import { resolveAppPaths } from '../config/app-paths';
 import { loadRootConfig } from '../config/profile-store';
 import type { TenantBrand } from '../config/schema';
-import { validateAppCredentials } from '../utils/feishu-auth';
 import { log } from '../core/logger';
+import { validateAppCredentials } from '../utils/feishu-auth';
 import { HttpError } from './http';
 import { writeNewProfile } from './onboard';
 
@@ -20,8 +20,7 @@ function sanitizeProfileName(name: string): string {
       .trim()
       // Strip only chars unsafe as a path segment (matches normalizeProfileName);
       // keep Unicode letters so a non-ASCII bot name stays as-is.
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\u0000-\u001f\s/\\:*?"<>|]+/g, '-')
+      .replace(/[\p{Cc}\s/\\:*?"<>|]+/gu, '-')
       .replace(/^[-.]+|[-.]+$/g, '')
       .slice(0, 40)
   );

@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { saveRootConfig } from '../../../src/config/profile-store';
-import { materializeEnvSecretForService, resolveProfileRuntime } from '../../../src/runtime/profile-runtime';
+import {
+  materializeEnvSecretForService,
+  resolveProfileRuntime,
+} from '../../../src/runtime/profile-runtime';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
 
 const auth = vi.hoisted(() => ({
@@ -50,7 +53,7 @@ describe('OMP profile runtime resolver', () => {
       const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8'));
 
       expect(runtime.profile).toBe('work');
-      expect(runtime.profileConfig.omp.binaryPath).toBe(await realpath(binaryPath));
+      expect(runtime.profileConfig.omp.binaryPath).toBe(binaryPath);
       expect(runtime.profileConfig.workspaces.default).toBe(await realpath(workspace));
       expect(saved.activeProfile).toBe('work');
       expect(saved.profiles.work).not.toHaveProperty('agentKind');

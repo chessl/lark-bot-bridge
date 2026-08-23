@@ -126,10 +126,7 @@ describe('agent preflight diagnostics', () => {
       ['agent-binary-not-readable', '✗ 本地 Oh My Pi 二进制不可读取。'],
       ['agent-version-check-spawn-failed', '✗ 本地 Oh My Pi 不可用：无法执行 `omp --version`。'],
       ['agent-version-check-timeout', '✗ 本地 Oh My Pi 不可用：`omp --version` 超时未返回。'],
-      [
-        'agent-version-check-nonzero-exit',
-        '✗ 本地 Oh My Pi 不可用：`omp --version` 退出码为 42。',
-      ],
+      ['agent-version-check-nonzero-exit', '✗ 本地 Oh My Pi 不可用：`omp --version` 退出码为 42。'],
       [
         'agent-version-check-empty-output',
         '✗ 本地 Oh My Pi 不可用：`omp --version` 没有返回版本信息。',

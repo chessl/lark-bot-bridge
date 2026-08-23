@@ -9,9 +9,7 @@ import {
 
 describe('OMP model selection', () => {
   it('offers the OMP default sentinel', () => {
-    expect(supportedModels()).toEqual([
-      { value: DEFAULT_MODEL, label: '跟随 OMP 默认（不指定）' },
-    ]);
+    expect(supportedModels()).toEqual([{ value: DEFAULT_MODEL, label: '跟随 OMP 默认（不指定）' }]);
   });
 
   it('preserves explicit OMP model ids and omits the default flag', () => {

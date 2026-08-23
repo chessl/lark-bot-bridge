@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  type ProcessEntry,
   readRegistry,
   register,
   unregister,
-  type ProcessEntry,
 } from '../../../src/runtime/registry';
 
 const roots: string[] = [];
@@ -46,9 +46,7 @@ describe('process registry', () => {
     const root = await makeRoot();
     const registryFile = join(root, 'registry', 'processes.json');
     await writeJson(registryFile, {
-      entries: [
-        entry({ id: 'dead', pid: 999_999_999, profileName: 'work' }),
-      ],
+      entries: [entry({ id: 'dead', pid: 999_999_999, profileName: 'work' })],
     });
 
     const registered = await register({

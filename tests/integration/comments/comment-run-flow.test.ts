@@ -107,7 +107,6 @@ describe('comment run flow', () => {
     ).toMatchObject({ sessionId: 'session-three' });
   });
 
-
   it('keeps replying when typing reaction add fails', async () => {
     const h = await createHarness({ reactionFails: true });
 

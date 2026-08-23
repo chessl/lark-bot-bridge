@@ -42,10 +42,7 @@ beforeEach(async () => {
   // personal (cli_a), work (cli_b), dup (cli_b — same app as work).
   await mkdir(join(root, 'profiles', 'personal'), { recursive: true });
   await saveRootConfig(
-    createRootConfig(
-      'personal',
-      createDefaultProfileConfig({ accounts: { app: app('cli_a') } }),
-    ),
+    createRootConfig('personal', createDefaultProfileConfig({ accounts: { app: app('cli_a') } })),
     configPath,
   );
   const rc = (await loadRootConfig(configPath))!;

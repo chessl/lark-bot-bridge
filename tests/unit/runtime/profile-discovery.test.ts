@@ -52,7 +52,6 @@ describe('profile discovery', () => {
     expect(profiles[0]).not.toHaveProperty('agentKind');
   });
 
-
   it('rejects a missing active profile', async () => {
     const rootDir = await root();
     await writeRootConfig(rootDir, {

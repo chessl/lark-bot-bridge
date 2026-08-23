@@ -100,7 +100,7 @@ describe('/status and /doctor diagnostics', () => {
     const opts = h.agent.runOptions[0]!;
     await expect(realpath(h.tmp.workspace)).resolves.toBe(opts.cwd);
     expect(opts.sessionId).toBeUndefined();
-    expect(opts.images).toBeUndefined();
+    expect(opts.images).toEqual([]);
     expect(opts.prompt).toContain('OK');
     const output = lastStreamCardJson(h.channel);
     expect(output).toContain('self-check');
@@ -173,14 +173,14 @@ describe('/status and /doctor diagnostics', () => {
     release();
     expect(h.agent.runOptions).toHaveLength(0);
     expect(lastMarkdownOrText(h.channel)).toContain('pool-full');
-    expect(lastMarkdownOrText(h.channel)).toContain('policy check: ok permission=plan');
+    expect(lastMarkdownOrText(h.channel)).toContain('policy check: ok access=full');
   });
 
   it('reports startup and non-capacity admission failures as failed', async () => {
     const startup = await createHarness({ configuredWorkspace: true, startupFailure: true });
     await expect(startup.run('/doctor')).resolves.toBe(true);
     expect(lastMarkdownOrText(startup.channel)).toContain('agent echo check: failed');
-    expect(lastMarkdownOrText(startup.channel)).toContain('policy check: ok permission=plan');
+    expect(lastMarkdownOrText(startup.channel)).toContain('policy check: ok access=full');
 
     const duplicate = await createHarness({ configuredWorkspace: true });
     const active = await duplicate.scopedRuns.start({
@@ -198,7 +198,7 @@ describe('/status and /doctor diagnostics', () => {
 
     await expect(duplicate.run('/doctor')).resolves.toBe(true);
     expect(lastMarkdownOrText(duplicate.channel)).toContain('agent echo check: failed');
-    expect(lastMarkdownOrText(duplicate.channel)).toContain('policy check: ok permission=plan');
+    expect(lastMarkdownOrText(duplicate.channel)).toContain('policy check: ok access=full');
     await active.run.stop();
   });
 

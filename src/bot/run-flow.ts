@@ -227,9 +227,7 @@ export class ScopedRuns {
         sessionId,
         model: requestedModel,
         images: policy.attachments
-          .filter(
-            (attachment) => attachment.kind === 'image' && attachment.decision === 'accepted',
-          )
+          .filter((attachment) => attachment.kind === 'image' && attachment.decision === 'accepted')
           .map((attachment) => attachment.path)
           .filter((path): path is string => Boolean(path)),
         stopGraceMs: this.stopGraceMs?.(),

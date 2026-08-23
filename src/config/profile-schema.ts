@@ -1,6 +1,5 @@
 import type { AppCredentials, AppPreferences, MessageReplyMode, SecretsConfig } from './schema';
 
-
 export interface ProfileAccess {
   allowedUsers: string[];
   allowedChats: string[];
@@ -14,7 +13,6 @@ export interface ProfileAccess {
    */
   chatRequireMention?: Record<string, boolean>;
 }
-
 
 export interface OmpConfig {
   binaryPath: string;
@@ -244,7 +242,6 @@ function normalizeWorkspaces(
     typeof input?.default === 'string' && input.default.trim() ? input.default.trim() : undefined;
   return defaultWorkspace ? { default: defaultWorkspace } : {};
 }
-
 
 function normalizeOmp(input: OmpConfig): OmpConfig {
   if (typeof input.binaryPath !== 'string' || !input.binaryPath.trim()) {

@@ -27,9 +27,9 @@ describe('OMP profile schema', () => {
   });
 
   it('rejects an empty OMP binary path', () => {
-    expect(() =>
-      normalizeProfileConfig({ accounts: { app }, omp: { binaryPath: ' ' } }),
-    ).toThrow(/binaryPath/);
+    expect(() => normalizeProfileConfig({ accounts: { app }, omp: { binaryPath: ' ' } })).toThrow(
+      /binaryPath/,
+    );
   });
 
   it('keeps supported message reply preferences', () => {

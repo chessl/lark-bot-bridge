@@ -6,9 +6,7 @@ export interface ModelOption {
   label: string;
 }
 
-const OMP_MODELS: ModelOption[] = [
-  { value: DEFAULT_MODEL, label: '跟随 OMP 默认（不指定）' },
-];
+const OMP_MODELS: ModelOption[] = [{ value: DEFAULT_MODEL, label: '跟随 OMP 默认（不指定）' }];
 
 export function supportedModels(): ModelOption[] {
   return OMP_MODELS;

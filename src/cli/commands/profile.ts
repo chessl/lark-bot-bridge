@@ -87,11 +87,9 @@ function formatProfileListRow(
   row: { active: string; profile: string; status: string },
   widths: { active: number; profile: number },
 ): string {
-  return [
-    row.active.padEnd(widths.active),
-    row.profile.padEnd(widths.profile),
-    row.status,
-  ].join('  ');
+  return [row.active.padEnd(widths.active), row.profile.padEnd(widths.profile), row.status].join(
+    '  ',
+  );
 }
 
 export async function runProfileCreate(

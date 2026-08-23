@@ -61,9 +61,7 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
         stopPolling();
         // App created — prefill the profile name from the scanned app's name.
         setBotName(s.botName ?? "");
-        setProfileName(
-          s.suggestedProfile || uniqueName("omp", naming.current.existing),
-        );
+        setProfileName(s.suggestedProfile || uniqueName("omp", naming.current.existing));
         setPhase("confirm");
       } else if (s.status === "error") {
         stopPolling();

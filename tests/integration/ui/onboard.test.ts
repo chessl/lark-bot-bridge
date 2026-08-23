@@ -39,9 +39,9 @@ describe('writeNewProfile', () => {
 
     expect((await writeNewProfile({ ...base, appId: 'cli_a' }, root)).profile).toBe('personal');
     await expect(writeNewProfile({ ...base, appId: 'cli_b' }, root)).rejects.toThrow(/已存在/);
-    expect((await loadRootConfig(join(root, 'config.json')))?.profiles.personal?.accounts.app.id).toBe(
-      'cli_a',
-    );
+    expect(
+      (await loadRootConfig(join(root, 'config.json')))?.profiles.personal?.accounts.app.id,
+    ).toBe('cli_a');
 
     expect(
       (await writeNewProfile({ ...base, profile: 'work', appId: 'cli_b' }, root)).profile,
@@ -72,10 +72,7 @@ describe('writeNewProfile', () => {
   it('rejects a path-unsafe profile name with a clear 400', async () => {
     const root = await tmpRoot();
     await expect(
-      writeNewProfile(
-        { profile: 'a/b', appId: 'cli_x', appSecret: 's', tenant: 'feishu' },
-        root,
-      ),
+      writeNewProfile({ profile: 'a/b', appId: 'cli_x', appSecret: 's', tenant: 'feishu' }, root),
     ).rejects.toMatchObject({ status: 400 });
   });
 });

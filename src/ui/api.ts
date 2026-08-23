@@ -32,6 +32,7 @@ import {
   logoutUser,
   searchUserChats,
   startDeviceLogin,
+  type UserChatsPage,
 } from '../lark-native/user-im';
 import { isMeetingNo } from '../meeting/api';
 import {
@@ -523,7 +524,7 @@ export async function userChatsView(
   opts: { query?: string; pageToken?: string } = {},
 ): Promise<{ chats: UserChatView[]; nextPageToken?: string; botKnown: boolean }> {
   const query = (opts.query ?? '').trim();
-  let page;
+  let page: UserChatsPage;
   try {
     page = query
       ? await searchUserChats({ profile, rootDir }, { query, pageToken: opts.pageToken })

@@ -58,9 +58,7 @@ describe('OMP run policy', () => {
     expect(
       evaluateRunPolicy(
         input({
-          attachments: [
-            { kind: 'file', requiredness: 'required', decision: 'rejected' },
-          ],
+          attachments: [{ kind: 'file', requiredness: 'required', decision: 'rejected' }],
         }),
       ),
     ).toMatchObject({ ok: false, rejectReason: { code: 'required-attachment-rejected' } });

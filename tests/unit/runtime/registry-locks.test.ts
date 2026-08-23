@@ -5,11 +5,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import { runtimeLockMetaFile, withProfileAndAppLocks } from '../../../src/runtime/locks';
 import {
+  type ProcessEntry,
   readRegistry,
   register,
   sameAppLiveOthers,
   unregisterSync,
-  type ProcessEntry,
 } from '../../../src/runtime/registry';
 
 const roots: string[] = [];

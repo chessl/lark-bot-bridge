@@ -61,7 +61,7 @@ describe('profile create', () => {
       const saved = JSON.parse(savedText) as RootConfig;
       const appPaths = resolveAppPaths({ rootDir: root, profile: 'work' });
       expect(saved.activeProfile).toBe('personal');
-      expect(saved.profiles.work?.omp.binaryPath).toBe(await realpath(binaryPath));
+      expect(saved.profiles.work?.omp.binaryPath).toBe(binaryPath);
       expect(saved.profiles.work?.workspaces.default).toBe(await realpath(workspace));
       expect(savedText).not.toContain('manual-secret');
       await expect(getSecret(secretKeyForApp('cli_work'), appPaths)).resolves.toBe('manual-secret');

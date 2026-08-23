@@ -84,10 +84,7 @@ beforeEach(async () => {
   configPath = join(rootDir, 'config.json');
   await mkdir(join(rootDir, 'profiles', 'personal'), { recursive: true });
   await saveRootConfig(
-    createRootConfig(
-      'personal',
-      createDefaultProfileConfig({ accounts: { app } }),
-    ),
+    createRootConfig('personal', createDefaultProfileConfig({ accounts: { app } })),
     configPath,
   );
   // second profile 'work' on disk (offline)

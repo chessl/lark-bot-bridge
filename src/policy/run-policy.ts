@@ -120,6 +120,9 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
   };
 }
 
-function reject(code: RunPolicyReject['rejectReason']['code'], userVisible: string): RunPolicyReject {
+function reject(
+  code: RunPolicyReject['rejectReason']['code'],
+  userVisible: string,
+): RunPolicyReject {
   return { ok: false, rejectReason: { code, userVisible } };
 }

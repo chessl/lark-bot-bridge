@@ -2,10 +2,10 @@ import { join } from 'node:path';
 import type { CommentEvent, LarkChannel } from '@larksuite/channel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
-  OmpRunEngine,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
+  OmpRunEngine,
 } from '../../../src/agent/types.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { commentTokenDigest } from '../../../src/bot/comment-resource.js';

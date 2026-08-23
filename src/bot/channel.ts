@@ -1242,7 +1242,6 @@ function shouldOpenProgressStream(state: RunState): boolean {
   return renderText({ ...state, footer: null }).trim() !== '';
 }
 
-
 /**
  * Backstop for a progress stream that was opened on real content and still
  * ended up empty — e.g. `/config` hiding tool calls mid-run, which retroactively

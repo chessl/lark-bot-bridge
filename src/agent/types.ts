@@ -1,7 +1,6 @@
 import type { NativeMcpEndpoint } from './native-tools';
 import type { AgentAvailability } from './preflight';
 
-
 export type AgentEvent =
   | { type: 'system'; sessionId?: string; cwd?: string; model?: string }
   | { type: 'text'; delta: string }
@@ -23,7 +22,6 @@ export type AgentEvent =
       terminationReason: 'normal' | 'interrupted' | 'timeout';
     }
   | { type: 'error'; message: string; terminationReason: 'failed' | 'interrupted' | 'timeout' };
-
 
 export interface AgentRunOptions {
   runId: string;

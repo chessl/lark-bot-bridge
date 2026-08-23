@@ -42,9 +42,9 @@ describe('policy fingerprint', () => {
         admins: ['c', 'd'],
       }),
     );
-    expect(
-      resourceScopeDigest({ source: 'comment', resourceBindings: ['b', 'a'] }),
-    ).toBe(resourceScopeDigest({ source: 'comment', resourceBindings: ['a', 'b'] }));
+    expect(resourceScopeDigest({ source: 'comment', resourceBindings: ['b', 'a'] })).toBe(
+      resourceScopeDigest({ source: 'comment', resourceBindings: ['a', 'b'] }),
+    );
   });
 
   it('fingerprints attachment decisions without local file details', () => {

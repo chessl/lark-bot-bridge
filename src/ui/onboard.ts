@@ -25,9 +25,7 @@ export interface OnboardState {
 export async function onboardState(rootDir?: string): Promise<OnboardState> {
   const appPaths = resolveAppPaths({ rootDir });
   const root = await loadRootConfig(appPaths.configFile);
-  const ompAvailable = await resolveExecutablePath(
-    process.env.LARK_CHANNEL_OMP_BIN ?? 'omp',
-  ).then(
+  const ompAvailable = await resolveExecutablePath(process.env.LARK_CHANNEL_OMP_BIN ?? 'omp').then(
     () => true,
     () => false,
   );

@@ -150,7 +150,6 @@ describe('OmpAdapter process contract', () => {
       else process.env.PI_CODING_AGENT_DIR = previous;
     }
   });
-
 });
 
 async function createFakeOmp(): Promise<FakeOmp> {

@@ -128,7 +128,7 @@ describe('cloud-doc comment delivery', () => {
   it.each([
     {
       events: [{ type: 'error', message: 'boom', terminationReason: 'failed' }],
-      reply: '⚠️ Oh My Pi 报错：boom',
+      reply: '⚠️ OMP 报错：boom',
     },
     {
       events: [{ type: 'done', terminationReason: 'normal' }],

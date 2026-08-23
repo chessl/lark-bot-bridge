@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -136,7 +136,7 @@ describe('profile retention and export', () => {
     }
     const config = await readRoot(root);
     expect(config.activeProfile).toBe('omp');
-    expect(config.profiles.omp?.omp.binaryPath).toBe(await realpath(omp));
+    expect(config.profiles.omp?.omp.binaryPath).toBe(omp);
   });
 
   it('adds a suffix when archive names collide', async () => {

@@ -155,11 +155,11 @@ const MAX_LOG_STRING_CHARS = 4096;
 const CREDENTIAL_JSON_FIELD_RE =
   /("(?:secret|app_secret|appSecret|token|access_token|tenant_access_token|app_access_token|authorization)"\s*:\s*")[^"]*(")/gi;
 const ESCAPED_CREDENTIAL_JSON_FIELD_RE =
-  /(\\\"(?:secret|app_secret|appSecret|token|access_token|tenant_access_token|app_access_token|authorization)\\\"\s*:\s*\\\")[^\\]*(\\\")/gi;
+  /(\\"(?:secret|app_secret|appSecret|token|access_token|tenant_access_token|app_access_token|authorization)\\"\s*:\s*\\")[^\\]*(\\")/gi;
 const RESOURCE_JSON_FIELD_RE =
   /("(?:fileKey|sourceFileKey|file_key|source_file_key|imageKey|image_key|mediaKey|media_key)"\s*:\s*")[^"]*(")/gi;
 const ESCAPED_RESOURCE_JSON_FIELD_RE =
-  /(\\\"(?:fileKey|sourceFileKey|file_key|source_file_key|imageKey|image_key|mediaKey|media_key)\\\"\s*:\s*\\\")[^\\]*(\\\")/gi;
+  /(\\"(?:fileKey|sourceFileKey|file_key|source_file_key|imageKey|image_key|mediaKey|media_key)\\"\s*:\s*\\")[^\\]*(\\")/gi;
 
 interface SanitizeOptions {
   redactIds: boolean;
