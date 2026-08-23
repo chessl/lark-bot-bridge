@@ -433,7 +433,7 @@ describe('P2P OMP Reply', () => {
     expect(JSON.stringify(elements.at(-1))).toContain('完成');
   });
 
-  it('retains newest bounded progress while preserving cumulative totals', async () => {
+  it('captures the 12/13 Reasoning and 20/21 Tools boundaries with cumulative totals', async () => {
     const events: FakeAgentEvents = [
       ...Array.from({ length: 13 }, (_, index) => ({
         type: 'reasoning' as const,
@@ -449,33 +449,127 @@ describe('P2P OMP Reply', () => {
       })),
       { type: 'done', terminationReason: 'normal' },
     ];
-    const historyGate = controllableEventGate(35);
-    const h = await createHarness({ events, eventGates: [historyGate] });
+    const reasoningBoundary = controllableEventGate(12);
+    const toolsBoundary = controllableEventGate(34);
+    const overflowBoundary = controllableEventGate(35);
+    const h = await createHarness({
+      events,
+      eventGates: [reasoningBoundary, toolsBoundary, overflowBoundary],
+    });
     await startTestBridge(h);
     vi.useFakeTimers();
 
     void h.channel.handlers.message?.(message('om_bounded_progress', 'run'));
     await vi.waitFor(() => expect(h.channel.operations).toContain('omp:consume'));
-    await historyGate.reachedPromise;
+    await reasoningBoundary.reachedPromise;
     await vi.runAllTimersAsync();
-    expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce();
-    historyGate.resolve();
+    const twelve = h.channel.updates.at(-1)?.card;
+
+    reasoningBoundary.resolve();
+    await toolsBoundary.reachedPromise;
+    await vi.runAllTimersAsync();
+    const twenty = h.channel.updates.at(-1)?.card;
+
+    toolsBoundary.resolve();
+    await overflowBoundary.reachedPromise;
+    await vi.runAllTimersAsync();
+    const overflow = h.channel.updates.at(-1)?.card;
+
+    expect(JSON.stringify(twelve)).toContain('REASON\\\\_01\\\\_END');
+    expect(JSON.stringify(twelve)).toContain('REASON\\\\_12\\\\_END');
+    expect(JSON.stringify(twelve)).not.toContain('REASON\\\\_13\\\\_END');
+    expect(JSON.stringify(twelve)).toContain('中间过程（12 条）');
+
+    const twentyOutbound = JSON.stringify(twenty);
+    expect(twentyOutbound).not.toContain('REASON\\\\_01\\\\_END');
+    expect(twentyOutbound).not.toContain('REASON\\\\_02\\\\_END');
+    expect(twentyOutbound).toContain('REASON\\\\_03\\\\_END');
+    expect(twentyOutbound).toContain('中间过程（14 条）');
+    expect(twentyOutbound).toContain(`${'X'.repeat(599)}…`);
+    expect(twentyOutbound.match(/运行操作/g)).toHaveLength(19);
+    expect(twentyOutbound).toContain('读取信息');
+    expect(twentyOutbound).toContain('调用工具 20 次');
+
+    const overflowOutbound = JSON.stringify(overflow);
+    expect(overflowOutbound).not.toContain('读取信息');
+    expect(overflowOutbound.match(/运行操作/g)).toHaveLength(20);
+    expect(overflowOutbound).toContain('调用工具 21 次');
+    for (const card of [twelve, twenty, overflow]) {
+      expect(totalCardElements(card)).toBeLessThanOrEqual(200);
+      expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(30 * 1024);
+    }
+
+    overflowBoundary.resolve();
     await vi.waitFor(() =>
       expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledOnce(),
     );
+  });
 
-    const running = h.channel.updates.findLast((update) =>
-      JSON.stringify(update.card).includes('"content":"运行中"'),
-    )?.card;
-    const outbound = JSON.stringify(running);
-    expect(outbound).not.toContain('REASON\\\\_01\\\\_END');
-    expect(outbound).not.toContain('REASON\\\\_02\\\\_END');
-    expect(outbound).toContain('REASON\\\\_03\\\\_END');
-    expect(outbound).toContain('中间过程（14 条）');
-    expect(outbound).toContain(`${'X'.repeat(599)}…`);
-    expect(outbound).not.toContain('读取信息');
-    expect(outbound.match(/运行操作/g)).toHaveLength(20);
-    expect(outbound).toContain('调用工具 21 次');
+  it('captures an exact 30 KB terminal card with metrics, marker, and one IM Reply', async () => {
+    const h = await createHarness({
+      wallNow: clock(1_000_500),
+      monoNow: clock(100, 2_600, 3_850, 125_100),
+      events: [
+        { type: 'prompt_sent' },
+        {
+          type: 'system',
+          modelId: 'gpt-budget',
+          effort: 'high',
+          contextPercent: 7.25,
+        },
+        { type: 'text_started' },
+        { type: 'tool_use', id: 'tool-budget', name: 'read', input: {} },
+        { type: 'final_text', content: `界🚀${'x'.repeat(40_000)}` },
+        {
+          type: 'usage',
+          inputTokens: 900,
+          cacheReadTokens: 50,
+          cacheWriteTokens: 25,
+          outputTokens: 999,
+        },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_budget', 'run', 1_000_000));
+    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+
+    const finalCard = h.channel.updates.at(-1)?.card;
+    const outbound = JSON.stringify(finalCard);
+    const metrics = cardElements(finalCard).filter(
+      (element) => 'element_id' in element && element.element_id === 'metrics',
+    );
+    const answer = cardElements(finalCard).find(
+      (element) => 'element_id' in element && element.element_id === 'answer',
+    );
+
+    expect(Buffer.byteLength(outbound)).toBe(30 * 1024);
+    expect(answer).toMatchObject({
+      content: expect.stringContaining('界🚀'),
+    });
+    expect(answer).toMatchObject({
+      content: expect.stringContaining('内容过长，已截断'),
+    });
+    expect(JSON.stringify(answer)).not.toContain('�');
+    expect(metrics).toHaveLength(1);
+    for (const metric of [
+      'gpt-budget',
+      'effort high',
+      'ctx 7.3%',
+      '总耗时 2m5s',
+      '飞书到达 ≈0.5s',
+      '前置 2.5s',
+      '首字 1.3s',
+      'OMP 2m3s',
+      '输入 975',
+      '输出 999',
+      '工具 1',
+    ]) {
+      expect(JSON.stringify(metrics)).toContain(metric);
+    }
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+    expect(h.channel.sent).toHaveLength(0);
   });
 
   it.each(ambiguousInitialReplies)(
@@ -1311,6 +1405,24 @@ function cardElements(card: object | undefined): object[] {
   return body.elements.filter(
     (element): element is object => element !== null && typeof element === 'object',
   );
+}
+
+function totalCardElements(card: object | undefined): number {
+  if (!card) return 0;
+  function nested(value: unknown): number {
+    if (!value || typeof value !== 'object') return 0;
+    let count = 0;
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'elements' && Array.isArray(child)) {
+        count += child.length;
+        for (const element of child) count += nested(element);
+      } else {
+        count += nested(child);
+      }
+    }
+    return count;
+  }
+  return ('header' in card ? 1 : 0) + nested(card);
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void> {

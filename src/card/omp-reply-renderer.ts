@@ -1,10 +1,44 @@
 import { deepMaskEmails } from './mask-email';
 import type { RunState, ToolEntry } from './run-state';
 
-export function renderOmpReplyCard(state: RunState): object {
+const MAX_CARD_BYTES = 30 * 1024;
+const MAX_CARD_ELEMENTS = 200;
+const TRUNCATION_MARKER = '内容过长，已截断';
+
+type RenderOptions = Readonly<{
+  streamingMode: boolean;
+  summary: string;
+}>;
+
+
+export function renderOmpReplyCard(state: RunState, options?: RenderOptions): object {
+  let reasoning = state.reasoningEntries ?? [];
+  let tools = state.blocks.flatMap((block) => (block.kind === 'tool' ? [block.tool] : []));
+  const finalText = finalReply(state);
+  let card = buildOmpReplyCard(state, reasoning, tools, finalText, options);
+
+  while (!withinCardBudget(card) && reasoning.length > 0) {
+    reasoning = reasoning.slice(1);
+    card = buildOmpReplyCard(state, reasoning, tools, finalText, options);
+  }
+  while (!withinCardBudget(card) && tools.length > 0) {
+    tools = tools.slice(1);
+    card = buildOmpReplyCard(state, reasoning, tools, finalText, options);
+  }
+  if (!withinCardBudget(card) && state.terminal === 'done') {
+    card = truncateFinalReply(state, reasoning, tools, finalText, options);
+  }
+  return card;
+}
+
+function buildOmpReplyCard(
+  state: RunState,
+  reasoning: readonly string[],
+  tools: readonly ToolEntry[],
+  finalText: string,
+  options: RenderOptions | undefined,
+): object {
   const running = state.terminal === 'running';
-  const reasoning = state.reasoningEntries ?? [];
-  const tools = state.blocks.flatMap((block) => (block.kind === 'tool' ? [block.tool] : []));
   const activity = state.activityStack?.at(-1)?.label;
 
   return deepMaskEmails({
@@ -12,8 +46,8 @@ export function renderOmpReplyCard(state: RunState): object {
     config: {
       update_multi: true,
       width_mode: 'default',
-      streaming_mode: running,
-      summary: { content: summaryFor(state) },
+      streaming_mode: options?.streamingMode ?? running,
+      summary: { content: options?.summary ?? summaryFor(state) },
     },
     header: {
       title: { tag: 'plain_text', content: running ? 'OMP 正在处理' : 'OMP Reply' },
@@ -49,7 +83,7 @@ export function renderOmpReplyCard(state: RunState): object {
           element_id: 'answer',
           content: running
             ? "**正在完成请求**\n<font color='grey'>Final Reply 会在确认后原位出现。</font>"
-            : `**${finalReply(state)}**`,
+            : `**${finalText}**`,
           text_size: 'body',
         },
         ...metricsElements(state),
@@ -71,6 +105,92 @@ export function renderOmpReplyCard(state: RunState): object {
       ],
     },
   });
+}
+
+function truncateFinalReply(
+  state: RunState,
+  reasoning: readonly string[],
+  tools: readonly ToolEntry[],
+  finalText: string,
+  options: RenderOptions | undefined,
+): object {
+  let lower = 0;
+  let upper = finalText.length;
+  let best = buildOmpReplyCard(state, reasoning, tools, TRUNCATION_MARKER, options);
+
+  while (lower < upper) {
+    let middle = codePointBoundary(finalText, Math.floor((lower + upper + 1) / 2));
+    if (middle <= lower) middle = upper;
+    const candidate = buildOmpReplyCard(
+      state,
+      reasoning,
+      tools,
+      `${finalText.slice(0, middle)}${TRUNCATION_MARKER}`,
+      options,
+    );
+    if (withinCardBudget(candidate)) {
+      lower = middle;
+      best = candidate;
+    } else {
+      upper = previousCodePointBoundary(finalText, middle);
+    }
+  }
+  return best;
+}
+
+function withinCardBudget(card: object): boolean {
+  return (
+    Buffer.byteLength(JSON.stringify(card)) <= MAX_CARD_BYTES &&
+    countCardElements(card) <= MAX_CARD_ELEMENTS
+  );
+}
+
+function countCardElements(card: object): number {
+  return ('header' in card ? 1 : 0) + countNestedElements(card);
+}
+
+function countNestedElements(value: unknown): number {
+  if (!value || typeof value !== 'object') return 0;
+  let count = 0;
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'elements' && Array.isArray(child)) {
+      count += child.length;
+      for (const element of child) count += countNestedElements(element);
+    } else {
+      count += countNestedElements(child);
+    }
+  }
+  return count;
+}
+
+function codePointBoundary(value: string, index: number): number {
+  const previousCode = value.charCodeAt(index - 1);
+  const nextCode = value.charCodeAt(index);
+  return (
+    index > 0 &&
+    index < value.length &&
+    previousCode >= 0xd800 &&
+    previousCode <= 0xdbff &&
+    nextCode >= 0xdc00 &&
+    nextCode <= 0xdfff
+  )
+    ? index - 1
+    : index;
+}
+
+function previousCodePointBoundary(value: string, index: number): number {
+  const previous = index - 1;
+  const previousCode = value.charCodeAt(previous);
+  const precedingCode = value.charCodeAt(previous - 1);
+  return (
+    previous > 0 &&
+    previousCode >= 0xdc00 &&
+    previousCode <= 0xdfff &&
+    precedingCode >= 0xd800 &&
+    precedingCode <= 0xdbff
+  )
+    ? previous - 1
+    : previous;
 }
 
 export function renderOmpReplyMarkdown(state: RunState): string {

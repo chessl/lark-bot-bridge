@@ -917,15 +917,10 @@ function isClearRejection(error: unknown): boolean {
 }
 
 function renderManagedCard(state: RunState): object {
-  return {
-    ...renderOmpReplyCard(state),
-    config: {
-      update_multi: true,
-      width_mode: 'default',
-      streaming_mode: true,
-      summary: { content: summaryFor(state) },
-    },
-  };
+  return renderOmpReplyCard(state, {
+    streamingMode: true,
+    summary: summaryFor(state),
+  });
 }
 
 function summaryFor(state: RunState): string {

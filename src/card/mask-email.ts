@@ -22,7 +22,9 @@
 // handles (`user@localhost` — no dot). SSH remotes (`git@host.tld`) DO match
 // and get masked — intentional: the audit flags them as EMAIL_ADDRESS too, so
 // masking is what lets the message through at all.
-const EMAIL_RE = /([A-Za-z0-9._%+-]+)@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})/g;
+// Matching only the final local-part character avoids quadratic backtracking
+// on long card text; the replacement changes only the following `@`.
+const EMAIL_RE = /([A-Za-z0-9._%+-])@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})/g;
 
 /** Rewrite every email in `text` so the tenant audit won't flag it. */
 export function maskEmails(text: string): string {
