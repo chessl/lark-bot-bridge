@@ -22,7 +22,7 @@ import {
   markInterrupted,
   type RunMetricReceipt,
   type RunState,
-  reduce,
+  reduceWithClock,
 } from '../card/run-state';
 import { renderText } from '../card/text-renderer';
 import { type Controls, tryHandleCommand } from '../commands';
@@ -1515,7 +1515,7 @@ async function processAgentStream(
 
       const prevTerminal = state.terminal;
       const prevFooter = state.footer;
-      state = reduce(state, evt, monoNow);
+      state = reduceWithClock(state, evt, monoNow);
       if (state.footer !== prevFooter || state.terminal !== prevTerminal) {
         log.info('card', 'transition', { footer: state.footer, terminal: state.terminal });
       }

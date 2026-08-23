@@ -5,6 +5,7 @@ const MAX_REASONING = 12;
 const MAX_REASONING_CHARS = 600;
 const MAX_TOOLS = 20;
 const MAX_TOOL_LABEL_CHARS = 80;
+const DEFAULT_MONO_NOW = performance.now.bind(performance);
 
 export type ToolStatus = 'running' | 'done' | 'error' | 'unfinished';
 export type ToolAction = '读取' | '搜索' | '执行' | '修改' | '协作';
@@ -84,10 +85,14 @@ export function createRunState(receipt?: RunMetricReceipt): RunState {
 
 export const initialState: RunState = createRunState();
 
-export function reduce(
+export function reduce(state: RunState, evt: AgentEvent): RunState {
+  return reduceWithClock(state, evt, DEFAULT_MONO_NOW);
+}
+
+export function reduceWithClock(
   state: RunState,
   evt: AgentEvent,
-  monoNow: () => number = () => performance.now(),
+  monoNow: () => number,
 ): RunState {
   if (state.terminal !== 'running') {
     return ignoreEvent(
