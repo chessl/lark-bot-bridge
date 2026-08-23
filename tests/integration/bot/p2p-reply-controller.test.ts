@@ -3,6 +3,7 @@ import type { NormalizedMessage } from '@larksuite/channel';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
+import type { AgentEvent } from '../../../src/agent/types.js';
 import type { Controls } from '../../../src/commands/index.js';
 import {
   createDefaultProfileConfig,
@@ -533,9 +534,14 @@ describe('P2P OMP Reply', () => {
       events: [
         { type: 'reasoning', content: 'OLDERPROJECTION' },
         { type: 'reasoning', content: 'LATESTPROJECTIONSENTINEL' },
-        { type: 'tool_result', id: 'missing-tool', output: 'IGNORED_OUTPUT' },
+        {
+          type: 'tool_result',
+          id: 'missing-tool',
+          output: 'IGNORED_OUTPUT',
+          isError: false,
+        },
         { type: 'done', terminationReason: 'normal' },
-      ] satisfies FakeAgentEvents,
+      ] satisfies readonly AgentEvent[],
       eventGates: [burstGate, identicalGate],
     });
     await startTestBridge(h);
@@ -572,7 +578,7 @@ describe('P2P OMP Reply', () => {
       events: [
         { type: 'reasoning', content: 'RUNNINGPROJECTION' },
         { type: 'done', terminationReason: 'normal' },
-      ] satisfies FakeAgentEvents,
+      ] satisfies readonly AgentEvent[],
       eventGates: [terminalGate],
       update: async () => {
         updateAttempt++;
