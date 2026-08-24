@@ -875,7 +875,6 @@ function makeProjection(card: object): Projection {
   return { card, serialized: JSON.stringify(card) };
 }
 
-
 function isClearRejection(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const code = 'code' in error ? error.code : undefined;
