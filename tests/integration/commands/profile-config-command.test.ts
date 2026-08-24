@@ -284,11 +284,10 @@ async function createHarness(
     recallMessage: vi.fn(async () => {}),
   });
   let nextCardUpdate = Promise.withResolvers<void>();
-  const updateCard = channel.rawClient.cardkit.v1.card.update;
-  channel.rawClient.cardkit.v1.card.update = async (params) => {
-    const result = await updateCard(params);
+  const updateCard = channel.updateCardById.bind(channel);
+  channel.updateCardById = async (cardId, cardJson, sequence) => {
+    await updateCard(cardId, cardJson, sequence);
     nextCardUpdate.resolve();
-    return result;
   };
   const sessions = new SessionStore(appPaths.sessionsFile);
   const workspaces = new WorkspaceStore(appPaths.workspacesFile);
