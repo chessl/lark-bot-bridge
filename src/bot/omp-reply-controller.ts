@@ -13,12 +13,13 @@ import {
   type Terminal,
 } from '../card/run-state';
 import { log } from '../core/logger';
-import type {
-  ImReplyPlan,
-  ImReplyPolicy,
-  ImReplyReason,
-  ImReplyTarget,
-  ImSenderOwnershipReason,
+import {
+  type ImReplyPlan,
+  type ImReplyPolicy,
+  type ImReplyReason,
+  type ImReplyTarget,
+  type ImSenderOwnershipReason,
+  substitutionMentionOpenIds,
 } from './im-invocation';
 import type {
   ActiveDelivery,
@@ -195,7 +196,7 @@ export class OmpReplyController {
     this.#projectionTimer = undefined;
     this.#latestProjection = undefined;
     const staticTerminal = makeProjection(renderOmpReplyCard(plan));
-    const degradedTerminal = hasReplyMention(plan)
+    const degradedTerminal = hasReplyMentions(plan)
       ? makeProjection(renderOmpReplyCard(plan, { streamingMode: false, mentionMode: 'plain' }))
       : undefined;
     logReplyMention('planned', plan, transport, mentionReason(plan));
@@ -232,7 +233,7 @@ export class OmpReplyController {
             ? JSON.stringify(renderOmpReplyMarkdownPost(plan, 'plain'))
             : undefined,
         );
-        if (markdown === 'mention_rejected' && hasReplyMention(plan)) {
+        if (markdown === 'mention_rejected' && hasReplyMentions(plan)) {
           logReplyMention('degraded', plan, transport, 'mention-rejected');
           const degraded = await this.commitReply(
             'markdown',
@@ -780,9 +781,7 @@ async function retryUnknownOperation(
         const plan = interruptedReplyPlan(entry.replyPolicy);
         logReplyMention('planned', plan, 'markdown', mentionReason(plan));
         const mentionMode =
-          attempt.result === 'mention_rejected' && plan.senderOwnership.kind === 'mention'
-            ? 'plain'
-            : 'mention';
+          attempt.result === 'mention_rejected' && hasReplyMentions(plan) ? 'plain' : 'mention';
         if (mentionMode === 'plain') {
           logReplyMention('degraded', plan, 'markdown', 'mention-rejected');
         }
@@ -799,7 +798,7 @@ async function retryUnknownOperation(
         attempt.result === 'mention_rejected' &&
         pending.terminal &&
         (pending.kind === 'update' || pending.kind === 'patch') &&
-        entry.replyPolicy.senderOwnership.kind === 'mention'
+        hasReplyMentions(interruptedReplyPlan(entry.replyPolicy))
       ) {
         const known = clearPending(entry, now, attempt.messageId);
         await journal.put(known);
@@ -910,7 +909,7 @@ async function recoverInterrupted(
       const known = clearPending({ ...entry, nextSequence: sequence + 1, pending }, now);
       await journal.put(known);
       if (update === 'mention_rejected') {
-        const degraded = plan.senderOwnership.kind === 'mention';
+        const degraded = hasReplyMentions(plan);
         if (degraded) {
           logReplyMention('degraded', plan, 'managed', 'mention-rejected');
         }
@@ -977,7 +976,7 @@ async function recoverInterruptedWithoutMessage(
   let pending = recoveryReplyOperation(plan, mode);
   let result = await submitRecoveryOperation(channel, journal, entry, pending);
   if (result === 'unknown') return;
-  if (result === 'mention_rejected' && mode === 'mention' && plan.senderOwnership.kind === 'mention') {
+  if (result === 'mention_rejected' && mode === 'mention' && hasReplyMentions(plan)) {
     mode = 'plain';
     logReplyMention('degraded', plan, 'markdown', 'mention-rejected');
     pending = recoveryReplyOperation(plan, mode);
@@ -1236,6 +1235,7 @@ function validateFinalPlan(plan: ImReplyPlan, progressPolicy: ImReplyPolicy): vo
   switch (plan.invocationKind) {
     case 'ordinary':
     case 'peer':
+    case 'substitution':
       break;
     default: {
       const exhaustive: never = plan.invocationKind;
@@ -1269,6 +1269,9 @@ function validateFinalPlan(plan: ImReplyPlan, progressPolicy: ImReplyPolicy): vo
       scope: plan.scope,
       target: plan.target,
       senderOwnership: plan.senderOwnership,
+      ...(plan.invocationKind === 'substitution'
+        ? { substitutionTargetOpenIds: plan.substitutionTargetOpenIds }
+        : {}),
     }) !== JSON.stringify(progressPolicy)
   ) {
     throw new Error('Final IM Reply policy differs from the frozen Progress Reply policy');
@@ -1279,9 +1282,10 @@ type ReplyMentionEvent = 'planned' | 'rendered' | 'degraded';
 type ReplyMentionReason =
   | 'verified-human-sender'
   | 'trusted-peer-alias'
+  | 'substitution-target'
+  | 'verified-human-sender-and-substitution-target'
   | 'mention-rejected'
   | ImSenderOwnershipReason;
-type ReplyRecoveryReason = 'interrupted-after-restart' | 'terminal-request-replayed';
 
 function interruptedReplyPlan(replyPolicy: ImReplyPolicy): ImReplyPlan {
   return {
@@ -1293,14 +1297,21 @@ function interruptedReplyPlan(replyPolicy: ImReplyPolicy): ImReplyPlan {
 
 function mentionReason(plan: ImReplyPlan): ReplyMentionReason {
   if (plan.peerActivation) return 'trusted-peer-alias';
-  return plan.senderOwnership.kind === 'mention'
-    ? 'verified-human-sender'
-    : plan.senderOwnership.reason;
+  const hasSender = plan.senderOwnership.kind === 'mention';
+  const hasTarget = substitutionMentionOpenIds(plan).length > 0;
+  if (hasSender && hasTarget) return 'verified-human-sender-and-substitution-target';
+  if (hasTarget) return 'substitution-target';
+  return hasSender ? 'verified-human-sender' : plan.senderOwnership.reason;
 }
 
-function hasReplyMention(plan: ImReplyPlan): boolean {
-  return plan.senderOwnership.kind === 'mention' || plan.peerActivation !== undefined;
+function hasReplyMentions(plan: ImReplyPlan): boolean {
+  return (
+    plan.senderOwnership.kind === 'mention' ||
+    plan.peerActivation !== undefined ||
+    substitutionMentionOpenIds(plan).length > 0
+  );
 }
+
 
 function logReplyMention(
   event: ReplyMentionEvent,
@@ -1313,6 +1324,10 @@ function logReplyMention(
     invocationKind: plan.invocationKind,
     transport,
     scope: plan.scope.kind,
+    mentionCount:
+      (plan.senderOwnership.kind === 'mention' ? 1 : 0) +
+      (plan.peerActivation ? 1 : 0) +
+      substitutionMentionOpenIds(plan).length,
   });
 }
 

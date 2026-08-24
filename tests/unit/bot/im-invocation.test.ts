@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createImInvocation,
   finalizeImReply,
+  substitutionMentionOpenIds,
   type ImConversationScope,
   type ImOrdinaryMessagePlan,
   planImMessage,
@@ -179,6 +180,190 @@ describe('IM message planning', () => {
       'duplicate-message',
     );
     expect(planImMessage({ ...base, mentionRequired: true }).reason).toBe('human-command');
+  });
+});
+
+describe('personal substitution planning', () => {
+  const substitution = { enabled: true, targetOpenIds: ['ou_target'] };
+
+  it('applies access, Command, and current-Bot priority before exact target matching', () => {
+    const targetMention = {
+      mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Display only', isBot: false }],
+      rawMentions: [{ id: { open_id: 'ou_target' } }],
+    };
+    const message = imMessage({
+      senderType: 'user',
+      rawSenderId: 'ou_sender',
+      ...targetMention,
+    });
+    const base = {
+      message,
+      scope: CHAT_SCOPE,
+      authorized: true,
+      duplicate: false,
+      mentionRequired: true,
+      recognizedCommand: false,
+      currentBotOpenId: 'ou_bot',
+      personalSubstitution: substitution,
+    };
+
+    expect(planImMessage({ ...base, authorized: false }).reason).toBe('access-denied');
+    expect(planImMessage({ ...base, recognizedCommand: true }).reason).toBe('human-command');
+    expect(planImMessage(base)).toMatchObject({
+      lane: 'substitution',
+      reason: 'personal-substitution',
+      targets: [{ openId: 'ou_target', displayAlias: 'Display only' }],
+    });
+
+    const currentBotMessage = imMessage({
+      senderType: 'user',
+      rawSenderId: 'ou_sender',
+      mentions: [
+        ...targetMention.mentions,
+        { key: '@_user_2', openId: 'ou_bot', name: 'Bridge', isBot: true },
+      ],
+      rawMentions: [
+        ...targetMention.rawMentions,
+        { id: { open_id: 'ou_bot' } },
+      ],
+    });
+    expect(planImMessage({ ...base, message: currentBotMessage })).toMatchObject({
+      lane: 'ordinary',
+      reason: 'ordinary-message',
+    });
+  });
+
+  it('requires matching raw and normalized human target identity and rejects Bot senders', () => {
+    const human = {
+      scope: CHAT_SCOPE,
+      authorized: true,
+      duplicate: false,
+      mentionRequired: false,
+      recognizedCommand: false,
+      currentBotOpenId: 'ou_bot',
+      personalSubstitution: substitution,
+    };
+    expect(
+      planImMessage({
+        ...human,
+        message: imMessage({
+          senderType: 'user',
+          rawSenderId: 'ou_sender',
+          mentions: [{ key: '@_user_1', openId: 'ou_other', name: 'Target', isBot: false }],
+          rawMentions: [{ id: { open_id: 'ou_other' } }],
+        }),
+      }),
+    ).toMatchObject({ lane: 'ordinary' });
+    expect(
+      planImMessage({
+        ...human,
+        message: imMessage({
+          senderType: 'user',
+          rawSenderId: 'ou_sender',
+          mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Target', isBot: true }],
+          rawMentions: [{ id: { open_id: 'ou_target' } }],
+        }),
+      }),
+    ).toMatchObject({ lane: 'drop', reason: 'contradictory-mention' });
+    expect(
+      planImMessage({
+        ...human,
+        message: imMessage({
+          senderId: 'ou_peer',
+          senderType: 'bot',
+          rawSenderId: 'ou_peer',
+          mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Target', isBot: false }],
+          rawMentions: [{ id: { open_id: 'ou_target' } }],
+        }),
+      }),
+    ).toMatchObject({ lane: 'drop', reason: 'bot-not-direct-mention' });
+  });
+});
+
+describe('personal substitution Invocation creation', () => {
+  it('freezes one display-only target while keeping its canonical ID out of Prompt', () => {
+    const config = { enabled: true, targetOpenIds: ['ou_target'] };
+    const plan = planImMessage({
+      message: imMessage({
+        senderType: 'user',
+        rawSenderId: 'ou_sender',
+        content: '请替 ou_target 回答',
+        mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Frozen label', isBot: false }],
+        rawMentions: [{ id: { open_id: 'ou_target' } }],
+      }),
+      scope: TOPIC_SCOPE,
+      authorized: true,
+      duplicate: false,
+      mentionRequired: true,
+      recognizedCommand: false,
+      personalSubstitution: config,
+    });
+    if (plan.lane !== 'substitution') {
+      throw new Error(`expected substitution plan, got ${plan.lane}`);
+    }
+    config.targetOpenIds[0] = 'ou_changed';
+    const invocation = createImInvocation([plan]);
+
+    expect(invocation).toMatchObject({
+      kind: 'substitution',
+      scope: TOPIC_SCOPE,
+      replyPolicy: {
+        invocationKind: 'substitution',
+        senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+        substitutionTargetOpenIds: ['ou_target'],
+      },
+      promptPolicy: {
+        kind: 'substitution',
+        reason: 'personal-substitution-message',
+        targetAliases: ['Frozen label'],
+      },
+    });
+    expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_target');
+    expect(JSON.stringify(invocation.replyPolicy)).not.toContain('Frozen label');
+  });
+
+  it.each([
+    {
+      name: 'done with answer',
+      state: {
+        ...finalizeIfRunning(createRunState()),
+        finalText: ' answer ',
+      } satisfies RunState,
+      targets: ['ou_target'],
+    },
+    {
+      name: 'empty done',
+      state: finalizeIfRunning(createRunState()),
+      targets: [],
+    },
+    {
+      name: 'error',
+      state: { ...createRunState(), terminal: 'error' } satisfies RunState,
+      targets: [],
+    },
+    { name: 'interrupted', state: markInterrupted(createRunState()), targets: [] },
+    { name: 'idle timeout', state: markIdleTimeout(createRunState()), targets: [] },
+  ])('adds target Mention only for $name', ({ state, targets }) => {
+    const plan = planImMessage({
+      message: imMessage({
+        senderType: 'user',
+        rawSenderId: 'ou_sender',
+        mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Target', isBot: false }],
+        rawMentions: [{ id: { open_id: 'ou_target' } }],
+      }),
+      scope: CHAT_SCOPE,
+      authorized: true,
+      duplicate: false,
+      mentionRequired: true,
+      recognizedCommand: false,
+      personalSubstitution: { enabled: true, targetOpenIds: ['ou_target'] },
+    });
+    if (plan.lane !== 'substitution') {
+      throw new Error(`expected substitution plan, got ${plan.lane}`);
+    }
+    const reply = finalizeImReply(createImInvocation([plan]), state);
+    expect(reply.senderOwnership).toEqual({ kind: 'mention', openId: 'ou_sender' });
+    expect(substitutionMentionOpenIds(reply)).toEqual(targets);
   });
 });
 

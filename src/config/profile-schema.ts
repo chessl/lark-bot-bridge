@@ -23,12 +23,14 @@ export interface TrustedPeerBot {
   openId: string;
 }
 
+export interface PersonalSubstitutionConfig {
+  enabled: boolean;
+  targetOpenIds: string[];
+}
+
 export interface CollaborationConfig {
   trustedPeerBots: TrustedPeerBot[];
-  personalSubstitution: {
-    enabled: boolean;
-    targetOpenIds: string[];
-  };
+  personalSubstitution: PersonalSubstitutionConfig;
 }
 
 
@@ -187,7 +189,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
 }
 
 const TRUSTED_PEER_ALIAS = /^[\p{L}\p{N}_-]{1,32}$/u;
-const TRUSTED_PEER_OPEN_ID = /^ou_[A-Za-z0-9_-]+$/;
+const APP_SCOPED_OPEN_ID = /^ou_[A-Za-z0-9_-]+$/;
 const RESERVED_PEER_ALIASES: Record<string, true> = {
   all: true,
   everyone: true,
@@ -229,7 +231,7 @@ export function normalizeTrustedPeerBots(
     if (aliases.has(aliasKey)) {
       throw new Error('trusted peer alias is duplicated');
     }
-    if (!TRUSTED_PEER_OPEN_ID.test(openId)) {
+    if (!APP_SCOPED_OPEN_ID.test(openId)) {
       throw new Error('trusted peer open ID is invalid');
     }
     if (openIds.has(openId)) {
@@ -244,6 +246,33 @@ export function normalizeTrustedPeerBots(
   });
 }
 
+export function normalizePersonalSubstitution(input: unknown): PersonalSubstitutionConfig {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('collaboration personalSubstitution is required');
+  }
+  if (
+    !('enabled' in input) ||
+    typeof input.enabled !== 'boolean' ||
+    !('targetOpenIds' in input) ||
+    !Array.isArray(input.targetOpenIds)
+  ) {
+    throw new Error('collaboration personalSubstitution is invalid');
+  }
+  if (input.targetOpenIds.length > 1) {
+    throw new Error('personal substitution target count must be between 0 and 1');
+  }
+  const targetOpenIds = input.targetOpenIds.map((value) => {
+    if (typeof value !== 'string' || !APP_SCOPED_OPEN_ID.test(value)) {
+      throw new Error('personal substitution target open ID is invalid');
+    }
+    return value;
+  });
+  if (input.enabled && targetOpenIds.length !== 1) {
+    throw new Error('enabled personal substitution requires one target');
+  }
+  return { enabled: input.enabled, targetOpenIds };
+}
+
 function normalizeCollaboration(input: unknown): CollaborationConfig {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('profile collaboration configuration is required');
@@ -252,26 +281,9 @@ function normalizeCollaboration(input: unknown): CollaborationConfig {
     trustedPeerBots?: unknown;
     personalSubstitution?: unknown;
   };
-  const trustedPeerBots = normalizeTrustedPeerBots(raw.trustedPeerBots);
-  const substitution = raw.personalSubstitution;
-  if (!substitution || typeof substitution !== 'object' || Array.isArray(substitution)) {
-    throw new Error('collaboration personalSubstitution is required');
-  }
-  if (
-    !('enabled' in substitution) ||
-    typeof substitution.enabled !== 'boolean' ||
-    !('targetOpenIds' in substitution) ||
-    !Array.isArray(substitution.targetOpenIds) ||
-    !substitution.targetOpenIds.every((value) => typeof value === 'string' && value.trim())
-  ) {
-    throw new Error('collaboration personalSubstitution is invalid');
-  }
   return {
-    trustedPeerBots,
-    personalSubstitution: {
-      enabled: substitution.enabled,
-      targetOpenIds: substitution.targetOpenIds.map((value) => value.trim()),
-    },
+    trustedPeerBots: normalizeTrustedPeerBots(raw.trustedPeerBots),
+    personalSubstitution: normalizePersonalSubstitution(raw.personalSubstitution),
   };
 }
 

@@ -303,6 +303,175 @@ describe('sender identity in bridge_context', () => {
   });
 });
 
+describe('personal substitution intake', () => {
+  it('gives access, Command, and current-Bot Mention priority over substitution', async () => {
+    vi.useFakeTimers();
+    const denied = await createHarness();
+    denied.profileConfig.access.allowedChats = [];
+    denied.profileConfig.collaboration.personalSubstitution = {
+      enabled: true,
+      targetOpenIds: ['ou_target'],
+    };
+    await startTestBridge(denied);
+    await denied.channel.handlers.message?.(
+      message({
+        messageId: 'om_denied_substitution',
+        content: 'denied',
+        rawSenderType: 'user',
+        mentionedBot: false,
+        mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Target', isBot: false }],
+        rawMentions: [
+          { key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Target' },
+        ],
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(800);
+    expect(denied.agent.runOptions).toHaveLength(0);
+
+    vi.useRealTimers();
+    const h = await createHarness();
+    h.profileConfig.collaboration.personalSubstitution = {
+      enabled: true,
+      targetOpenIds: ['ou_target'],
+    };
+    await startTestBridge(h);
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_command_substitution',
+        content: '/help',
+        rawSenderType: 'user',
+        mentionedBot: false,
+        mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Target', isBot: false }],
+        rawMentions: [
+          { key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Target' },
+        ],
+      }),
+    );
+    expect(h.agent.runOptions).toHaveLength(0);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_current_bot_priority',
+        content: 'Bridge handles this',
+        rawSenderType: 'user',
+        mentionedBot: true,
+        mentions: [
+          { key: '@_user_1', openId: 'ou_target', name: 'Target', isBot: false },
+          { key: '@_user_2', openId: 'ou_bot', name: 'Bridge', isBot: true },
+        ],
+        rawMentions: [
+          { key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Target' },
+          { key: '@_user_2', id: { open_id: 'ou_bot' }, name: 'Bridge' },
+        ],
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+    expect(h.agent.runOptions[0]?.prompt).not.toContain('personal substitution');
+  });
+
+  it('freezes exact target and display label per isolated Chat Invocation', async () => {
+    const h = await createHarness();
+    h.profileConfig.collaboration.personalSubstitution = {
+      enabled: true,
+      targetOpenIds: ['ou_target'],
+    };
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_substitution_old',
+        content: '@Target answer this',
+        rawSenderType: 'user',
+        mentionedBot: false,
+        mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Event label', isBot: false }],
+        rawMentions: [
+          {
+            key: '@_user_1',
+            id: { open_id: 'ou_target' },
+            name: 'Config spoof',
+          },
+        ],
+      }),
+    );
+    h.controls.cfg.collaboration.personalSubstitution = {
+      enabled: true,
+      targetOpenIds: ['ou_next'],
+    };
+    await waitFor(() => h.agent.runOptions.length === 1);
+    const firstPrompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(firstPrompt).toContain('Event label');
+    expect(firstPrompt).not.toContain('Config spoof');
+    expect(firstPrompt).not.toContain('ou_target');
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_substitution_stale',
+        content: 'old target',
+        rawSenderType: 'user',
+        mentionedBot: false,
+        mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Old', isBot: false }],
+        rawMentions: [
+          { key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Old' },
+        ],
+      }),
+    );
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_substitution_next',
+        content: 'new target',
+        rawSenderType: 'user',
+        mentionedBot: false,
+        mentions: [{ key: '@_user_1', openId: 'ou_next', name: 'Next', isBot: false }],
+        rawMentions: [
+          { key: '@_user_1', id: { open_id: 'ou_next' }, name: 'Next' },
+        ],
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 2);
+    expect(h.agent.runOptions[1]?.prompt).toContain('new target');
+    expect(h.agent.runOptions[1]?.prompt).not.toContain('old target');
+  });
+
+  it('keeps substitution isolated from ordinary batching and preserves Topic scope', async () => {
+    const h = await createHarness();
+    h.profileConfig.collaboration.personalSubstitution = {
+      enabled: true,
+      targetOpenIds: ['ou_target'],
+    };
+    await startTestBridge(h);
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_topic_substitution',
+        content: 'isolated substitution',
+        rawSenderType: 'user',
+        mentionedBot: false,
+        threadId: 'omt_topic',
+        mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Target', isBot: false }],
+        rawMentions: [
+          { key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Target' },
+        ],
+      }),
+    );
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_topic_ordinary',
+        content: 'ordinary follow-up',
+        rawSenderType: 'user',
+        threadId: 'omt_topic',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 2);
+
+    expect(h.agent.runOptions[0]?.prompt).toContain('isolated substitution');
+    expect(h.agent.runOptions[0]?.prompt).not.toContain('ordinary follow-up');
+    expect(h.agent.runOptions[1]?.prompt).toContain('ordinary follow-up');
+    const context = readSection(h.agent.runOptions[0]?.prompt ?? '', 'bridge_context') as {
+      threadId?: string;
+    };
+    expect(context.threadId).toBe('omt_topic');
+  });
+});
+
 async function createHarness(): Promise<{
   tmp: TmpProfile;
   channel: FakeLarkChannel & { handlers: MessageHandlerMap };
@@ -442,6 +611,7 @@ function message(input: {
     id: { open_id: string };
     name: string;
   }>;
+  threadId?: string;
   mentionedBot?: boolean;
 }): NormalizedMessage {
   return {
@@ -479,6 +649,7 @@ function message(input: {
           },
         }
       : {}),
+    ...(input.threadId ? { threadId: input.threadId } : {}),
   } as unknown as NormalizedMessage;
 }
 

@@ -692,7 +692,61 @@ describe('P2P OMP Reply', () => {
     expect(channel.sent).toEqual([]);
   });
 
-function testReplyPolicy(target: ImReplyTarget): ImReplyPolicy {
+  it('keeps substitution disclosure and target degradation inside the one managed Reply', async () => {
+    const target = {
+      chatId: 'oc_substitution',
+      messageId: 'om_substitution',
+      replyInThread: false,
+    } as const;
+    const replyPolicy: ImReplyPolicy = {
+      invocationKind: 'substitution',
+      scope: {
+        kind: 'chat',
+        id: target.chatId,
+        chatId: target.chatId,
+        mode: 'group',
+      },
+      target,
+      senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+      substitutionTargetOpenIds: ['ou_target'],
+    };
+    const channel = createFakeLarkChannel({
+      update: async () => ({ code: 230001, msg: 'mention rejected' }),
+    });
+    const controller = new OmpReplyController({
+      channel: channel as unknown as LarkChannel,
+      replyPolicy,
+    });
+    await controller.open(createRunState());
+    const state: RunState = {
+      ...finalizeIfRunning(createRunState()),
+      finalText: 'answer',
+    };
+
+    await controller.finish({
+      ...replyPolicy,
+      reason: 'run-completed',
+      state,
+    });
+
+    const update = JSON.stringify(channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0]);
+    expect(update.match(/ou_sender/g)).toHaveLength(1);
+    expect(update.match(/ou_target/g)).toHaveLength(1);
+    expect(update).toContain('AI 代');
+    expect(update).toContain('回答（已在本回复中点名）');
+    expect(channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+    expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledOnce();
+    const patch = JSON.stringify(channel.rawClient.im.v1.message.patch.mock.calls[0]?.[0]);
+    expect(patch).toContain('\\\\@请求者');
+    expect(patch).toContain('\\\\@目标');
+    expect(patch).toContain('Mention 不可用');
+    expect(patch).not.toMatch(/ou_sender|ou_target|<at/);
+    expect(channel.sent).toEqual([]);
+  });
+
+function testReplyPolicy(
+  target: ImReplyTarget,
+): Extract<ImReplyPolicy, { invocationKind: 'ordinary' }> {
   return {
     invocationKind: 'ordinary',
     scope: {

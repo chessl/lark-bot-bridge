@@ -1,6 +1,10 @@
 import { modelLabel, supportedModels } from '../agent/models';
 import type { KnownChat } from '../bot/lark-info';
-import type { ProfileMode, TrustedPeerBot } from '../config/profile-schema';
+import type {
+  PersonalSubstitutionConfig,
+  ProfileMode,
+  TrustedPeerBot,
+} from '../config/profile-schema';
 
 export interface ConfigFormOpts {
   /** Deployment mode: 'personal' (default) or 'team'. */
@@ -16,9 +20,11 @@ export interface ConfigFormOpts {
   admins: string[];
   knownChats: KnownChat[];
   trustedPeerBots?: TrustedPeerBot[];
+  personalSubstitution?: PersonalSubstitutionConfig;
   collaborationExpanded?: boolean;
   collaborationError?: string;
   maskTrustedPeerIds?: boolean;
+  maskPersonalSubstitutionIds?: boolean;
   /** URL of the running local web console (supervisor `--web-ui` mode). Shown
    * at the top of the card when present; omitted when no console is running. */
   consoleUrl?: string;
@@ -65,6 +71,8 @@ function chatList(chatIds: string[], knownChats: KnownChat[]): string {
 
 function trustedPeerPanel(opts: ConfigFormOpts): object {
   const peers = opts.trustedPeerBots ?? [];
+  const substitution = opts.personalSubstitution ?? { enabled: false, targetOpenIds: [] };
+  const substitutionTarget = substitution.targetOpenIds[0] ?? '';
   const rows = peers.flatMap((peer, index) => [
     {
       tag: 'column_set',
@@ -126,7 +134,7 @@ function trustedPeerPanel(opts: ConfigFormOpts): object {
       {
         tag: 'markdown',
         content:
-          '_可信 peer 只有以 verified Bot 身份直接结构化 @ 当前 Bot 时才会建立隔离 Invocation。alias 与 open_id 仅影响之后的新 Invocation。_',
+          '_可信 peer 只有以 verified Bot 身份直接结构化 @ 当前 Bot 时才会建立隔离 Invocation。personal substitution 只有已授权真人直接结构化 @ 已配置目标时生效。配置只影响之后的新 Invocation。_',
       },
       ...(opts.collaborationError
         ? [{ tag: 'markdown', content: `**未保存：** ${opts.collaborationError}` }]
@@ -143,6 +151,31 @@ function trustedPeerPanel(opts: ConfigFormOpts): object {
             },
           ]
         : [{ tag: 'markdown', content: '_已达到 10 个 trusted peer 上限。_' }]),
+      { tag: 'hr' },
+      {
+        tag: 'markdown',
+        content:
+          '**Personal substitution**\n_目标输入企业邮箱；保存后只显示 app-scoped open ID 的末 6 位。禁用不会删除已保存目标。_',
+      },
+      {
+        tag: 'select_static',
+        name: 'personal_substitution_enabled',
+        initial_option: substitution.enabled ? 'yes' : 'no',
+        options: [
+          { text: { tag: 'plain_text', content: '启用' }, value: 'yes' },
+          { text: { tag: 'plain_text', content: '禁用' }, value: 'no' },
+        ],
+      },
+      {
+        tag: 'input',
+        name: 'personal_substitution_target',
+        default_value:
+          opts.maskPersonalSubstitutionIds === false || !substitutionTarget.startsWith('ou_')
+            ? substitutionTarget
+            : `…${substitutionTarget.slice(-6)}`,
+        placeholder: { tag: 'plain_text', content: 'name@example.com' },
+        input_type: 'text',
+      },
     ],
     opts.collaborationExpanded ?? false,
   );
@@ -157,6 +190,12 @@ function safePeerSummary(peers: readonly TrustedPeerBot[], includeAliases: boole
       return `${alias}(...${peer.openId.slice(-6)})`;
     })
     .join('、');
+}
+
+function safeSubstitutionSummary(config: PersonalSubstitutionConfig | undefined): string {
+  const enabled = config?.enabled === true;
+  const count = config?.targetOpenIds.length ?? 0;
+  return `${enabled ? '启用' : '禁用'}（${count} 个已保存目标）`;
 }
 
 /** Form card for `/config`. */
@@ -378,7 +417,8 @@ export function configSavedCard(opts: ConfigFormOpts): object {
             `**并发上限**:\`${opts.maxConcurrentRuns}\`\n` +
             `**run 探活**:\`${opts.runIdleTimeoutMinutes > 0 ? `${opts.runIdleTimeoutMinutes} 分钟` : '关闭'}\`\n` +
             `**群里需要 @ bot**:\`${opts.requireMentionInGroup ? '是' : '否'}\`\n` +
-            `**trusted peer Bot**:${safePeerSummary(opts.trustedPeerBots ?? [], true)}\n\n` +
+            `**trusted peer Bot**:${safePeerSummary(opts.trustedPeerBots ?? [], true)}\n` +
+            `**personal substitution**:${safeSubstitutionSummary(opts.personalSubstitution)}\n\n` +
             '🔒 **访问控制**' +
             (opts.mode === 'team' ? '（_团队版下不生效,任何人可用_）' : '') +
             '\n' +
@@ -452,7 +492,11 @@ export function configCancelledCard(): object {
 export function configFailedCard(
   reason: string,
   trustedPeerBots: readonly TrustedPeerBot[] = [],
+  substitutionTargetCount = 0,
 ): object {
+  const safeReason = reason
+    .replace(/\bou_[A-Za-z0-9_-]+\b/g, '已隐藏 ID')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '已隐藏邮箱');
   return {
     schema: '2.0',
     config: { summary: { content: '保存失败' } },
@@ -461,8 +505,9 @@ export function configFailedCard(
         {
           tag: 'markdown',
           content:
-            `保存失败：${reason}\n\n` +
-            `trusted peer 草稿：${safePeerSummary(trustedPeerBots, false)}`,
+            `保存失败：${safeReason}\n\n` +
+            `trusted peer 草稿：${safePeerSummary(trustedPeerBots, false)}\n` +
+            `personal substitution 草稿：${substitutionTargetCount} 个目标（内容已隐藏）`,
         },
       ],
     },

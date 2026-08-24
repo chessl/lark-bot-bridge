@@ -201,6 +201,78 @@ describe('terminal OMP Run state', () => {
     expect(JSON.stringify(post)).not.toContain('ou_fake');
   });
 
+  it.each([
+    {
+      name: 'done',
+      terminal: 'done',
+      finalText: 'answer <at id="ou_fake"></at>',
+      reason: 'run-completed',
+      targetMention: true,
+    },
+    {
+      name: 'empty done',
+      terminal: 'done',
+      finalText: '  ',
+      reason: 'run-completed',
+      targetMention: false,
+    },
+    { name: 'error', terminal: 'error', reason: 'run-failed', targetMention: false },
+    {
+      name: 'interrupted',
+      terminal: 'interrupted',
+      reason: 'run-interrupted',
+      targetMention: false,
+    },
+    {
+      name: 'idle timeout',
+      terminal: 'idle_timeout',
+      reason: 'run-timed-out',
+      targetMention: false,
+    },
+  ] satisfies Array<{
+    name: string;
+    terminal: Exclude<RunState['terminal'], 'running'>;
+    finalText?: string;
+    reason: ImReplyReason;
+    targetMention: boolean;
+  }>)(
+    'projects substitution disclosure and target Mention only for nonempty $name',
+    ({ terminal, finalText, reason, targetMention }) => {
+      const state: RunState = {
+        ...initialState,
+        terminal,
+        ...(finalText === undefined ? {} : { finalText }),
+      };
+      const plan: ImReplyPlan = {
+        invocationKind: 'substitution',
+        reason,
+        scope: { kind: 'chat', id: 'oc_group', chatId: 'oc_group', mode: 'group' },
+        target: { chatId: 'oc_group', messageId: 'om_source', replyInThread: false },
+        senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+        substitutionTargetOpenIds: ['ou_target'],
+        state,
+      };
+      const card = JSON.stringify(renderOmpReplyCard(plan));
+      const markdown = renderOmpReplyMarkdown(plan);
+      const post = JSON.stringify(renderOmpReplyMarkdownPost(plan));
+      const degraded = JSON.stringify(renderOmpReplyMarkdownPost(plan, 'plain'));
+
+      for (const projection of [card, markdown, post]) {
+        expect(projection.match(/ou_sender/g)).toHaveLength(1);
+        expect(projection.includes('ou_target')).toBe(targetMention);
+        expect(projection.includes('AI 代')).toBe(targetMention);
+        expect(projection.includes('回答（已在本回复中点名）')).toBe(targetMention);
+        expect(projection).not.toContain('ou_fake');
+      }
+      expect(post.match(/ou_target/g) ?? []).toHaveLength(targetMention ? 1 : 0);
+      expect(degraded).not.toMatch(/ou_sender|ou_target|<at|"tag":"at"/);
+      expect(degraded).toContain('\\\\@请求者');
+      expect(degraded.includes('\\\\@目标')).toBe(targetMention);
+      expect(degraded.includes('回答（已在本回复中点名）')).toBe(targetMention);
+      expect(degraded).toContain('Mention 不可用');
+    },
+  );
+
   it('keeps Progress Reply free of ownership Mention', () => {
     const progress: RunState = {
       ...initialState,

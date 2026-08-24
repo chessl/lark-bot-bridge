@@ -98,6 +98,90 @@ describe('profile-aware account and config commands', () => {
     expect(root.profiles.claude?.collaboration.trustedPeerBots).toEqual([]);
     expect(root.profiles.claude?.preferences.maxConcurrentRuns).toBeUndefined();
   });
+
+  it('batch-resolves and atomically saves one personal substitution target', async () => {
+    vi.useFakeTimers();
+    const h = await createHarness();
+    const lookup = vi.spyOn(h.channel.rawClient, 'request').mockResolvedValue({
+      data: { user_list: [{ email: 'target@example.com', user_id: 'ou_target_123456' }] },
+    });
+
+    await h.command('/config submit', {
+      personal_substitution_enabled: 'yes',
+      personal_substitution_target: 'target@example.com',
+    });
+
+    const root = await waitForRoot(
+      h.rootDir,
+      (candidate) =>
+        candidate.profiles.claude?.collaboration.personalSubstitution.enabled === true,
+    );
+    expect(root.profiles.claude?.collaboration.personalSubstitution).toEqual({
+      enabled: true,
+      targetOpenIds: ['ou_target_123456'],
+    });
+    expect(lookup).toHaveBeenCalledWith({
+      method: 'POST',
+      url: '/open-apis/contact/v3/users/batch_get_id',
+      params: { user_id_type: 'open_id' },
+      data: { emails: ['target@example.com'] },
+    });
+
+    await h.command('/config submit', {
+      personal_substitution_enabled: 'no',
+      personal_substitution_target: '…123456 [substitution saved 0]',
+    });
+    const disabled = await waitForRoot(
+      h.rootDir,
+      (candidate) =>
+        candidate.profiles.claude?.collaboration.personalSubstitution.enabled === false &&
+        candidate.profiles.claude?.collaboration.personalSubstitution.targetOpenIds.length === 1,
+    );
+    expect(disabled.profiles.claude?.collaboration.personalSubstitution).toEqual({
+      enabled: false,
+      targetOpenIds: ['ou_target_123456'],
+    });
+  });
+
+  it('writes no config fields when substitution target resolution is incomplete', async () => {
+    vi.useFakeTimers();
+    const h = await createHarness();
+    vi.spyOn(h.channel.rawClient, 'request').mockResolvedValue({ data: { user_list: [] } });
+
+    await h.command('/config submit', {
+      max_concurrent_runs: '9',
+      personal_substitution_enabled: 'yes',
+      personal_substitution_target: 'unknown@example.com',
+    });
+    await vi.runAllTimersAsync();
+
+    const root = await readRoot(h.rootDir);
+    expect(root.profiles.claude?.collaboration.personalSubstitution).toEqual({
+      enabled: false,
+      targetOpenIds: [],
+    });
+    expect(root.profiles.claude?.preferences.maxConcurrentRuns).toBeUndefined();
+    expect(JSON.stringify(h.channel.sent)).not.toContain('unknown@example.com');
+  });
+
+  it('writes nothing when a substitution config draft is cancelled', async () => {
+    vi.useFakeTimers();
+    const h = await createHarness();
+    const lookup = vi.spyOn(h.channel.rawClient, 'request');
+
+    await h.command('/config cancel', {
+      personal_substitution_enabled: 'yes',
+      personal_substitution_target: 'target@example.com',
+    });
+    await vi.runAllTimersAsync();
+
+    const root = await readRoot(h.rootDir);
+    expect(root.profiles.claude?.collaboration.personalSubstitution).toEqual({
+      enabled: false,
+      targetOpenIds: [],
+    });
+    expect(lookup).not.toHaveBeenCalled();
+  });
   it('saves /account submit into the active profile and profile-local keystore', async () => {
     vi.useFakeTimers();
     const h = await createHarness();

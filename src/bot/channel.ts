@@ -815,11 +815,14 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     recognizedCommand: isKnownTextCommand(msg.content),
     currentBotOpenId: channel.botIdentity?.openId,
     trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
+    personalSubstitution: controls.cfg.collaboration.personalSubstitution,
   });
   log.info('intake.route', plan.reason, {
     scope,
     lane: plan.lane,
-    ...(plan.lane === 'ordinary' || plan.lane === 'peer' ? { kind: plan.lane } : {}),
+    ...(plan.lane === 'ordinary' || plan.lane === 'peer' || plan.lane === 'substitution'
+      ? { kind: plan.lane }
+      : {}),
     ...(plan.lane === 'peer' ? { alias: plan.peer.alias } : {}),
   });
 
@@ -849,7 +852,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   // fetch_failed sentinel. Feeding it to the agent would read as an empty
   // forward, so surface a recoverable hint and skip the run — the user can
   // resend once the upstream recovers.
-  if (plan.lane !== 'peer' && isForwardFetchFailed(plannedMessage)) {
+  if (plan.lane !== 'peer' && plan.lane !== 'substitution' && isForwardFetchFailed(plannedMessage)) {
     log.warn('intake', 'forward-fetch-failed', {
       scope,
       msgId: plannedMessage.messageId,
@@ -865,13 +868,14 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     return;
   }
 
-  if (plan.lane === 'peer') {
-    const invocation = createImInvocation([plan]);
+  if (plan.lane === 'peer' || plan.lane === 'substitution') {
+    const invocation =
+      plan.lane === 'peer' ? createImInvocation([plan]) : createImInvocation([plan]);
     enqueueInvocation(invocation);
-    log.info('intake', 'peer-enqueued', {
+    log.info('intake', 'isolated-enqueued', {
       scope,
       kind: invocation.kind,
-      alias: invocation.peerAlias,
+      ...(invocation.kind === 'peer' ? { alias: invocation.peerAlias } : {}),
     });
     return;
   }
@@ -1348,7 +1352,7 @@ function buildPrompt(
         ? '请看下面的附件。'
         : '（对方发来一条没有正文的消息——通常是只 @ 了你的唤醒（ping）。请简短回应。）';
 
-  const ordinaryContext =
+  const invocationContext =
     policy.kind === 'ordinary'
       ? (() => {
           const first = policy.messages[0];
@@ -1368,36 +1372,46 @@ function buildPrompt(
             messageIds: policy.messages.map((message) => message.messageId),
           };
         })()
-      : {
-          senderId: `@${policy.message.senderAlias}`,
-          senderName: policy.message.senderAlias,
-          senderType: 'bot' as const,
-          messageIds: [policy.message.messageId],
-        };
-  const peerInstructions =
+      : policy.kind === 'peer'
+        ? {
+            senderId: `@${policy.message.senderAlias}`,
+            senderName: policy.message.senderAlias,
+            senderType: 'bot' as const,
+            messageIds: [policy.message.messageId],
+          }
+        : {
+            senderId: 'verified-human-requester',
+            senderType: 'user' as const,
+            messageIds: [policy.message.messageId],
+          };
+  const collaborationInstructions =
     policy.kind === 'peer'
       ? [
           `本次是可信 peer @${policy.message.senderAlias} 发起的隔离调用。冻结的可信 alias 为: ${policy.trustedPeerAliases
             .map((alias) => `@${alias}`)
             .join('、') || '无'}。只返回答案正文;transport 不会激活任何 alias,本次保持 zero-hop。`,
         ]
-      : [
-          `可信 peer 协作策略：oneHop=${String(policy.oneHop)}，maxActivePeers=1，aliases=[${
-            policy.trustedPeerAliases.map((alias) => `@${alias}`).join('、') || '无'
-          }]。只返回答案正文；transport 只会在成功的最终答案中激活第一个合格 alias。`,
-        ];
+      : policy.kind === 'substitution'
+        ? [
+            `本次是 personal substitution 隔离调用，显示目标为「${policy.targetAliases[0]}」。显示名只用于本次可读上下文，不是授权事实。只返回答案正文；发送者归属、替身披露和目标 Mention 由 transport 固定生成。`,
+          ]
+        : [
+            `可信 peer 协作策略：oneHop=${String(policy.oneHop)}，maxActivePeers=1，aliases=[${
+              policy.trustedPeerAliases.map((alias) => `@${alias}`).join('、') || '无'
+            }]。只返回答案正文；transport 只会在成功的最终答案中激活第一个合格 alias。`,
+          ];
 
   return buildAgentPrompt({
     context: {
       chatId: invocation.scope.chatId,
       chatType: invocation.scope.mode === 'p2p' ? 'p2p' : 'group',
-      ...ordinaryContext,
+      ...invocationContext,
       ...(invocation.scope.kind === 'topic' ? { threadId: invocation.scope.threadId } : {}),
       source: 'im',
     },
     instructions: [
       ...BRIDGE_AGENT_INSTRUCTIONS,
-      ...peerInstructions,
+      ...collaborationInstructions,
       ...(extraInstructions ?? []),
     ],
     userInput: userPart,

@@ -55,9 +55,13 @@ export type ImRouteReason =
   | 'contradictory-mention'
   | 'untrusted-bot'
   | 'trusted-peer'
+  | 'personal-substitution'
   | 'ordinary-message';
 
-export type ImPromptReason = 'ordinary-message-batch' | 'trusted-peer-message';
+export type ImPromptReason =
+  | 'ordinary-message-batch'
+  | 'trusted-peer-message'
+  | 'personal-substitution-message';
 
 export type ImReplyReason =
   | 'run-completed'
@@ -78,6 +82,11 @@ export type ImTrustedPeer = Readonly<{
   openId: VerifiedBotId;
 }>;
 
+export type ImSubstitutionTarget = Readonly<{
+  openId: VerifiedHumanId;
+  displayAlias: string;
+}>;
+
 export interface PlanImMessageInput {
   message: NormalizedMessage;
   scope: ImConversationScope;
@@ -87,13 +96,18 @@ export interface PlanImMessageInput {
   recognizedCommand: boolean;
   currentBotOpenId?: string;
   trustedPeerBots?: ReadonlyArray<{ alias: string; openId: string }>;
+  personalSubstitution?: Readonly<{
+    enabled: boolean;
+    targetOpenIds: readonly string[];
+  }>;
 }
 
 export type ImMessagePlan =
   | ImDroppedMessagePlan
   | ImCommandPlan
   | ImOrdinaryMessagePlan
-  | ImPeerMessagePlan;
+  | ImPeerMessagePlan
+  | ImSubstitutionMessagePlan;
 
 export type ImDroppedMessagePlan = Readonly<{
   lane: 'drop';
@@ -135,6 +149,14 @@ export type ImPeerMessagePlan = Readonly<{
   trustedPeers: readonly ImTrustedPeer[];
 }>;
 
+export type ImSubstitutionMessagePlan = Readonly<{
+  lane: 'substitution';
+  reason: 'personal-substitution';
+  scope: ImConversationScope;
+  source: ImSourceMessage;
+  targets: readonly [ImSubstitutionTarget];
+}>;
+
 export type ImSourceMessage = Readonly<{
   message: NormalizedMessage;
   sender: ImSenderIdentity;
@@ -164,6 +186,12 @@ export type ImPeerPromptMessage = Readonly<{
   interactiveCard?: unknown;
 }>;
 
+export type ImSubstitutionPromptMessage = Readonly<{
+  messageId: string;
+  content: string;
+  resourceFileKeys: readonly string[];
+}>;
+
 export type ImPromptPolicy =
   | Readonly<{
       kind: 'ordinary';
@@ -179,10 +207,15 @@ export type ImPromptPolicy =
       message: ImPeerPromptMessage;
       trustedPeerAliases: readonly string[];
       zeroHop: true;
+    }>
+  | Readonly<{
+      kind: 'substitution';
+      reason: Extract<ImPromptReason, 'personal-substitution-message'>;
+      message: ImSubstitutionPromptMessage;
+      targetAliases: readonly [string];
     }>;
 
-export type ImReplyPolicy = Readonly<{
-  invocationKind: 'ordinary' | 'peer';
+type ImReplyPolicyBase = Readonly<{
   scope: ImConversationScope;
   target: ImReplyTarget;
   senderOwnership: ImSenderOwnership;
@@ -195,7 +228,16 @@ export type ImPeerActivation = Readonly<{
   end: number;
 }>;
 
-export type ImInvocation = ImOrdinaryInvocation | ImPeerInvocation;
+export type ImReplyPolicy =
+  | (ImReplyPolicyBase & Readonly<{ invocationKind: 'ordinary' }>)
+  | (ImReplyPolicyBase & Readonly<{ invocationKind: 'peer' }>)
+  | (ImReplyPolicyBase &
+      Readonly<{
+        invocationKind: 'substitution';
+        substitutionTargetOpenIds: readonly [string];
+      }>);
+
+export type ImInvocation = ImOrdinaryInvocation | ImPeerInvocation | ImSubstitutionInvocation;
 
 export type ImOrdinaryInvocation = Readonly<{
   kind: 'ordinary';
@@ -204,7 +246,7 @@ export type ImOrdinaryInvocation = Readonly<{
   sourceMessages: readonly [ImSourceMessage, ...ImSourceMessage[]];
   replyTarget: ImReplyTarget;
   promptPolicy: Extract<ImPromptPolicy, { kind: 'ordinary' }>;
-  replyPolicy: ImReplyPolicy & Readonly<{ invocationKind: 'ordinary' }>;
+  replyPolicy: Extract<ImReplyPolicy, { invocationKind: 'ordinary' }>;
   trustedPeers: readonly ImTrustedPeer[];
 }>;
 
@@ -217,7 +259,18 @@ export type ImPeerInvocation = Readonly<{
   peerAlias: string;
   trustedPeers: readonly ImTrustedPeer[];
   promptPolicy: Extract<ImPromptPolicy, { kind: 'peer' }>;
-  replyPolicy: ImReplyPolicy & Readonly<{ invocationKind: 'peer' }>;
+  replyPolicy: Extract<ImReplyPolicy, { invocationKind: 'peer' }>;
+}>;
+
+export type ImSubstitutionInvocation = Readonly<{
+  kind: 'substitution';
+  routeReason: 'personal-substitution';
+  scope: ImConversationScope;
+  sourceMessages: readonly [ImSourceMessage];
+  replyTarget: ImReplyTarget;
+  targets: readonly [ImSubstitutionTarget];
+  promptPolicy: Extract<ImPromptPolicy, { kind: 'substitution' }>;
+  replyPolicy: Extract<ImReplyPolicy, { invocationKind: 'substitution' }>;
 }>;
 
 export type ImReplyPlan = ImReplyPolicy &
@@ -261,6 +314,52 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
         scope,
         source,
       });
+    }
+    const currentBotMention = directCurrentBotMention(input.message, input.currentBotOpenId);
+    if (currentBotMention === 'contradictory') {
+      return Object.freeze({
+        lane: 'drop',
+        reason: 'contradictory-mention',
+        allowAccessHint: false,
+      });
+    }
+    if (currentBotMention === 'direct') {
+      return Object.freeze({
+        lane: 'ordinary',
+        reason: 'ordinary-message',
+        scope,
+        source,
+        trustedPeers,
+      });
+    }
+    const substitution = input.personalSubstitution;
+    const configuredTarget =
+      substitution?.enabled === true && substitution.targetOpenIds.length === 1
+        ? substitution.targetOpenIds[0]
+        : undefined;
+    if (configuredTarget) {
+      const targetMention = directSubstitutionMention(input.message, configuredTarget);
+      if (targetMention === 'contradictory') {
+        return Object.freeze({
+          lane: 'drop',
+          reason: 'contradictory-mention',
+          allowAccessHint: false,
+        });
+      }
+      if (targetMention !== 'not-direct') {
+        const target: ImSubstitutionTarget = Object.freeze({
+          openId: verifiedHumanId(configuredTarget),
+          displayAlias: targetMention.displayAlias,
+        });
+        const targets: readonly [ImSubstitutionTarget] = Object.freeze([target]);
+        return Object.freeze({
+          lane: 'substitution',
+          reason: 'personal-substitution',
+          scope,
+          source,
+          targets,
+        });
+      }
     }
     if (input.mentionRequired) {
       return Object.freeze({ lane: 'drop', reason: 'mention-required', allowAccessHint: false });
@@ -317,9 +416,14 @@ export function createImInvocation(
   botIdentity?: Readonly<{ openId: string; name?: string }>,
 ): ImPeerInvocation;
 export function createImInvocation(
+  plans: readonly [ImSubstitutionMessagePlan],
+  botIdentity?: Readonly<{ openId: string; name?: string }>,
+): ImSubstitutionInvocation;
+export function createImInvocation(
   plans:
     | readonly [ImOrdinaryMessagePlan, ...ImOrdinaryMessagePlan[]]
-    | readonly [ImPeerMessagePlan],
+    | readonly [ImPeerMessagePlan]
+    | readonly [ImSubstitutionMessagePlan],
   botIdentity?: Readonly<{ openId: string; name?: string }>,
 ): ImInvocation {
   const first = plans[0];
@@ -346,6 +450,37 @@ export function createImInvocation(
         message: toPeerPromptMessage(first.source, first.peer.alias),
         trustedPeerAliases: Object.freeze(first.trustedPeers.map(({ alias }) => alias)),
         zeroHop: true,
+      }),
+      replyPolicy,
+    });
+  }
+  if (first.lane === 'substitution') {
+    const target = replyTarget(first.source.message);
+    const sourceMessages: readonly [ImSourceMessage] = Object.freeze([first.source]);
+    const targets: readonly [ImSubstitutionTarget] = Object.freeze([
+      Object.freeze({ ...first.targets[0] }),
+    ]);
+    const substitutionTargetOpenIds: readonly [string] = Object.freeze([targets[0].openId]);
+    const targetAliases: readonly [string] = Object.freeze([targets[0].displayAlias]);
+    const replyPolicy = Object.freeze({
+      invocationKind: 'substitution',
+      scope: first.scope,
+      target,
+      senderOwnership: senderOwnership(first.scope, first.source.sender),
+      substitutionTargetOpenIds,
+    }) satisfies ImSubstitutionInvocation['replyPolicy'];
+    return Object.freeze({
+      kind: 'substitution',
+      routeReason: 'personal-substitution',
+      scope: first.scope,
+      sourceMessages,
+      replyTarget: target,
+      targets,
+      promptPolicy: Object.freeze({
+        kind: 'substitution',
+        reason: 'personal-substitution-message',
+        message: toSubstitutionPromptMessage(first.source, targets[0].openId),
+        targetAliases,
       }),
       replyPolicy,
     });
@@ -428,7 +563,9 @@ export function finalizeImReply(invocation: ImInvocation, state: RunState): ImRe
       ? sanitizeImAnswer(state.finalText?.trim() ?? '')
       : '';
   const peerActivation =
-    answer.length > 0 ? firstTrustedPeerActivation(answer, invocation.trustedPeers) : undefined;
+    invocation.kind === 'ordinary' && answer.length > 0
+      ? firstTrustedPeerActivation(answer, invocation.trustedPeers)
+      : undefined;
   const finalState = peerActivation ? Object.freeze({ ...state, finalText: answer }) : state;
   return Object.freeze({
     ...invocation.replyPolicy,
@@ -634,8 +771,17 @@ function previousCodePoint(
   return { value: value.slice(start, end), start };
 }
 
+export function substitutionMentionOpenIds(plan: ImReplyPlan): readonly string[] {
+  return plan.invocationKind === 'substitution' &&
+    plan.state.terminal === 'done' &&
+    Boolean(plan.state.finalText?.trim())
+    ? plan.substitutionTargetOpenIds
+    : [];
+}
+
 function snapshotSource(message: NormalizedMessage): ImSourceMessage {
   const resources = message.resources.map((resource) => Object.freeze({ ...resource }));
+
   const mentions = (message.mentions ?? []).map((mention) => Object.freeze({ ...mention }));
   Object.freeze(resources);
   Object.freeze(mentions);
@@ -732,6 +878,18 @@ function toPeerPromptMessage(source: ImSourceMessage, alias: string): ImPeerProm
   });
 }
 
+function toSubstitutionPromptMessage(
+  source: ImSourceMessage,
+  targetOpenId: string,
+): ImSubstitutionPromptMessage {
+  const message = source.message;
+  return Object.freeze({
+    messageId: message.messageId,
+    content: message.content.replaceAll(targetOpenId, '[目标]'),
+    resourceFileKeys: Object.freeze(message.resources.map((resource) => resource.fileKey)),
+  });
+}
+
 function snapshotTrustedPeers(
   peers: ReadonlyArray<{ alias: string; openId: string }>,
 ): readonly ImTrustedPeer[] {
@@ -743,6 +901,56 @@ function snapshotTrustedPeers(
       }),
     ),
   );
+}
+
+function directSubstitutionMention(
+  message: NormalizedMessage,
+  targetOpenId: string,
+): Readonly<{ displayAlias: string }> | 'not-direct' | 'contradictory' {
+  const raw = message.raw;
+  if (
+    typeof raw !== 'object' ||
+    raw === null ||
+    !('message' in raw) ||
+    typeof raw.message !== 'object' ||
+    raw.message === null ||
+    !('mentions' in raw.message) ||
+    !Array.isArray(raw.message.mentions)
+  ) {
+    return 'not-direct';
+  }
+  const rawMatch = raw.message.mentions.some(
+    (mention) =>
+      Boolean(mention) &&
+      typeof mention === 'object' &&
+      'id' in mention &&
+      typeof mention.id === 'object' &&
+      mention.id !== null &&
+      'open_id' in mention.id &&
+      mention.id.open_id === targetOpenId,
+  );
+  if (!rawMatch) return 'not-direct';
+
+  const normalized = (message.mentions ?? []).filter(
+    (mention) => mention.openId === targetOpenId,
+  );
+  if (normalized.length === 0 || normalized.some((mention) => mention.isBot === true)) {
+    return 'contradictory';
+  }
+  return Object.freeze({
+    displayAlias: safeDisplayAlias(normalized[0]?.name, targetOpenId),
+  });
+}
+
+function safeDisplayAlias(value: string | undefined, targetOpenId: string): string {
+  const sanitized = (value ?? '')
+    .normalize('NFKC')
+    .replaceAll(targetOpenId, '')
+    .replace(/<\/?at\b[^>]*>/gi, '')
+    .replace(/[\p{Cc}\p{Cf}]+/gu, ' ')
+    .replaceAll('@', '＠')
+    .trim();
+  return [...sanitized].slice(0, 64).join('') || '目标';
 }
 
 function directCurrentBotMention(

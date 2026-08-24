@@ -42,7 +42,9 @@ import { helpCard, resumeCard, statusCard, workspacesCard } from '../card/templa
 import { resolveAppPaths } from '../config/app-paths';
 import * as configOps from '../config/config-ops';
 import {
+  normalizePersonalSubstitution,
   normalizeTrustedPeerBots,
+  type PersonalSubstitutionConfig,
   type ProfileAccess,
   type ProfileConfig,
   type ProfileMode,
@@ -1452,6 +1454,9 @@ async function showConfigForm(ctx: CommandContext): Promise<void> {
     knownChats: ctx.controls.knownChats ?? [],
     trustedPeerBots: maskSavedTrustedPeers(ctx.controls.cfg.collaboration.trustedPeerBots),
     ...(consoleUrl ? { consoleUrl } : {}),
+    personalSubstitution: maskSavedPersonalSubstitution(
+      ctx.controls.cfg.collaboration.personalSubstitution,
+    ),
   });
   if (ctx.fromCardAction) await recallMessage(ctx, ctx.msg.messageId);
   await sendManagedCard(ctx.channel, ctx.msg.chatId, card, commandReplyOptions(ctx));
@@ -1507,9 +1512,92 @@ function restoreTrustedPeerDraft(
   });
 }
 
-function configFormOptions(ctx: CommandContext, trustedPeerBots: TrustedPeerBot[]): ConfigFormOpts {
+function personalSubstitutionDraft(ctx: CommandContext): PersonalSubstitutionConfig {
+  const fv = ctx.formValue ?? {};
+  const current = maskSavedPersonalSubstitution(
+    ctx.controls.cfg.collaboration.personalSubstitution,
+  );
+  const rawEnabled = String(fv.personal_substitution_enabled ?? '').trim();
+  const enabled =
+    rawEnabled === 'yes'
+      ? true
+      : rawEnabled === 'no'
+        ? false
+        : ctx.controls.cfg.collaboration.personalSubstitution.enabled;
+  const target =
+    'personal_substitution_target' in fv
+      ? String(fv.personal_substitution_target ?? '').trim()
+      : (current.targetOpenIds[0] ?? '');
+  return { enabled, targetOpenIds: target ? [target] : [] };
+}
+
+function maskSavedPersonalSubstitution(
+  config: PersonalSubstitutionConfig,
+): PersonalSubstitutionConfig {
+  const target = config.targetOpenIds[0];
+  return {
+    enabled: config.enabled,
+    targetOpenIds: target ? [`…${target.slice(-6)} [substitution saved 0]`] : [],
+  };
+}
+
+async function resolvePersonalSubstitution(
+  ctx: CommandContext,
+  draft: PersonalSubstitutionConfig,
+): Promise<PersonalSubstitutionConfig> {
+  const target = draft.targetOpenIds[0];
+  if (!target) return normalizePersonalSubstitution(draft);
+
+  const savedMatch = /^…(.{1,6}) \[substitution saved 0\]$/.exec(target);
+  if (savedMatch) {
+    const saved = ctx.controls.cfg.collaboration.personalSubstitution.targetOpenIds[0];
+    if (!saved || saved.slice(-6) !== savedMatch[1]) {
+      throw new Error('saved personal substitution target is stale');
+    }
+    return normalizePersonalSubstitution({ enabled: draft.enabled, targetOpenIds: [saved] });
+  }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(target)) {
+    throw new Error('personal substitution target must be an enterprise email');
+  }
+
+  const response = await ctx.channel.rawClient.request<{
+    data?: {
+      user_list?: Array<{ email?: string; user_id?: string }>;
+    };
+  }>({
+    method: 'POST',
+    url: '/open-apis/contact/v3/users/batch_get_id',
+    params: { user_id_type: 'open_id' },
+    data: { emails: [target] },
+  });
+  const matches = (response.data?.user_list ?? []).filter(
+    (entry) => entry.email?.toLowerCase() === target.toLowerCase(),
+  );
+  if (matches.length !== 1 || typeof matches[0]?.user_id !== 'string') {
+    throw new Error('personal substitution target could not be resolved');
+  }
+  return normalizePersonalSubstitution({
+    enabled: draft.enabled,
+    targetOpenIds: [matches[0].user_id],
+  });
+}
+
+function configFormOptions(
+  ctx: CommandContext,
+  trustedPeerBots: TrustedPeerBot[],
+  personalSubstitution = personalSubstitutionDraft(ctx),
+): ConfigFormOpts {
   const idleMs = getRunIdleTimeoutMs(ctx.controls.cfg);
   const access = ctx.controls.cfg.access;
+  const substitutionTarget = personalSubstitution.targetOpenIds[0];
+  const safePersonalSubstitution = {
+    enabled: personalSubstitution.enabled,
+    targetOpenIds:
+      substitutionTarget &&
+      /^…[A-Za-z0-9_-]{1,6} \[substitution saved 0\]$/.test(substitutionTarget)
+        ? [substitutionTarget]
+        : [],
+  };
   return {
     mode: ctx.controls.cfg.mode,
     model: normalizeModelSelection(ctx.controls.cfg.preferences?.model),
@@ -1521,7 +1609,9 @@ function configFormOptions(ctx: CommandContext, trustedPeerBots: TrustedPeerBot[
     admins: access.admins,
     knownChats: ctx.controls.knownChats ?? [],
     trustedPeerBots,
+    personalSubstitution: safePersonalSubstitution,
     maskTrustedPeerIds: false,
+    maskPersonalSubstitutionIds: false,
     collaborationExpanded: true,
   };
 }
@@ -1533,12 +1623,13 @@ async function updateTrustedPeerDraft(
 ): Promise<void> {
   if (!ctx.fromCardAction) return;
   const peers = trustedPeerDraft(ctx, undefined);
+  const substitution = personalSubstitutionDraft(ctx);
   if (action === 'add') {
     if (peers.length < 10) peers.push({ alias: '', openId: '' });
   } else if (deleteIndex !== undefined && deleteIndex < peers.length) {
     peers.splice(deleteIndex, 1);
   }
-  const card = configFormCard(configFormOptions(ctx, peers));
+  const card = configFormCard(configFormOptions(ctx, peers, substitution));
   const formMsgId = ctx.msg.messageId;
   void (async () => {
     await delay(FORM_SETTLE_MS);
@@ -1583,6 +1674,7 @@ async function submitConfig(ctx: CommandContext, peerCount?: number): Promise<vo
     trustedPeerDraft(ctx, peerCount),
     ctx.controls.cfg.collaboration.trustedPeerBots,
   );
+  const substitutionDraft = personalSubstitutionDraft(ctx);
   // Unexpected or empty values keep the current selection. Store `undefined`
   // for the "default" sentinel to keep config tidy.
   const rawModel = String(fv.model ?? '').trim();
@@ -1648,25 +1740,31 @@ async function submitConfig(ctx: CommandContext, peerCount?: number): Promise<vo
     };
 
     let trustedPeerBots: TrustedPeerBot[];
+    let personalSubstitution: PersonalSubstitutionConfig;
     try {
       trustedPeerBots = normalizeTrustedPeerBots(peerDraft, ctx.channel.botIdentity?.openId);
+      personalSubstitution = await resolvePersonalSubstitution(ctx, substitutionDraft);
       await savePreferencesConfig(
         ctx,
         nextPreferences,
         requireMentionInGroup,
         mode,
         {
-          ...ctx.controls.cfg.collaboration,
           trustedPeerBots,
+          personalSubstitution,
         },
       );
-    } catch (err) {
-      log.fail('command', err, { step: 'config.save' });
+    } catch {
+      log.warn('command', 'config-save-rejected', { reason: 'invalid-collaboration' });
       await waitForSettle();
       await showResultCardInPlace(
         ctx,
         formMsgId,
-        configFailedCard('trusted peer 配置无效；整张卡未写入。', peerDraft),
+        configFailedCard(
+          '协作配置无效；整张卡未写入。',
+          peerDraft,
+          substitutionDraft.targetOpenIds.length,
+        ),
       );
       return;
     }
@@ -1680,6 +1778,8 @@ async function submitConfig(ctx: CommandContext, peerCount?: number): Promise<vo
       allowedChatsCount: access.allowedChats.length,
       adminsCount: access.admins.length,
       trustedPeerBotsCount: trustedPeerBots.length,
+      personalSubstitutionEnabled: personalSubstitution.enabled,
+      personalSubstitutionTargetCount: personalSubstitution.targetOpenIds.length,
     });
     await waitForSettle();
     await showResultCardInPlace(
@@ -1696,6 +1796,7 @@ async function submitConfig(ctx: CommandContext, peerCount?: number): Promise<vo
         admins: access.admins,
         knownChats: ctx.controls.knownChats ?? [],
         trustedPeerBots,
+        personalSubstitution,
       }),
     );
 

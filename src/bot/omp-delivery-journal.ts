@@ -47,12 +47,19 @@ const SenderOwnershipSchema = z.discriminatedUnion('kind', [
     ]),
   }),
 ]);
-const ReplyPolicySchema = z.object({
-  invocationKind: z.enum(['ordinary', 'peer']),
+const ReplyPolicyBaseSchema = z.object({
   scope: ConversationScopeSchema,
   target: ReplyTargetSchema,
   senderOwnership: SenderOwnershipSchema,
-}) satisfies z.ZodType<ImReplyPolicy>;
+});
+const ReplyPolicySchema = z.discriminatedUnion('invocationKind', [
+  ReplyPolicyBaseSchema.extend({ invocationKind: z.literal('ordinary') }),
+  ReplyPolicyBaseSchema.extend({ invocationKind: z.literal('peer') }),
+  ReplyPolicyBaseSchema.extend({
+    invocationKind: z.literal('substitution'),
+    substitutionTargetOpenIds: z.tuple([z.string().min(1)]),
+  }),
+]) satisfies z.ZodType<ImReplyPolicy>;
 const DeliveryStateSchema = z.enum([
   'no_message',
   'unknown',

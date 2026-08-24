@@ -35,6 +35,13 @@ const REPLY_POLICY: ImReplyPolicy = {
   target: TARGET,
   senderOwnership: { kind: 'mention', openId: 'ou_sender' },
 };
+const SUBSTITUTION_REPLY_POLICY: ImReplyPolicy = {
+  invocationKind: 'substitution',
+  scope: REPLY_POLICY.scope,
+  target: TARGET,
+  senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+  substitutionTargetOpenIds: ['ou_target'],
+};
 const cleanups: Array<() => Promise<void>> = [];
 const journals: OmpDeliveryJournal[] = [];
 
@@ -132,6 +139,86 @@ describe('OMP Reply restart recovery', () => {
     expect(fake.update).not.toHaveBeenCalled();
     expect(fake.close).not.toHaveBeenCalled();
     expect(fake.patch).not.toHaveBeenCalled();
+  });
+
+  it('recovers substitution interruption with sender ownership only', async () => {
+    const tmp = await temporaryProfile();
+    const path = join(tmp.profile, 'substitution-interrupted.json');
+    await seed(path, [
+      {
+        runId: 'run_substitution_interrupted',
+        replyPolicy: SUBSTITUTION_REPLY_POLICY,
+        deliveryState: 'no_message',
+        nextSequence: 1,
+        time: { openedAtMs: NOW - 1_000 },
+      },
+    ]);
+    const fake = fakeChannel();
+    const restarted = trackedJournal(path);
+
+    await activateOmpReplyRecovery({ channel: fake.channel, journal: restarted, now: () => NOW });
+
+    expect(fake.reply).toHaveBeenCalledOnce();
+    const payload = JSON.stringify(replyPayload(fake.reply.mock.calls[0]?.[0]));
+    expect(payload.match(/ou_sender/g)).toHaveLength(1);
+    expect(payload).not.toMatch(/ou_target|AI 代|回答（已在本回复中点名）/);
+    expect(restarted.entries()).toEqual([]);
+  });
+
+  it('exact-retries a durable substitution terminal request without recomputing policy', async () => {
+    const tmp = await temporaryProfile();
+    const path = join(tmp.profile, 'substitution-exact-retry.json');
+    const pending: DurablePendingOperation = {
+      kind: 'reply',
+      transport: 'markdown',
+      terminal: true,
+      uuid: 'uuid_substitution_exact',
+      sequence: 0,
+      request: {
+        path: { message_id: TARGET.messageId },
+        data: {
+          msg_type: 'post',
+          content: JSON.stringify({
+            zh_cn: {
+              title: '',
+              content: [
+                [{ tag: 'at', user_id: 'ou_sender' }],
+                [
+                  { tag: 'text', text: 'AI 代 ' },
+                  { tag: 'at', user_id: 'ou_target' },
+                  { tag: 'text', text: '回答（已在本回复中点名）' },
+                ],
+                [{ tag: 'md', text: 'answer' }],
+              ],
+            },
+          }),
+          reply_in_thread: true,
+          uuid: 'uuid_substitution_exact',
+        },
+      },
+    };
+    await seed(path, [
+      {
+        runId: 'run_substitution_exact',
+        replyPolicy: SUBSTITUTION_REPLY_POLICY,
+        transport: 'markdown',
+        deliveryState: 'unknown',
+        nextSequence: 1,
+        time: { openedAtMs: NOW - 1_000 },
+        pending,
+      },
+    ]);
+    const fake = fakeChannel();
+    const restarted = trackedJournal(path);
+
+    await activateOmpReplyRecovery({ channel: fake.channel, journal: restarted, now: () => NOW });
+
+    expect(fake.reply).toHaveBeenCalledOnce();
+    expect(fake.reply.mock.calls[0]?.[0]).toEqual(pending.request);
+    expect(JSON.stringify(fake.reply.mock.calls[0]?.[0]).match(/ou_target/g)).toHaveLength(1);
+    expect(fake.update).not.toHaveBeenCalled();
+    expect(fake.patch).not.toHaveBeenCalled();
+    expect(restarted.entries()).toEqual([]);
   });
 
   it('exact-retries an unknown initial submission inside one hour and interrupts the recovered binding', async () => {

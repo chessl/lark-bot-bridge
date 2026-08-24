@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createDefaultProfileConfig,
+  normalizePersonalSubstitution,
   normalizeProfileConfig,
   normalizeTrustedPeerBots,
 } from '../../../src/config/profile-schema';
@@ -77,6 +78,24 @@ describe('OMP profile schema', () => {
   it('requires persisted collaboration and defaults new profiles off', () => {
     expect(() => normalizeProfileConfig({ app, omp })).toThrow(/collaboration/);
     expect(createDefaultProfileConfig({ app, omp }).collaboration).toEqual(collaboration);
+  });
+
+  it('retains one disabled substitution target and rejects unsafe cardinality atomically', () => {
+    expect(
+      normalizePersonalSubstitution({ enabled: false, targetOpenIds: ['ou_target'] }),
+    ).toEqual({ enabled: false, targetOpenIds: ['ou_target'] });
+    expect(() =>
+      normalizePersonalSubstitution({ enabled: true, targetOpenIds: [] }),
+    ).toThrow(/requires one target/);
+    expect(() =>
+      normalizePersonalSubstitution({
+        enabled: true,
+        targetOpenIds: ['ou_first', 'ou_second'],
+      }),
+    ).toThrow(/between 0 and 1/);
+    expect(() =>
+      normalizePersonalSubstitution({ enabled: true, targetOpenIds: ['user_target'] }),
+    ).toThrow(/open ID/);
   });
 
   it('validates trusted peer aliases and canonical IDs atomically', () => {

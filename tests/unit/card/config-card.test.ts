@@ -58,3 +58,37 @@ describe('config trusted peer controls', () => {
     expect(failed).not.toContain('<at');
   });
 });
+
+describe('config personal substitution controls', () => {
+  const personalSubstitution = {
+    enabled: true,
+    targetOpenIds: ['ou_target_secret_123456'],
+  };
+
+  it('keeps one retained target in the collaboration form without a real Mention or full ID', () => {
+    const json = JSON.stringify(configFormCard({ ...base, personalSubstitution }));
+    expect(json).toContain('personal_substitution_enabled');
+    expect(json).toContain('personal_substitution_target');
+    expect(json).toContain('…123456');
+    expect(json).not.toContain('ou_target_secret_123456');
+    expect(json).not.toContain('<at');
+  });
+
+  it('safe-echoes only enabled state and target count on success or failure', () => {
+    const saved = JSON.stringify(configSavedCard({ ...base, personalSubstitution }));
+    const failed = JSON.stringify(
+      configFailedCard(
+        'target@example.com failed for ou_target_secret_123456',
+        [],
+        1,
+      ),
+    );
+    expect(saved).toContain('启用（1 个已保存目标）');
+    expect(failed).toContain('1 个目标（内容已隐藏）');
+    for (const card of [saved, failed]) {
+      expect(card).not.toContain('target@example.com');
+      expect(card).not.toContain('ou_target_secret_123456');
+      expect(card).not.toContain('<at');
+    }
+  });
+});

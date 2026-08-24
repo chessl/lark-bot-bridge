@@ -1,4 +1,8 @@
-import { sanitizeImAnswer, type ImReplyPlan } from '../bot/im-invocation';
+import {
+  sanitizeImAnswer,
+  substitutionMentionOpenIds,
+  type ImReplyPlan,
+} from '../bot/im-invocation';
 import { deepMaskEmails, maskEmails } from './mask-email';
 import type { RunState, ToolEntry, ToolStatus } from './run-state';
 
@@ -245,43 +249,51 @@ export function renderOmpReplyMarkdown(
 
 export function renderOmpReplyMarkdownPost(
   input: ReplyInput,
-  mentionMode?: ReplyMentionMode,
+  mentionMode: ReplyMentionMode = 'mention',
 ): object {
-  if (isImReplyPlan(input) && mentionMode !== 'plain') {
+  if (!isImReplyPlan(input) || mentionMode === 'plain') {
+    return markdownPost(renderOmpReplyMarkdown(input, mentionMode));
+  }
+  const activation = input.invocationKind === 'ordinary' ? input.peerActivation : undefined;
+  if (activation) {
     const owner =
       input.senderOwnership.kind === 'mention'
         ? [[{ tag: 'at', user_id: input.senderOwnership.openId }]]
         : [];
     const markdown = renderOmpReplyMarkdown(input, 'omit');
-    const activation = input.peerActivation;
-    if (activation) {
-      const body = sanitizeImAnswer(ompReplyPresentation(input.state).finalReply);
-      const before = maskEmails(`**回复**\n\n${body.slice(0, activation.start)}`);
-      const matched = maskEmails(body.slice(activation.start, activation.end));
-      if (
-        markdown.startsWith(before) &&
-        markdown.slice(before.length, before.length + matched.length) === matched
-      ) {
-        const peerRow = [
-          ...(before ? [{ tag: 'md', text: before }] : []),
-          { tag: 'at', user_id: activation.openId },
-          ...(markdown.length > before.length + matched.length
-            ? [{ tag: 'md', text: markdown.slice(before.length + matched.length) }]
-            : []),
-        ];
-        return { zh_cn: { title: '', content: [...owner, peerRow] } };
-      }
-    }
-    if (owner.length > 0) {
-      return {
-        zh_cn: {
-          title: '',
-          content: [...owner, [{ tag: 'md', text: markdown }]],
-        },
-      };
+    const body = sanitizeImAnswer(ompReplyPresentation(input.state).finalReply);
+    const before = maskEmails(`**回复**\n\n${body.slice(0, activation.start)}`);
+    const matched = maskEmails(body.slice(activation.start, activation.end));
+    if (
+      markdown.startsWith(before) &&
+      markdown.slice(before.length, before.length + matched.length) === matched
+    ) {
+      const peerRow = [
+        ...(before ? [{ tag: 'md', text: before }] : []),
+        { tag: 'at', user_id: activation.openId },
+        ...(markdown.length > before.length + matched.length
+          ? [{ tag: 'md', text: markdown.slice(before.length + matched.length) }]
+          : []),
+      ];
+      return { zh_cn: { title: '', content: [...owner, peerRow] } };
     }
   }
-  return markdownPost(renderOmpReplyMarkdown(input, mentionMode));
+  const targetOpenIds = substitutionMentionOpenIds(input);
+  const content: object[][] = [];
+  if (input.senderOwnership.kind === 'mention') {
+    content.push([{ tag: 'at', user_id: input.senderOwnership.openId }]);
+  }
+  if (targetOpenIds[0]) {
+    content.push([
+      { tag: 'text', text: 'AI 代 ' },
+      { tag: 'at', user_id: targetOpenIds[0] },
+      { tag: 'text', text: '回答（已在本回复中点名）' },
+    ]);
+    content.push([{ tag: 'text', text: '' }]);
+  }
+  if (content.length === 0) return markdownPost(renderOmpReplyMarkdown(input, mentionMode));
+  content.push([{ tag: 'md', text: renderOmpReplyMarkdown(input, 'omit') }]);
+  return { zh_cn: { title: '', content } };
 }
 
 function withinMarkdownBudget(markdown: string): boolean {
@@ -442,18 +454,29 @@ function withSenderOwnership(
 ): string {
   const safeBody = isImReplyPlan(input) ? sanitizeImAnswer(body) : body;
   const ownedBody = withPeerActivation(input, safeBody, mentionMode);
-  if (
-    !isImReplyPlan(input) ||
-    input.senderOwnership.kind === 'none' ||
-    mentionMode === 'omit'
-  ) {
-    return ownedBody;
+  if (!isImReplyPlan(input) || mentionMode === 'omit') return ownedBody;
+
+  const prefix: string[] = [];
+  if (input.senderOwnership.kind === 'mention') {
+    prefix.push(
+      mentionMode === 'plain'
+        ? '\\@请求者'
+        : `<at id="${escapeAttribute(input.senderOwnership.openId)}"></at>`,
+    );
   }
-  const owner =
-    mentionMode === 'plain'
-      ? '\\@请求者\n<font color="grey">Mention 不可用，已改为文本归属</font>'
-      : `<at id="${escapeAttribute(input.senderOwnership.openId)}"></at>`;
-  return `${owner}\n\n${ownedBody}`;
+  const targetOpenId = substitutionMentionOpenIds(input)[0];
+  if (targetOpenId) {
+    const target =
+      mentionMode === 'plain'
+        ? '\\@目标'
+        : `<at id="${escapeAttribute(targetOpenId)}"></at>`;
+    prefix.push(`AI 代 ${target}回答（已在本回复中点名）`);
+  }
+  if (prefix.length === 0) return ownedBody;
+  if (mentionMode === 'plain') {
+    prefix.push('<font color="grey">Mention 不可用，已改为文本归属</font>');
+  }
+  return `${prefix.join('\n')}\n\n${ownedBody}`;
 }
 
 function withPeerActivation(
@@ -461,7 +484,14 @@ function withPeerActivation(
   body: string,
   mentionMode: ReplyMentionMode,
 ): string {
-  if (!isImReplyPlan(input) || !input.peerActivation || mentionMode === 'omit') return body;
+  if (
+    !isImReplyPlan(input) ||
+    input.invocationKind !== 'ordinary' ||
+    !input.peerActivation ||
+    mentionMode === 'omit'
+  ) {
+    return body;
+  }
   const { alias, openId, start, end } = input.peerActivation;
   if (start < 0 || end <= start || end > body.length) return body;
   const mention =
