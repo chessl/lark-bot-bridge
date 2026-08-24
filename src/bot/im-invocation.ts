@@ -300,7 +300,7 @@ function parseSender(message: NormalizedMessage): ImSenderIdentity {
   if (
     (normalizedKind !== undefined && normalizedKind !== rawKind) ||
     (message.senderIsBot === true && rawKind !== 'bot') ||
-    (message.senderIsBot === false && rawKind === 'bot')
+    (message.senderIsBot === false && senderType === 'bot')
   ) {
     return Object.freeze({ kind: 'unknown', reason: 'contradictory-sender-type' });
   }

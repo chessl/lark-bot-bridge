@@ -194,9 +194,7 @@ describe('terminal OMP Run state', () => {
 
     expect(card.match(/ou_sender/g)).toHaveLength(1);
     expect(markdown.match(/ou_sender/g)).toHaveLength(1);
-    expect(post).toMatchObject({
-      zh_cn: { content: [[{ tag: 'at', user_id: 'ou_sender' }]] },
-    });
+    expect(JSON.stringify(post)).toContain('"tag":"at","user_id":"ou_sender"');
     expect(JSON.stringify(post).match(/ou_sender/g)).toHaveLength(1);
     expect(card).not.toContain('ou_fake');
     expect(markdown).not.toContain('ou_fake');

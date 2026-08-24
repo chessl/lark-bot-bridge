@@ -47,7 +47,7 @@ describe('profile-aware account and config commands', () => {
       h.rootDir,
       (candidate) => candidate.profiles.claude?.preferences.maxConcurrentRuns === 7,
     );
-    expect(root.schemaVersion).toBe(2);
+    expect(root.schemaVersion).toBe(3);
     expect(root.activeProfile).toBe('claude');
     expect(root.profiles['codex-dev']).toBeDefined();
     expect(root.profiles.claude?.preferences).toMatchObject({
@@ -73,7 +73,7 @@ describe('profile-aware account and config commands', () => {
       h.rootDir,
       (candidate) => candidate.profiles.claude?.app.id === 'cli_new',
     );
-    expect(root.schemaVersion).toBe(2);
+    expect(root.schemaVersion).toBe(3);
     expect(root.profiles['codex-dev']).toBeDefined();
     expect(root.profiles.claude?.app).toMatchObject({
       id: 'cli_new',

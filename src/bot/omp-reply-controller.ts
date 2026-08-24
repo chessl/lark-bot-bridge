@@ -29,7 +29,7 @@ import type {
   ReplyTransport,
 } from './omp-delivery-journal';
 
-type OperationResult = 'success' | 'unknown' | 'rejected';
+type OperationResult = 'success' | 'unknown' | 'rejected' | 'mention_rejected';
 type ReplyRequest = Parameters<LarkChannel['rawClient']['im']['v1']['message']['reply']>[0];
 type UpdateRequest = Parameters<LarkChannel['rawClient']['cardkit']['v1']['card']['update']>[0];
 type CloseRequest = Parameters<LarkChannel['rawClient']['cardkit']['v1']['card']['settings']>[0];
@@ -208,15 +208,13 @@ export class OmpReplyController {
           makeProjection(renderManagedCard(plan)),
           true,
         );
-        if (update === 'rejected') {
-          await this.patchKnownTerminal(
-            degradedTerminal ?? staticTerminal,
-            plan,
-            Boolean(degradedTerminal),
-          );
+        if (update === 'mention_rejected') {
+          await this.patchKnownTerminal(degradedTerminal ?? staticTerminal, plan, true);
+        } else if (update === 'rejected') {
+          await this.patchKnownTerminal(staticTerminal, plan, false);
         } else {
           const close = await this.commitClose(finalState);
-          if (close === 'rejected') {
+          if (close !== 'success') {
             await this.patchKnownTerminal(staticTerminal, plan, false);
           }
         }
@@ -230,7 +228,7 @@ export class OmpReplyController {
           true,
           plan.target,
         );
-        if (markdown === 'rejected' && plan.senderOwnership.kind === 'mention') {
+        if (markdown === 'mention_rejected' && plan.senderOwnership.kind === 'mention') {
           logReplyMention('degraded', plan, transport, 'mention-rejected');
           const degraded = await this.commitReply(
             'markdown',
@@ -239,8 +237,8 @@ export class OmpReplyController {
             true,
             plan.target,
           );
-          if (degraded === 'rejected') throw this.deliveryFailure('terminal-markdown-rejected');
-        } else if (markdown === 'rejected') {
+          if (degraded !== 'success') throw this.deliveryFailure('terminal-markdown-rejected');
+        } else if (markdown !== 'success') {
           throw this.deliveryFailure('terminal-markdown-rejected');
         }
       }
@@ -367,7 +365,7 @@ export class OmpReplyController {
       if (degraded) logReplyMention('degraded', plan, this.requireOpen(), 'mention-rejected');
       return;
     }
-    if (fallback) {
+    if (patch === 'mention_rejected' && fallback) {
       logReplyMention('degraded', plan, this.requireOpen(), 'mention-rejected');
       const retry = await this.commitStaticPatch(fallback, true);
       if (retry === 'success') return;
@@ -425,14 +423,14 @@ export class OmpReplyController {
         await this.persist();
         return 'success';
       }
-      if (result === 'rejected') {
+      if (result === 'rejected' || result === 'mention_rejected') {
         if (operation.kind === 'update' || operation.kind === 'close') {
           this.#sequence = operation.sequence;
         }
         this.#deliveryState = this.#messageKnown ? 'message_known' : 'not_sent';
         this.#pending = undefined;
         await this.persist();
-        return 'rejected';
+        return result;
       }
       this.#deliveryState = 'unknown';
       await this.persist();
@@ -660,11 +658,14 @@ async function retryUnknownOperation(
   try {
     const attempt = await attemptDurableOperation(channel, pending, true);
     if (attempt.result === 'unknown') return;
-    if (attempt.result === 'rejected') {
+    if (attempt.result === 'rejected' || attempt.result === 'mention_rejected') {
       if (pending.kind === 'reply' && entry.time.messageKnownAtMs === undefined) {
         const plan = interruptedReplyPlan(entry.replyPolicy);
         logReplyMention('planned', plan, 'markdown', mentionReason(plan));
-        const mentionMode = plan.senderOwnership.kind === 'mention' ? 'plain' : 'mention';
+        const mentionMode =
+          attempt.result === 'mention_rejected' && plan.senderOwnership.kind === 'mention'
+            ? 'plain'
+            : 'mention';
         if (mentionMode === 'plain') {
           logReplyMention('degraded', plan, 'markdown', 'mention-rejected');
         }
@@ -678,6 +679,7 @@ async function retryUnknownOperation(
         return;
       }
       if (
+        attempt.result === 'mention_rejected' &&
         pending.terminal &&
         (pending.kind === 'update' || pending.kind === 'patch') &&
         entry.replyPolicy.senderOwnership.kind === 'mention'
@@ -790,7 +792,7 @@ async function recoverInterrupted(
       if (update === 'unknown') return;
       const known = clearPending({ ...entry, nextSequence: sequence + 1, pending }, now);
       await journal.put(known);
-      if (update === 'rejected') {
+      if (update === 'mention_rejected') {
         const degraded = plan.senderOwnership.kind === 'mention';
         if (degraded) {
           logReplyMention('degraded', plan, 'managed', 'mention-rejected');
@@ -810,6 +812,18 @@ async function recoverInterrupted(
               )
             : staticProjection,
           degraded ? 'plain' : 'mention',
+          false,
+        );
+        return;
+      }
+      if (update === 'rejected') {
+        await patchRecoveredMessage(
+          channel,
+          journal,
+          known,
+          plan,
+          staticProjection,
+          'mention',
           false,
         );
         return;
@@ -846,13 +860,13 @@ async function recoverInterruptedWithoutMessage(
   let pending = recoveryReplyOperation(plan, mode);
   let result = await submitRecoveryOperation(channel, journal, entry, pending);
   if (result === 'unknown') return;
-  if (result === 'rejected' && mode === 'mention' && plan.senderOwnership.kind === 'mention') {
+  if (result === 'mention_rejected' && mode === 'mention' && plan.senderOwnership.kind === 'mention') {
     mode = 'plain';
     logReplyMention('degraded', plan, 'markdown', 'mention-rejected');
     pending = recoveryReplyOperation(plan, mode);
     result = await submitRecoveryOperation(channel, journal, entry, pending);
   }
-  if (result === 'rejected') {
+  if (result !== 'success') {
     await failRecovery(journal, entry, 'terminal-markdown-rejected');
     return;
   }
@@ -920,7 +934,7 @@ async function closeRecoveredManaged(
   if (close === 'unknown') return;
   const known = clearPending({ ...entry, nextSequence: sequence + 1, pending }, now);
   await journal.put(known);
-  if (close === 'rejected') {
+  if (close !== 'success') {
     await patchRecoveredMessage(
       channel,
       journal,
@@ -973,7 +987,7 @@ async function patchRecoveredMessage(
     operation(mentionMode, projection),
   );
   if (patch === 'unknown') return;
-  if (patch === 'rejected' && allowDegrade && plan.senderOwnership.kind === 'mention') {
+  if (patch === 'mention_rejected' && allowDegrade && plan.senderOwnership.kind === 'mention') {
     logReplyMention('degraded', plan, entry.transport ?? 'inline', 'mention-rejected');
     const degraded = makeProjection(
       renderOmpReplyCard(plan, {
@@ -985,7 +999,7 @@ async function patchRecoveredMessage(
     patch = await submitRecoveryOperation(channel, journal, entry, operation('plain', degraded));
     if (patch === 'unknown') return;
   }
-  if (patch === 'rejected') {
+  if (patch !== 'success') {
     await failRecovery(journal, entry, 'static-terminal-patch-rejected');
     return;
   }
@@ -1036,23 +1050,55 @@ async function attemptDurableOperation(
         return { result: exactRetry ? 'success' : 'unknown' };
       }
       return {
-        result: typeof code === 'number' && code !== 0 ? 'rejected' : 'unknown',
+        result:
+          typeof code === 'number' && code !== 0
+            ? rejectedOperation(response)
+            : 'unknown',
       };
     }
     if (operation.kind === 'patch') {
       const response = await channel.rawClient.im.v1.message.patch(operation.request);
       const code = response.code;
-      return { result: code === 0 ? 'success' : typeof code === 'number' ? 'rejected' : 'unknown' };
+      return {
+        result:
+          code === 0
+            ? 'success'
+            : typeof code === 'number'
+              ? rejectedOperation(response)
+              : 'unknown',
+      };
     }
     const response =
       operation.kind === 'update'
         ? await channel.rawClient.cardkit.v1.card.update(operation.request)
         : await channel.rawClient.cardkit.v1.card.settings(operation.request);
     const code = response.code;
-    return { result: code === 0 ? 'success' : typeof code === 'number' ? 'rejected' : 'unknown' };
+    return {
+      result:
+        code === 0
+          ? 'success'
+          : typeof code === 'number'
+            ? rejectedOperation(response)
+            : 'unknown',
+    };
   } catch (error) {
-    return { result: isClearRejection(error) ? 'rejected' : 'unknown' };
+    return {
+      result: isClearRejection(error) ? rejectedOperation(error) : 'unknown',
+    };
   }
+}
+
+function rejectedOperation(value: unknown): Extract<OperationResult, 'rejected' | 'mention_rejected'> {
+  if (value && typeof value === 'object') {
+    const message =
+      'msg' in value && typeof value.msg === 'string'
+        ? value.msg
+        : 'message' in value && typeof value.message === 'string'
+          ? value.message
+          : '';
+    if (/(?:\bmention\b|@|提及)/iu.test(message)) return 'mention_rejected';
+  }
+  return 'rejected';
 }
 
 function isKnownEntryExpired(entry: ActiveDelivery, nowMs: number): boolean {

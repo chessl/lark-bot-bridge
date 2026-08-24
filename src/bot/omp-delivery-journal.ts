@@ -148,6 +148,7 @@ export type DeliveryFailureReason =
   | 'corrupt-journal-json'
   | 'corrupt-journal-shape'
   | 'corrupt-journal-entry'
+  | 'recovery-scan-failed'
   | 'recovery-timestamp-in-future'
   | 'initial-uuid-window-expired'
   | 'message-update-window-expired'
@@ -273,9 +274,9 @@ export class OmpDeliveryJournal {
     if (this.#scanner) return;
     this.#scanner = setInterval(() => {
       const result = this.#scannerWork.then(scan);
-      this.#scannerWork = result.catch((error) =>
-        log.fail('reply-recovery', error, { step: 'scan' }),
-      );
+      this.#scannerWork = result.catch(() => {
+        this.recordFailure(undefined, 'recovery-scan-failed');
+      });
     }, intervalMs);
   }
 

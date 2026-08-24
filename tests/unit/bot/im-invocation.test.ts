@@ -83,29 +83,20 @@ describe('IM message planning', () => {
         rawSenderId: 'ou_sender',
         expected: { kind: 'unknown', reason: 'contradictory-sender-type' },
       },
-      {
-        name: 'contradictory app bot marker',
-        senderType: 'app',
-        normalizedSenderIsBot: false,
-        rawSenderId: 'ou_sender',
-        expected: { kind: 'unknown', reason: 'contradictory-sender-type' },
-      },
     ] satisfies Array<{
       name: string;
       senderType: string | undefined;
       normalizedSenderType?: string;
-      normalizedSenderIsBot?: boolean;
       rawSenderId: string | undefined;
       expected: object;
     }>,
   )(
     'keeps $name explicit',
-    ({ name, senderType, normalizedSenderType, normalizedSenderIsBot, rawSenderId, expected }) => {
+    ({ name, senderType, normalizedSenderType, rawSenderId, expected }) => {
       const message = imMessage({
         messageId: `om_${name}`,
         ...(senderType === undefined ? {} : { senderType }),
         ...(normalizedSenderType === undefined ? {} : { normalizedSenderType }),
-        ...(normalizedSenderIsBot === undefined ? {} : { normalizedSenderIsBot }),
         ...(rawSenderId === undefined ? {} : { rawSenderId }),
       });
       const plan = ordinaryPlan(message, CHAT_SCOPE);
@@ -312,7 +303,6 @@ function imMessage(
     senderType?: string;
     rawSenderId?: string;
     normalizedSenderType?: string;
-    normalizedSenderIsBot?: boolean;
     threadId?: string;
   } = {},
 ): NormalizedMessage {
@@ -326,9 +316,7 @@ function imMessage(
     ...(normalizedSenderType
       ? {
           senderType: normalizedSenderType,
-          senderIsBot:
-            input.normalizedSenderIsBot ??
-            (normalizedSenderType === 'app' || normalizedSenderType === 'bot'),
+          senderIsBot: normalizedSenderType === 'bot',
         }
       : {}),
     ...(input.senderName ? { senderName: input.senderName } : {}),

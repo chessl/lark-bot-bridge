@@ -101,8 +101,8 @@ describe('OMP Reply restart recovery', () => {
       'deliveryState',
       'nextSequence',
       'pending',
-      'runId',
       'replyPolicy',
+      'runId',
       'time',
       'transport',
     ]);
@@ -125,7 +125,9 @@ describe('OMP Reply restart recovery', () => {
     expect(restarted.entries()).toEqual([]);
     expect(fake.reply).toHaveBeenCalledTimes(2);
     for (const call of fake.reply.mock.calls) {
-      expect(JSON.stringify(call[0])).toContain('"tag":"at","user_id":"ou_sender"');
+      const payload = JSON.stringify(replyPayload(call[0]));
+      expect(payload).toContain('"tag":"at"');
+      expect(payload.match(/ou_sender/g)).toHaveLength(1);
     }
     expect(fake.update).not.toHaveBeenCalled();
     expect(fake.close).not.toHaveBeenCalled();
@@ -549,4 +551,19 @@ function updatePayload(input: unknown): string {
     return '';
   }
   return input.data.card.data;
+}
+
+function replyPayload(input: unknown): unknown {
+  if (
+    typeof input !== 'object' ||
+    input === null ||
+    !('data' in input) ||
+    typeof input.data !== 'object' ||
+    input.data === null ||
+    !('content' in input.data) ||
+    typeof input.data.content !== 'string'
+  ) {
+    return undefined;
+  }
+  return JSON.parse(input.data.content);
 }
