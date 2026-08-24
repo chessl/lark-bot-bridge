@@ -305,11 +305,7 @@ async function createHarness(
   return {
     rootDir,
     channel,
-    command: (
-      content: string,
-      formValue?: Record<string, unknown>,
-      messageId?: string,
-    ) =>
+    command: (content: string, formValue?: Record<string, unknown>, messageId?: string) =>
       tryHandleCommand({
         channel: channel as unknown as CommandContext['channel'],
         msg: message(content, messageId),
