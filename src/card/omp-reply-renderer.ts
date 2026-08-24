@@ -356,6 +356,13 @@ export function renderOmpReplyMarkdownPost(
     throw new Error('cannot render a running OMP Reply as terminal Markdown');
   }
   const finalText = ompReplyPresentation(state).finalReply;
+  if (
+    isImReplyPlan(input) &&
+    input.invocationKind === 'ordinary' &&
+    input.peerActivation
+  ) {
+    return buildOmpReplyMarkdownPost(input, finalText, mentionMode);
+  }
   const full = buildOmpReplyMarkdownPost(input, finalText, mentionMode);
   if (withinPostBudget(full) || state.terminal !== 'done') return full;
 
@@ -385,11 +392,14 @@ function buildOmpReplyMarkdownPost(
   finalText: string,
   mentionMode: ReplyMentionMode,
 ): object {
-  if (!isImReplyPlan(input) || mentionMode === 'plain') {
+  if (!isImReplyPlan(input)) {
     return markdownPost(buildOmpReplyMarkdown(input, finalText, mentionMode));
   }
   const activation = input.invocationKind === 'ordinary' ? input.peerActivation : undefined;
   if (activation) {
+    if (mentionMode === 'plain') {
+      return markdownPost(renderedOmpReplyMarkdown(input, mentionMode).markdown);
+    }
     const owner =
       input.senderOwnership.kind === 'mention'
         ? [[{ tag: 'at', user_id: input.senderOwnership.openId }]]
@@ -427,6 +437,9 @@ function buildOmpReplyMarkdownPost(
         };
       }
     }
+  }
+  if (mentionMode === 'plain') {
+    return markdownPost(buildOmpReplyMarkdown(input, finalText, mentionMode));
   }
   const targetOpenIds = substitutionMentionOpenIds(input);
   const content: object[][] = [];
