@@ -279,7 +279,8 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
   }
 
   const trustedPeers = snapshotTrustedPeers(input.trustedPeerBots ?? []);
-  const peer = trustedPeers.find((candidate) => candidate.openId === source.sender.id);
+  const peerSenderId = source.sender.id;
+  const peer = trustedPeers.find((candidate) => candidate.openId === peerSenderId);
   if (!peer) {
     return Object.freeze({ lane: 'drop', reason: 'untrusted-bot', allowAccessHint: false });
   }
@@ -316,11 +317,12 @@ export function createImInvocation(
       target,
       senderOwnership: Object.freeze({ kind: 'none', reason: 'verified-bot-sender' }),
     }) satisfies ImPeerInvocation['replyPolicy'];
+    const sourceMessages: readonly [ImSourceMessage] = Object.freeze([first.source]);
     return Object.freeze({
       kind: 'peer',
       routeReason: 'trusted-peer',
       scope: first.scope,
-      sourceMessages: Object.freeze([first.source]),
+      sourceMessages,
       replyTarget: target,
       peerAlias: first.peer.alias,
       trustedPeers: first.trustedPeers,

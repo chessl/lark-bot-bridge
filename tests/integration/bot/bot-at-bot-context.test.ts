@@ -240,7 +240,7 @@ describe('sender identity in bridge_context', () => {
     for (const [messageId, content] of [
       ['om_peer_first', 'first peer request'],
       ['om_peer_second', 'second peer request'],
-    ]) {
+    ] satisfies Array<[string, string]>) {
       await h.channel.handlers.message?.(
         message({
           messageId,

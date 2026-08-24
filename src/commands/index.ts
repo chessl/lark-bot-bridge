@@ -1449,6 +1449,7 @@ async function showConfigForm(ctx: CommandContext): Promise<void> {
     allowedUsers: access.allowedUsers,
     allowedChats: access.allowedChats,
     admins: access.admins,
+    knownChats: ctx.controls.knownChats ?? [],
     trustedPeerBots: maskSavedTrustedPeers(ctx.controls.cfg.collaboration.trustedPeerBots),
     ...(consoleUrl ? { consoleUrl } : {}),
   });
