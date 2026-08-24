@@ -180,6 +180,11 @@ function isAdminCommand(cmd: string): boolean {
   return ADMIN_COMMANDS.has(cmd.startsWith('/') ? cmd : `/${cmd}`);
 }
 
+export function isKnownTextCommand(content: string): boolean {
+  const command = content.trim().split(/\s+/, 1)[0];
+  return command !== undefined && command.startsWith('/') && handlers[command] !== undefined;
+}
+
 export async function tryHandleCommand(ctx: CommandContext): Promise<boolean> {
   const trimmed = ctx.msg.content.trim();
   if (!trimmed.startsWith('/')) return false;

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
+import type { LarkChannel } from '@larksuite/channel';
 import {
   ompReplyPresentation,
   renderOmpReplyCard,
   renderOmpReplyMarkdownPost,
 } from '../card/omp-reply-renderer';
 import { initialState as emptyRunState, markInterrupted, type RunState } from '../card/run-state';
+import type { ImReplyPlan, ImReplyTarget } from './im-invocation';
 import type {
   ActiveDelivery,
   DeliveryFailureReason,
@@ -14,38 +15,6 @@ import type {
   OmpDeliveryJournal,
   ReplyTransport,
 } from './omp-delivery-journal';
-
-export type OmpReplyTarget =
-  | Readonly<{
-      chatId: string;
-      messageId: string;
-      replyInThread: false;
-    }>
-  | Readonly<{
-      chatId: string;
-      messageId: string;
-      threadId: string;
-      replyInThread: true;
-    }>;
-
-export function deriveOmpReplyTarget(
-  message: Pick<NormalizedMessage, 'chatId' | 'messageId' | 'threadId'>,
-): OmpReplyTarget {
-  return Object.freeze(
-    message.threadId
-      ? {
-          chatId: message.chatId,
-          messageId: message.messageId,
-          threadId: message.threadId,
-          replyInThread: true,
-        }
-      : {
-          chatId: message.chatId,
-          messageId: message.messageId,
-          replyInThread: false,
-        },
-  );
-}
 
 type OperationResult = 'success' | 'unknown' | 'rejected';
 type ReplyRequest = Parameters<LarkChannel['rawClient']['im']['v1']['message']['reply']>[0];
@@ -82,7 +51,7 @@ const CARD_ALREADY_BOUND = 200780;
 /** Owns the one CardKit bubble used by an OMP instant-message Run. */
 export class OmpReplyController {
   readonly #channel: LarkChannel;
-  readonly #target: OmpReplyTarget;
+  readonly #target: ImReplyTarget;
   readonly #journal: OmpDeliveryJournal | undefined;
   readonly #runId: string | undefined;
   readonly #now: () => number;
@@ -105,7 +74,7 @@ export class OmpReplyController {
 
   constructor(input: {
     channel: LarkChannel;
-    target: OmpReplyTarget;
+    target: ImReplyTarget;
     journal?: OmpDeliveryJournal;
     runId?: string;
     now?: () => number;
@@ -188,7 +157,8 @@ export class OmpReplyController {
     }
   }
 
-  async finish(finalState: RunState): Promise<void> {
+  async finish(plan: ImReplyPlan): Promise<void> {
+    const finalState = plan.state;
     if (finalState.terminal === 'running') throw new Error('cannot finish a running OMP Reply');
     if (this.#terminalRequested || this.#finished) throw new Error('OMP Reply is already finished');
     const transport = this.requireOpen();

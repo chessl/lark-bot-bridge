@@ -957,6 +957,26 @@ describe('P2P OMP Reply', () => {
     expect(rejection.channel.rawClient.im.v1.message.reply).not.toHaveBeenCalled();
     expect(rejection.channel.sent[0]?.options).toMatchObject({ replyTo: 'om_rejection' });
   });
+
+  it('creates one Invocation, Run, and Reply for duplicate IM deliveries', async () => {
+    const h = await createHarness();
+    await startTestBridge(h);
+    const duplicate = message('om_duplicate', 'run once');
+
+    await h.channel.handlers.message?.(duplicate);
+    await h.channel.handlers.message?.(duplicate);
+    await waitFor(() =>
+      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+    );
+
+    expect(h.agent.runOptions).toHaveLength(1);
+    expect(h.channel.createdCards).toHaveLength(1);
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+    expect(h.channel.rawClient.im.v1.message.reply.mock.calls[0]?.[0]).toMatchObject({
+      path: { message_id: 'om_duplicate' },
+    });
+  });
+
   it('renders model, configuration, total duration, usage, and TPS in one footer', async () => {
     const h = await createHarness({
       wallNow: clock(1_000_500),
@@ -1385,6 +1405,13 @@ function message(
     contentType: 'text',
     resources: [],
     mentionedBot: false,
+    raw: {
+      sender: {
+        sender_id: { open_id: 'ou_user' },
+        sender_type: 'user',
+      },
+      message: { message_id: messageId },
+    },
     ...(createTime === null ? {} : { createTime }),
   } as unknown as NormalizedMessage;
 }

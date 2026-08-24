@@ -22,7 +22,7 @@ import {
   type RunState,
   reduceWithClock,
 } from '../card/run-state';
-import { type Controls, tryHandleCommand } from '../commands';
+import { type Controls, isKnownTextCommand, tryHandleCommand } from '../commands';
 import type { AppPaths } from '../config/app-paths';
 import type { ProfileConfig } from '../config/profile-schema';
 import { getAgentStopGraceMs, getMaxConcurrentRuns, getRunIdleTimeoutMs } from '../config/schema';
@@ -43,14 +43,19 @@ import type { WorkspaceStore } from '../workspace/store';
 import { ActiveRuns } from './active-runs';
 import { type ChatMode, ChatModeCache } from './chat-mode-cache';
 import { handleCommentMention } from './comments';
+import {
+  createImInvocation,
+  finalizeImReply,
+  type ImConversationScope,
+  type ImInvocation,
+  type ImOrdinaryMessagePlan,
+  type ImPromptMessage,
+  planImMessage,
+} from './im-invocation';
 import { startKeepalive } from './keepalive';
 import { fetchKnownChats } from './lark-info';
 import { OmpDeliveryJournal } from './omp-delivery-journal';
-import {
-  activateOmpReplyRecovery,
-  deriveOmpReplyTarget,
-  OmpReplyController,
-} from './omp-reply-controller';
+import { activateOmpReplyRecovery, OmpReplyController } from './omp-reply-controller';
 import { PendingQueue } from './pending-queue';
 import { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
@@ -179,6 +184,8 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   const wallNow = deps.wallNow ?? Date.now;
   const monoNow = deps.monoNow ?? performance.now.bind(performance);
   const messageReceipts = new WeakMap<NormalizedMessage, RunMetricReceipt>();
+  const imPlans = new WeakMap<NormalizedMessage, ImOrdinaryMessagePlan>();
+  const seenImMessageIds = new Set<string>();
   const activeRuns = new ActiveRuns();
   // ChatModeCache stays per-bridge-instance — invalidated on restart along
   // with everything else. Topic-mode chats only need one chat.get() call ever.
@@ -320,6 +327,25 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
             threadId: firstMsg.threadId,
           });
         }
+        const plans = batch.map((message) => {
+          const existing = imPlans.get(message);
+          if (existing) return existing;
+          const fallback = planImMessage({
+            message,
+            scope: conversationScope(scope, message.chatId, mode, message.threadId),
+            authorized: true,
+            duplicate: false,
+            mentionRequired: false,
+            recognizedCommand: false,
+          });
+          if (fallback.lane !== 'ordinary') {
+            throw new Error('queued IM message did not produce an ordinary plan');
+          }
+          return fallback;
+        });
+        const firstPlan = plans[0];
+        if (!firstPlan) return;
+        const invocation = createImInvocation([firstPlan, ...plans.slice(1)], channel.botIdentity);
         await runAgentBatch({
           channel,
           scopedRuns,
@@ -327,13 +353,11 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           sessionCatalog,
           media,
           deliveryJournal,
-          batch,
+          invocation,
           controls,
           lastRunModelByScope,
           messageReceipts,
           monoNow,
-          scope,
-          mode,
         });
       } catch (err) {
         log.fail('flush', err);
@@ -369,6 +393,9 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           chatModeCache,
           logThreadModeOverride,
           scopedRuns,
+          imPlans,
+          seenImMessageIds,
+          messageReceipts,
         }),
       ).catch((err) => log.fail('intake', err));
     },
@@ -627,6 +654,9 @@ interface IntakeDeps {
   chatModeCache: ChatModeCache;
   logThreadModeOverride: LogThreadModeOverride;
   scopedRuns: ScopedRuns;
+  imPlans: WeakMap<NormalizedMessage, ImOrdinaryMessagePlan>;
+  seenImMessageIds: Set<string>;
+  messageReceipts: WeakMap<NormalizedMessage, RunMetricReceipt>;
 }
 
 type LogThreadModeOverride = (input: {
@@ -634,6 +664,17 @@ type LogThreadModeOverride = (input: {
   resolvedMode: ChatMode;
   threadId: string;
 }) => void;
+
+function conversationScope(
+  id: string,
+  chatId: string,
+  mode: ChatMode,
+  threadId: string | undefined,
+): ImConversationScope {
+  return mode === 'topic' && threadId
+    ? Object.freeze({ kind: 'topic', id, chatId, threadId, mode })
+    : Object.freeze({ kind: 'chat', id, chatId, mode });
+}
 
 async function intakeMessage(deps: IntakeDeps): Promise<void> {
   const {
@@ -648,8 +689,10 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     chatModeCache,
     logThreadModeOverride,
     scopedRuns,
+    imPlans,
+    seenImMessageIds,
+    messageReceipts,
   } = deps;
-  const preview = msg.content.length > 80 ? `${msg.content.slice(0, 80)}…` : msg.content;
   // Resolve scope (and underlying chat mode) once at intake — every
   // downstream consumer keys off these.
   const resolvedMode = await chatModeCache.resolve(channel, msg.chatId);
@@ -671,13 +714,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
       });
     }
   }
-  // Carry the (possibly backfilled) threadId on the message so the batched
-  // flush — which reads `firstMsg.threadId` for reply routing and topic scope —
-  // sees it.
   const emsg: NormalizedMessage = threadId === msg.threadId ? msg : { ...msg, threadId };
-  // Some groups are converted into topic groups after creation. In that state
-  // getChatMode can lag behind the message event shape, so threadId is the
-  // stronger signal for topic-scoped sessions and reply routing.
   const chatMode = threadId ? 'topic' : resolvedMode;
   if (threadId && resolvedMode !== 'topic') {
     chatModeCache.invalidate(msg.chatId);
@@ -695,8 +732,6 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     resolvedMode,
     threadId,
     msgId: msg.messageId,
-    sender: msg.senderId,
-    preview,
     resources: msg.resources.length,
   });
 
@@ -704,13 +739,31 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     msg.chatType === 'p2p'
       ? canUseDm(controls.cfg, controls, msg.senderId)
       : canUseGroup(controls.cfg, controls, msg.chatId, msg.senderId);
-  if (!accessDecision.ok) {
-    log.info('intake', 'skip-not-allowed-user', {
-      scope,
-      sender: msg.senderId.slice(-6),
-      reason: accessDecision.reason,
-    });
-    if (msg.chatType !== 'p2p' && accessDecision.reason === 'denied-chat' && msg.mentionedBot) {
+  const plan = planImMessage({
+    message: emsg,
+    scope: conversationScope(scope, msg.chatId, chatMode, threadId),
+    authorized: accessDecision.ok,
+    duplicate: seenImMessageIds.has(msg.messageId),
+    mentionRequired:
+      msg.chatType !== 'p2p' &&
+      requireMentionForChat(controls.cfg, msg.chatId) &&
+      !msg.mentionedBot,
+    recognizedCommand: isKnownTextCommand(msg.content),
+  });
+  log.info('intake.route', plan.reason, {
+    scope,
+    lane: plan.lane,
+    ...(plan.lane === 'ordinary' ? { kind: 'ordinary' } : {}),
+  });
+
+  if (plan.lane === 'drop') {
+    if (
+      plan.reason === 'access-denied' &&
+      !accessDecision.ok &&
+      msg.chatType !== 'p2p' &&
+      accessDecision.reason === 'denied-chat' &&
+      msg.mentionedBot
+    ) {
       void sendNonAllowedGroupHint(channel, msg.chatId, msg.messageId).catch((err) =>
         log.warn('intake', 'non-allowed-hint-failed', { err: String(err) }),
       );
@@ -718,68 +771,63 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     return;
   }
 
-  // Group-mention policy. p2p is always unrestricted; in groups (regular and
-  // topic) we drop messages that don't @bot when the user has opted into the
-  // quiet-by-default behavior. A per-chat override (set from /config's group
-  // picker) takes priority over the global setting, so one group can respond
-  // to everything while others stay @-only (or vice versa). Slash commands are
-  // NOT exempt — the user chose strict mode so the group stays uniformly quiet
-  // unless mentioned. @全员 is already filtered by SDK
-  // (`respondToMentionAll: false`), so any event reaching here is either
-  // targeted or undirected chatter.
-  if (
-    msg.chatType !== 'p2p' &&
-    requireMentionForChat(controls.cfg, msg.chatId) &&
-    !msg.mentionedBot
-  ) {
-    log.info('intake', 'skip-no-mention', { scope, chatType: msg.chatType });
-    return;
-  }
+  seenImMessageIds.add(msg.messageId);
+  const plannedMessage = plan.source.message;
+  const receipt = messageReceipts.get(msg);
+  if (receipt) messageReceipts.set(plannedMessage, receipt);
 
   // A merge_forward whose sub-messages the SDK could not fetch (transient
   // upstream failure, already retried inside @larksuite/channel) arrives as the
   // fetch_failed sentinel. Feeding it to the agent would read as an empty
   // forward, so surface a recoverable hint and skip the run — the user can
   // resend once the upstream recovers.
-  if (isForwardFetchFailed(emsg)) {
+  if (isForwardFetchFailed(plannedMessage)) {
     log.warn('intake', 'forward-fetch-failed', {
       scope,
-      msgId: emsg.messageId,
-      chatType: emsg.chatType,
+      msgId: plannedMessage.messageId,
+      chatType: plannedMessage.chatType,
     });
-    await sendForwardFetchFailedHint(channel, emsg.chatId, emsg.messageId).catch((err) =>
+    await sendForwardFetchFailedHint(
+      channel,
+      plannedMessage.chatId,
+      plannedMessage.messageId,
+    ).catch((err) =>
       log.warn('intake', 'forward-fetch-failed-hint-failed', { err: String(err) }),
     );
     return;
   }
 
-  const handled = await tryHandleCommand({
-    channel,
-    msg: emsg,
-    scope,
-    chatMode,
-    sessions,
-    workspaces,
-    agent,
-    sessionCatalog,
-    sessionCatalogIdentity: await commandSessionCatalogIdentity({
-      msg: emsg,
+  if (plan.lane === 'command') {
+    const handled = await tryHandleCommand({
+      channel,
+      msg: plannedMessage,
       scope,
-      mode: chatMode,
+      chatMode,
+      sessions,
       workspaces,
+      agent,
+      sessionCatalog,
+      sessionCatalogIdentity: await commandSessionCatalogIdentity({
+        msg: plannedMessage,
+        scope,
+        mode: chatMode,
+        workspaces,
+        controls,
+        access: accessDecision,
+      }),
+      scopedRuns,
       controls,
-      access: accessDecision,
-    }),
-    scopedRuns,
-    controls,
-  });
-  if (handled) {
-    const dropped = pending.cancel(scope);
-    log.info('intake', 'command', { scope, droppedPending: dropped.length });
-    return;
+    });
+    if (handled) {
+      const dropped = pending.cancel(scope);
+      log.info('intake', 'command', { scope, droppedPending: dropped.length });
+      return;
+    }
+    throw new Error('recognized human Command was not handled');
   }
 
-  const size = pending.push(scope, emsg);
+  imPlans.set(plannedMessage, plan);
+  const size = pending.push(scope, plannedMessage);
   log.info('intake', 'queued', { scope, queueSize: size, debounceMs: DEBOUNCE_MS });
 }
 
@@ -789,14 +837,12 @@ interface RunBatchDeps {
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   media: MediaCache;
-  batch: NormalizedMessage[];
+  invocation: ImInvocation;
   controls: Controls;
   deliveryJournal?: OmpDeliveryJournal;
   lastRunModelByScope: Map<string, string>;
   messageReceipts: WeakMap<NormalizedMessage, RunMetricReceipt>;
   monoNow: () => number;
-  scope: string;
-  mode: ChatMode;
 }
 
 async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
@@ -806,24 +852,23 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     sessions,
     sessionCatalog,
     media,
-    batch,
+    invocation,
     controls,
     deliveryJournal,
     lastRunModelByScope,
     messageReceipts,
     monoNow,
-    scope,
-    mode,
   } = deps;
-  if (batch.length === 0) return;
-  const firstMsg = batch[0];
-  const lastMsg = batch[batch.length - 1];
-  if (!firstMsg || !lastMsg) return;
-
-  const replyTarget = deriveOmpReplyTarget(lastMsg);
-
-  const chatId = firstMsg.chatId;
-  const threadId = firstMsg.threadId;
+  const [firstSource, ...remainingSources] = invocation.sourceMessages;
+  const lastSource = remainingSources[remainingSources.length - 1] ?? firstSource;
+  const batch = [firstSource, ...remainingSources].map((source) => source.message);
+  const firstMsg = firstSource.message;
+  const lastMsg = lastSource.message;
+  const scope = invocation.scope.id;
+  const mode = invocation.scope.mode;
+  const replyTarget = invocation.replyTarget;
+  const chatId = invocation.scope.chatId;
+  const threadId = invocation.scope.kind === 'topic' ? invocation.scope.threadId : undefined;
 
   const resourceItems = batch.flatMap((m) =>
     m.resources.map((r) => ({ messageId: m.messageId, resource: r })),
@@ -913,15 +958,11 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       ]
     : undefined;
 
-  const prompt = buildPrompt(
-    batch,
-    attachments,
-    quotes,
-    topicContext,
-    channel.botIdentity,
-    extraInstructions,
-  );
-  log.info('prompt', 'built', {
+  const prompt = buildPrompt(invocation, attachments, quotes, topicContext, extraInstructions);
+  log.info('prompt.invocation', invocation.promptPolicy.reason, {
+    kind: invocation.kind,
+    scope,
+    batchSize: invocation.sourceMessages.length,
     promptChars: prompt.length,
     quotes: quotes.length,
     topicContext: topicContext.length,
@@ -1020,7 +1061,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       state,
       monoNow,
     );
-    await reply.finish(finalState);
+    await reply.finish(finalizeImReply(invocation, finalState));
     if (onItReactionId) {
       await removeMessageReaction(channel, lastMsg.messageId, onItReactionId);
       onItReactionId = undefined;
@@ -1199,26 +1240,24 @@ async function processAgentStream(
 }
 
 function buildPrompt(
-  batch: NormalizedMessage[],
+  invocation: ImInvocation,
   attachments: LocalAttachment[],
   quotes: QuotedContext[] = [],
   topicContext: QuotedContext[] = [],
-  botIdentity?: { openId: string; name?: string },
   extraInstructions?: string[],
 ): string {
-  const first = batch[0];
-  if (!first) return '';
-
-  const fileKeys = batch.flatMap((m) => m.resources.map((r) => r.fileKey));
+  const policy = invocation.promptPolicy;
+  const first = policy.messages[0];
+  const fileKeys = policy.messages.flatMap((message) => message.resourceFileKeys);
   // When the debounce window merged messages (possibly from several senders —
   // common in bot-at-bot group chats), annotate each segment with its sender
   // so the agent can tell who said what. Single-message batches stay verbatim.
-  const annotate = batch.length > 1;
-  const texts = batch
-    .map((m) => {
-      const text = stripAttachmentRefs(m.content, fileKeys).trim();
+  const annotate = policy.messages.length > 1;
+  const texts = policy.messages
+    .map((message) => {
+      const text = stripAttachmentRefs(message.content, fileKeys).trim();
       if (!text) return '';
-      return annotate ? `${senderAnnotation(m)} ${text}` : text;
+      return annotate ? `${senderAnnotation(message)} ${text}` : text;
     })
     .filter(Boolean);
   const userPart =
@@ -1228,20 +1267,21 @@ function buildPrompt(
         ? '请看下面的附件。'
         : '（对方发来一条没有正文的消息——通常是只 @ 了你的唤醒（ping）。请简短回应。）';
 
-  const senderType = senderTypeOf(first);
-  const mentions = mergeMentions(batch);
+  const senderType =
+    first.sender.kind === 'human' ? 'user' : first.sender.kind === 'bot' ? 'bot' : undefined;
+  const mentions = mergeMentions(policy.messages);
 
   return buildAgentPrompt({
     context: {
-      chatId: first.chatId,
-      chatType: first.chatType,
+      chatId: invocation.scope.chatId,
+      chatType: invocation.scope.mode === 'p2p' ? 'p2p' : 'group',
       senderId: first.senderId,
       ...(first.senderName ? { senderName: first.senderName } : {}),
       ...(senderType ? { senderType } : {}),
-      ...(botIdentity?.openId ? { botOpenId: botIdentity.openId } : {}),
+      ...(policy.botIdentity?.openId ? { botOpenId: policy.botIdentity.openId } : {}),
       ...(mentions.length > 0 ? { mentions } : {}),
-      ...(first.threadId ? { threadId: first.threadId } : {}),
-      messageIds: batch.map((m) => m.messageId),
+      ...(invocation.scope.kind === 'topic' ? { threadId: invocation.scope.threadId } : {}),
+      messageIds: policy.messages.map((message) => message.messageId),
       source: 'im',
     },
     instructions:
@@ -1251,36 +1291,23 @@ function buildPrompt(
     userInput: userPart,
     ...(topicContext.length > 0 ? { topicContext: topicContext.map(toPromptTopicMessage) } : {}),
     quotedMessages: quotes.map(toPromptQuote),
-    interactiveCards: batch.map(toPromptInteractiveCard).filter(isDefined),
+    interactiveCards: policy.messages.map(toPromptInteractiveCard).filter(isDefined),
     attachments: attachments.map(toPromptAttachment),
   });
 }
 
-/**
- * Classify the sender as human or bot from the raw Feishu event
- * (`sender.sender_type`: 'user' = human, 'app' = bot). The normalizer drops
- * this field, so read it off `msg.raw` (`includeRawEvent: true` above).
- * Unknown / missing values return undefined — omit rather than guess.
- */
-function senderTypeOf(msg: NormalizedMessage): 'user' | 'bot' | undefined {
-  const raw = msg.raw as { sender?: { sender_type?: unknown } } | undefined;
-  const senderType = raw?.sender?.sender_type;
-  if (senderType === 'user') return 'user';
-  if (senderType === 'app' || senderType === 'bot') return 'bot';
-  return undefined;
-}
-
-function senderAnnotation(msg: NormalizedMessage): string {
-  const name = msg.senderName ?? msg.senderId;
-  const type = senderTypeOf(msg);
+function senderAnnotation(message: ImPromptMessage): string {
+  const name = message.senderName ?? message.senderId;
+  const type =
+    message.sender.kind === 'human' ? 'user' : message.sender.kind === 'bot' ? 'bot' : undefined;
   return type ? `[${name} (${type})]:` : `[${name}]:`;
 }
 
-function mergeMentions(batch: NormalizedMessage[]): BridgePromptMention[] {
+function mergeMentions(batch: readonly ImPromptMessage[]): BridgePromptMention[] {
   const seen = new Set<string>();
   const out: BridgePromptMention[] = [];
-  for (const msg of batch) {
-    for (const mention of msg.mentions ?? []) {
+  for (const message of batch) {
+    for (const mention of message.mentions) {
       const dedupeKey = mention.openId ?? `${mention.name ?? ''}:${mention.key}`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
@@ -1306,7 +1333,7 @@ function replyQuoteTargetForMessage(msg: NormalizedMessage, mode: ChatMode): str
   return replyTo;
 }
 
-function stripAttachmentRefs(text: string, fileKeys: string[]): string {
+function stripAttachmentRefs(text: string, fileKeys: readonly string[]): string {
   if (!text || fileKeys.length === 0) return text;
   let out = text;
   for (const key of fileKeys) {
@@ -1346,22 +1373,14 @@ function toPromptTopicMessage(q: QuotedContext): BridgePromptTopicMessage {
   };
 }
 
-function toPromptInteractiveCard(m: NormalizedMessage): BridgePromptInteractiveCard | undefined {
-  if (m.rawContentType !== 'interactive') return undefined;
-  const rawContent = (m.raw as { message?: { content?: unknown } } | undefined)?.message?.content;
-  if (typeof rawContent !== 'string' || rawContent.length === 0) return undefined;
+function toPromptInteractiveCard(
+  message: ImPromptMessage,
+): BridgePromptInteractiveCard | undefined {
+  if (message.interactiveCard === undefined) return undefined;
   return {
-    messageId: m.messageId,
-    content: parseJsonOrRaw(rawContent),
+    messageId: message.messageId,
+    content: message.interactiveCard,
   };
-}
-
-function parseJsonOrRaw(input: string): unknown {
-  try {
-    return JSON.parse(input) as unknown;
-  } catch {
-    return input;
-  }
 }
 
 function isDefined<T>(value: T | undefined): value is T {
