@@ -162,6 +162,26 @@ describe('profile logger observability', () => {
     });
   });
 
+  it('serializes circular SDK diagnostics without overflowing the stack', async () => {
+    const tmp = await createTmpProfile('logger-circular-');
+    cleanups.push(tmp.cleanup);
+    const logsDir = join(tmp.profile, 'logs');
+    configureLogger({
+      logsDir,
+      now: () => new Date('2026-05-25T00:00:00.000Z'),
+    });
+    const request: Record<string, unknown> = { method: 'GET' };
+    const socket: Record<string, unknown> = { request };
+    request.socket = socket;
+
+    log.warn('sdk', 'error', { args: [request, socket] });
+    await flushLogger();
+
+    const text = await readFile(join(logsDir, 'bridge-20260525.jsonl'), 'utf8');
+    const entry = JSON.parse(text.trim()) as { args: unknown[] };
+    expect(JSON.stringify(entry.args)).toContain('[Circular]');
+  });
+
   it('bounds large run trace fields before writing', async () => {
     const tmp = await createTmpProfile('logger-trace-bound-');
     cleanups.push(tmp.cleanup);

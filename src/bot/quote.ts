@@ -6,6 +6,7 @@ import type {
 } from '@larksuite/channel';
 import { normalize } from '@larksuite/channel';
 import { log } from '../core/logger';
+import type { ResourceRequest } from '../media/cache';
 import { expandInteractiveCard } from './interactive-card';
 
 export interface QuotedContext {
@@ -23,8 +24,8 @@ export interface QuotedContext {
    * </forwarded_messages>` (capped at 50 items by the SDK). */
   content: string;
   rawContentType: string;
-  /** Direct resources owned by this message; forwarded children keep their own message ids. */
-  resources: ResourceDescriptor[];
+  /** Downloadable resources paired with the message that owns them. */
+  resources: ResourceRequest[];
 }
 
 /**
@@ -117,34 +118,26 @@ async function normalizeItemToQuoted(
   parent: ApiMessageItem,
   fetchSubMessages: (mid: string) => Promise<ApiMessageItem[]>,
 ): Promise<QuotedContext | undefined> {
-  if (!parent.message_id) return undefined;
+  const parentMessageId = parent.message_id;
+  if (!parentMessageId) return undefined;
   const senderOpenId = parent.sender?.id;
-  const fakeRaw: RawMessageEvent = {
-    sender: { sender_id: { open_id: senderOpenId } },
-    message: {
-      message_id: parent.message_id,
-      // chat_id / chat_type aren't actually used by normalize's converters,
-      // but the field is required by the type. Empty strings are safe.
-      chat_id: '',
-      chat_type: 'group',
-      message_type: parent.msg_type ?? 'text',
-      content: parent.body?.content ?? '',
-      create_time: parent.create_time !== undefined ? String(parent.create_time) : undefined,
-      mentions: parent.mentions,
-    },
+  const forwardedResources: ResourceDescriptor[] = [];
+  const trackedFetchSubMessages = async (messageId: string): Promise<ApiMessageItem[]> => {
+    const items = await fetchSubMessages(messageId);
+    forwardedResources.push(...(await collectForwardedResources(channel, items)));
+    return items;
   };
 
-  const botIdentity = channel.botIdentity ?? { openId: '', name: '' };
   try {
-    const normalized = await normalize(fakeRaw, {
-      botIdentity,
-      fetchSubMessages,
+    const normalized = await normalize(rawEventForItem(parent), {
+      botIdentity: channel.botIdentity ?? { openId: '', name: '' },
+      fetchSubMessages: trackedFetchSubMessages,
       // We want the raw content here, not the trimmed @bot mention form.
       stripBotMentions: false,
     });
     const createMs = parent.create_time ? Number.parseInt(String(parent.create_time), 10) : 0;
     return {
-      messageId: parent.message_id,
+      messageId: parentMessageId,
       senderId: senderOpenId ?? '',
       senderName: normalized.senderName,
       senderType: mapSenderType(parent.sender?.sender_type),
@@ -153,16 +146,59 @@ async function normalizeItemToQuoted(
       // — substitute the raw JSON so OMP can still see what was quoted.
       content: expandInteractiveCard(normalized.content, parent.body?.content),
       rawContentType: parent.msg_type ?? 'text',
-      // A forwarded attachment must be downloaded with its child message id, which normalize drops.
-      resources: parent.msg_type === 'merge_forward' ? [] : normalized.resources,
+      resources:
+        parent.msg_type === 'merge_forward'
+          ? forwardedResources.map((resource) => ({ messageId: parentMessageId, resource }))
+          : normalized.resources.map((resource) => ({ messageId: parentMessageId, resource })),
     };
   } catch (err) {
     log.warn('quote', 'normalize-failed', {
-      messageId: parent.message_id,
+      messageId: parentMessageId,
       err: err instanceof Error ? err.message : String(err),
     });
     return undefined;
   }
+}
+
+async function collectForwardedResources(
+  channel: LarkChannel,
+  items: readonly ApiMessageItem[],
+): Promise<ResourceDescriptor[]> {
+  const out: ResourceDescriptor[] = [];
+  const botIdentity = channel.botIdentity ?? { openId: '', name: '' };
+  for (const item of items) {
+    const messageId = item.message_id;
+    if (!messageId || item.msg_type === 'merge_forward') continue;
+    try {
+      const normalized = await normalize(rawEventForItem(item), {
+        botIdentity,
+        stripBotMentions: false,
+      });
+      out.push(...normalized.resources);
+    } catch (err) {
+      log.warn('quote', 'resource-normalize-failed', {
+        messageId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return out;
+}
+
+function rawEventForItem(item: ApiMessageItem): RawMessageEvent {
+  return {
+    sender: { sender_id: { open_id: item.sender?.id } },
+    message: {
+      message_id: item.message_id ?? '',
+      // chat_id / chat_type aren't used by normalize's converters.
+      chat_id: '',
+      chat_type: 'group',
+      message_type: item.msg_type ?? 'text',
+      content: item.body?.content ?? '',
+      create_time: item.create_time !== undefined ? String(item.create_time) : undefined,
+      mentions: item.mentions,
+    },
+  };
 }
 
 /**

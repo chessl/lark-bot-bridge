@@ -853,11 +853,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     }
   }
 
-  resourceItems.push(
-    ...quotes.flatMap((quote) =>
-      quote.resources.map((resource) => ({ messageId: quote.messageId, resource })),
-    ),
-  );
+  resourceItems.push(...quotes.flatMap((quote) => quote.resources));
   const attachments = await media.resolve(resourceItems, controls.cfg.attachments);
   if (attachments.length > 0) {
     log.info('media', 'resolved', { count: attachments.length });

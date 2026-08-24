@@ -35,6 +35,9 @@ interface QuotedFile {
   fileKey: string;
   fileName: string;
 }
+interface QuotedForwardedFile extends QuotedFile {
+  messageId: string;
+}
 interface FakeLarkChannel {
   sent: Array<{ chatId: string; content: unknown; options: unknown }>;
   streams: Array<{ chatId: string; options: unknown }>;
@@ -359,6 +362,42 @@ describe('topic message quote handling', () => {
     expect(prompt).toContain('"decision":"accepted"');
   });
 
+  it('downloads a file inside a reply-quoted merge_forward using its parent message id', async () => {
+    const h = await createHarness({
+      chatMode: 'group',
+      quotedForwardedFiles: {
+        om_forward: {
+          messageId: 'om_forward_file',
+          fileKey: 'file_forward',
+          fileName: 'forwarded.zip',
+        },
+      },
+    });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_forward_reply',
+        rootId: 'om_forward',
+        parentId: 'om_forward',
+        content: '@Bridge 分析合并转发里的附件',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.channel.downloadResourceToFile).toHaveBeenCalledWith(
+      'om_forward',
+      'file_forward',
+      'file',
+      expect.any(String),
+    );
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('"sourceMessageId":"om_forward"');
+    expect(prompt).toMatch(/"path":"[^"]+\.zip"/);
+    expect(prompt).toContain('"decision":"accepted"');
+  });
+
   it('keeps non-root reply quotes in topic chats', async () => {
     const h = await createHarness({
       quotedMessages: {
@@ -442,6 +481,7 @@ async function createHarness(
     chatMode?: 'group' | 'topic';
     quotedMessages?: Record<string, string>;
     quotedFiles?: Record<string, QuotedFile>;
+    quotedForwardedFiles?: Record<string, QuotedForwardedFile>;
     rawThreadIds?: Record<string, string>;
     threadMessages?: Array<Record<string, unknown>>;
     agentEvents?: AgentEvent[];
@@ -529,6 +569,7 @@ function createFakeLarkChannel(
     chatMode?: 'group' | 'topic';
     quotedMessages?: Record<string, string>;
     quotedFiles?: Record<string, QuotedFile>;
+    quotedForwardedFiles?: Record<string, QuotedForwardedFile>;
     rawThreadIds?: Record<string, string>;
     threadMessages?: Array<Record<string, unknown>>;
   } = {},
@@ -541,6 +582,7 @@ function createFakeLarkChannel(
     om_topic_root: 'topic root content',
   };
   const quotedFiles = options.quotedFiles ?? {};
+  const quotedForwardedFiles = options.quotedForwardedFiles ?? {};
   const rawThreadIds = options.rawThreadIds ?? {};
   const threadMessages = options.threadMessages ?? [];
   return {
@@ -569,6 +611,31 @@ function createFakeLarkChannel(
     getAppInfo: vi.fn(async () => ({ ownerId: 'ou_owner' })),
     listChats: vi.fn(async () => []),
     fetchRawMessage: vi.fn(async (messageId: string) => {
+      const forwardedFile = quotedForwardedFiles[messageId];
+      if (forwardedFile) {
+        return [
+          {
+            message_id: messageId,
+            msg_type: 'merge_forward',
+            body: { content: '{}' },
+            create_time: '1760000000000',
+            sender: { id: 'ou_quote_sender' },
+          },
+          {
+            message_id: forwardedFile.messageId,
+            upper_message_id: messageId,
+            msg_type: 'file',
+            body: {
+              content: JSON.stringify({
+                file_key: forwardedFile.fileKey,
+                file_name: forwardedFile.fileName,
+              }),
+            },
+            create_time: '1760000000001',
+            sender: { id: 'ou_quote_sender' },
+          },
+        ];
+      }
       const file = quotedFiles[messageId];
       return [
         {

@@ -179,6 +179,7 @@ function sanitizeLogValue(
   key: string,
   value: unknown,
   options: SanitizeOptions = EXTERNAL_SANITIZE,
+  seen: WeakSet<object> = new WeakSet(),
 ): unknown {
   const normalizedKey = key.startsWith('_') ? key.slice(1) : key;
   if (value === undefined) return undefined;
@@ -189,15 +190,27 @@ function sanitizeLogValue(
   }
   if (Object.hasOwn(RESOURCE_ID_KEYS, normalizedKey)) return '[REDACTED_RESOURCE]';
   if (options.redactIds && Object.hasOwn(ID_KEYS, normalizedKey)) return redactId(value);
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeLogValue(key, item, options));
-  }
   if (value && typeof value === 'object') {
-    const nested: Record<string, unknown> = {};
-    for (const [nestedKey, nestedValue] of Object.entries(value)) {
-      nested[nestedKey] = sanitizeLogValue(nestedKey, nestedValue, options);
+    if (seen.has(value)) return '[Circular]';
+    seen.add(value);
+    try {
+      if (!Array.isArray(value)) {
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype !== Object.prototype && prototype !== null) {
+          return `[${value.constructor?.name ?? 'Object'}]`;
+        }
+      }
+      if (Array.isArray(value)) {
+        return value.map((item) => sanitizeLogValue(key, item, options, seen));
+      }
+      const nested: Record<string, unknown> = {};
+      for (const [nestedKey, nestedValue] of Object.entries(value)) {
+        nested[nestedKey] = sanitizeLogValue(nestedKey, nestedValue, options, seen);
+      }
+      return nested;
+    } finally {
+      seen.delete(value);
     }
-    return nested;
   }
   if (typeof value === 'string') {
     const redacted = redactDiagnosticText(value);
