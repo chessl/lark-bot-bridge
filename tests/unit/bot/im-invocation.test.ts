@@ -87,7 +87,8 @@ describe('IM message planning', () => {
     {
       name: 'trusted direct peer',
       senderId: 'ou_peer',
-      rawMentionType: 'bot',
+      rawMention: true,
+      normalizedIsBot: true,
       trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
       content: 'please review',
       expected: { lane: 'peer', reason: 'trusted-peer' },
@@ -95,7 +96,8 @@ describe('IM message planning', () => {
     {
       name: 'untrusted direct Bot',
       senderId: 'ou_other',
-      rawMentionType: 'bot',
+      rawMention: true,
+      normalizedIsBot: true,
       trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
       content: 'please review',
       expected: { lane: 'drop', reason: 'untrusted-bot' },
@@ -103,15 +105,17 @@ describe('IM message planning', () => {
     {
       name: 'indirect trusted Bot',
       senderId: 'ou_peer',
-      rawMentionType: undefined,
+      rawMention: false,
+      normalizedIsBot: true,
       trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
       content: '@Bridge as text only',
       expected: { lane: 'drop', reason: 'bot-not-direct-mention' },
     },
     {
-      name: 'contradictory Mention kind',
+      name: 'contradictory normalized Mention kind',
       senderId: 'ou_peer',
-      rawMentionType: 'user',
+      rawMention: true,
+      normalizedIsBot: false,
       trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
       content: 'please review',
       expected: { lane: 'drop', reason: 'contradictory-mention' },
@@ -119,30 +123,31 @@ describe('IM message planning', () => {
     {
       name: 'Bot Command',
       senderId: 'ou_peer',
-      rawMentionType: 'bot',
+      rawMention: true,
+      normalizedIsBot: true,
       trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
       content: '/config',
       expected: { lane: 'drop', reason: 'bot-command' },
     },
   ])(
     'routes $name from verified identity and structured current-Bot Mention only',
-    ({ senderId, rawMentionType, trustedPeerBots, content, expected }) => {
-      const directMention =
-        rawMentionType === undefined
-          ? []
-          : [{ id: { open_id: 'ou_bot' }, mentioned_type: rawMentionType }];
+    ({ senderId, rawMention, normalizedIsBot, trustedPeerBots, content, expected }) => {
       const plan = planImMessage({
         message: imMessage({
           senderId,
           senderType: 'bot',
           rawSenderId: senderId,
           content,
-          mentions:
-            rawMentionType === undefined
-              ? []
-              : [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }],
-          rawMentions: directMention,
-          mentionedBot: rawMentionType !== undefined,
+          mentions: [
+            {
+              key: '@_user_1',
+              openId: 'ou_bot',
+              name: 'Bridge',
+              isBot: normalizedIsBot,
+            },
+          ],
+          rawMentions: rawMention ? [{ id: { open_id: 'ou_bot' } }] : [],
+          mentionedBot: normalizedIsBot,
         }),
         scope: CHAT_SCOPE,
         authorized: true,
@@ -276,7 +281,7 @@ describe('peer IM Invocation creation', () => {
         rawSenderId: 'ou_peer',
         threadId: 'omt_topic',
         mentions: [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }],
-        rawMentions: [{ id: { open_id: 'ou_bot' }, mentioned_type: 'bot' }],
+        rawMentions: [{ id: { open_id: 'ou_bot' } }],
       }),
       scope: TOPIC_SCOPE,
       authorized: true,
@@ -406,7 +411,6 @@ function imMessage(
     mentions?: Array<{ key: string; openId?: string; name?: string; isBot?: boolean }>;
     rawMentions?: Array<{
       id: { open_id: string };
-      mentioned_type: string;
     }>;
     mentionedBot?: boolean;
   } = {},

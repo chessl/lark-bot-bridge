@@ -102,7 +102,6 @@ describe('sender identity in bridge_context', () => {
           {
             key: '@_user_1',
             id: { open_id: 'ou_bot' },
-            mentioned_type: 'bot',
             name: 'Bridge',
           },
         ],
@@ -156,7 +155,6 @@ describe('sender identity in bridge_context', () => {
       {
         key: '@_user_1',
         id: { open_id: 'ou_bot' },
-        mentioned_type: 'bot',
         name: 'Bridge',
       },
     ];
@@ -253,7 +251,6 @@ describe('sender identity in bridge_context', () => {
             {
               key: '@_user_1',
               id: { open_id: 'ou_bot' },
-              mentioned_type: 'bot',
               name: 'Bridge',
             },
           ],
@@ -425,7 +422,6 @@ function message(input: {
   rawMentions?: Array<{
     key: string;
     id: { open_id: string };
-    mentioned_type: string;
     name: string;
   }>;
   mentionedBot?: boolean;

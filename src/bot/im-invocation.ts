@@ -553,9 +553,6 @@ function directCurrentBotMention(
     ) {
       continue;
     }
-    if (!('mentioned_type' in mention) || mention.mentioned_type !== 'bot') {
-      return 'contradictory';
-    }
     direct = true;
   }
   if (!direct) return 'not-direct';
