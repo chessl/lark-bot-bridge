@@ -606,7 +606,9 @@ function initialReplyOperation(): DurablePendingOperation {
   };
 }
 
-function updateOperation(sequence: number): DurablePendingOperation {
+function updateOperation(
+  sequence: number,
+): Extract<DurablePendingOperation, { kind: 'update' }> {
   return {
     kind: 'update',
     terminal: true,

@@ -206,7 +206,7 @@ describe('P2P OMP Reply safe fallback', () => {
             ? JSON.stringify(h.channel.patches.at(-1)?.card)
             : replyContent(replyInputs(h.channel).at(-1));
       expect(outbound).toContain('内容过长，已截断');
-      expect(outbound).toContain('ou_sender');
+      expect(outbound).toContain('ou_user');
       expect(outbound).toContain('ou_peer');
       expect(outbound.match(/ou_peer/g)).toHaveLength(1);
       expect(outbound).not.toContain('```');
@@ -571,10 +571,10 @@ function message(messageId: string): NormalizedMessage {
 function verifiedMessage(messageId: string): NormalizedMessage {
   return {
     ...message(messageId),
-    senderId: 'ou_sender',
+    senderId: 'ou_user',
     raw: {
       sender: {
-        sender_id: { open_id: 'ou_sender' },
+        sender_id: { open_id: 'ou_user' },
         sender_type: 'user',
       },
     },
@@ -624,6 +624,14 @@ function requestMessageId(input: unknown): string | undefined {
   const path = input.path;
   if (!path || typeof path !== 'object' || !('message_id' in path)) return undefined;
   return typeof path.message_id === 'string' ? path.message_id : undefined;
+}
+
+function updateCardData(input: unknown): string | undefined {
+  const data = requestData(input);
+  if (!data || !('card' in data)) return undefined;
+  const card = data.card;
+  if (!card || typeof card !== 'object' || !('data' in card)) return undefined;
+  return typeof card.data === 'string' ? card.data : undefined;
 }
 
 function responseMessageId(result: unknown): string | undefined {
