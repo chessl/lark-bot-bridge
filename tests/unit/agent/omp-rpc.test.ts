@@ -207,6 +207,8 @@ describe('OmpRpcTranslator', () => {
           role: 'assistant',
           content: [],
           usage: { input: 10, cacheRead: 20, cacheWrite: 30, output: 4 },
+          duration: 5_000,
+          ttft: 2_000,
         },
       }),
     ).toEqual([
@@ -216,6 +218,7 @@ describe('OmpRpcTranslator', () => {
         cacheReadTokens: 20,
         cacheWriteTokens: 30,
         outputTokens: 4,
+        outputDurationMs: 3_000,
       },
     ]);
     expect(

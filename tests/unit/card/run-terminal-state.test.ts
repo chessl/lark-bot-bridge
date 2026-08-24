@@ -27,6 +27,22 @@ describe('terminal OMP Run state', () => {
     });
   });
 
+  it('keeps multiline final Markdown unwrapped', () => {
+    const finalText = '可以。\n\n- 第一项\n- 第二项';
+    const card = renderOmpReplyCard(
+      stateFrom([
+        { type: 'final_text', content: finalText },
+        { type: 'done', terminationReason: 'normal' },
+      ]),
+    );
+
+    expect(card).toMatchObject({
+      body: {
+        elements: [{ element_id: 'answer', content: finalText }],
+      },
+    });
+  });
+
   it('promotes translated local command output as the normal final reply', () => {
     const local = stateFrom([
       { type: 'text', delta: 'local result' },
@@ -140,7 +156,7 @@ describe('terminal OMP Run state', () => {
     expect(card).toMatchObject({
       header: { title: { content: '回复' } },
       body: {
-        elements: [{ element_id: 'answer', content: '**未返回内容**' }],
+        elements: [{ element_id: 'answer', content: '未返回内容' }],
       },
     });
     expect(outbound).not.toContain('"element_id":"reasoning"');

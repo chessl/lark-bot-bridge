@@ -293,7 +293,7 @@ describe('P2P OMP Reply', () => {
       const elements = cardElements(finalUpdate?.card);
       expect(elements).toMatchObject([
         ...(expectedReasoning ? [{ element_id: 'reasoning', expanded: false }] : []),
-        { element_id: 'answer', content: `**${expectedAnswer}**` },
+        { element_id: 'answer', content: expectedAnswer },
         { element_id: 'metrics' },
         ...(unfinishedTool ? [{ element_id: 'tools', expanded: false }] : []),
       ]);
@@ -608,6 +608,7 @@ describe('P2P OMP Reply', () => {
           cacheReadTokens: 50,
           cacheWriteTokens: 25,
           outputTokens: 999,
+          outputDurationMs: 121_250,
         },
         { type: 'done', terminationReason: 'normal' },
       ],
@@ -976,6 +977,7 @@ describe('P2P OMP Reply', () => {
           cacheReadTokens: 50,
           cacheWriteTokens: 25,
           outputTokens: 999,
+          outputDurationMs: 24_000,
         },
         {
           type: 'usage',
@@ -983,6 +985,7 @@ describe('P2P OMP Reply', () => {
           cacheReadTokens: 10,
           cacheWriteTokens: 15,
           outputTokens: 1,
+          outputDurationMs: 1_000,
         },
         { type: 'usage' },
         { type: 'tool_use', id: 'tool-a', name: 'read', input: {} },
@@ -1005,10 +1008,33 @@ describe('P2P OMP Reply', () => {
     expect(metrics).toEqual([
       expect.objectContaining({
         content:
-          "<font color='grey'>gpt-test · effort high · ctx 7.3% · 总耗时 2m5s · 输入 1.1k · 输出 1.0k · TPS 8.2</font>",
+          "<font color='grey'>gpt-test · effort high · ctx 7.3% · 总耗时 2m5s · 输入 1.1k · 输出 1.0k · TPS 40.0</font>",
       }),
     ]);
     expect(JSON.stringify(metrics)).not.toMatch(/provider|工具|飞书到达|前置|首字|OMP/);
+  });
+
+  it('omits TPS when any output usage lacks OMP timing', async () => {
+    const h = await createHarness({
+      events: [
+        { type: 'final_text', content: 'measured answer' },
+        { type: 'usage', outputTokens: 100, outputDurationMs: 1_000 },
+        { type: 'usage', outputTokens: 1 },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_incomplete_tps', 'run'));
+    await waitFor(() =>
+      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+    );
+
+    const metrics = cardElements(h.channel.updates.at(-1)?.card).filter(
+      (element) => 'element_id' in element && element.element_id === 'metrics',
+    );
+    expect(JSON.stringify(metrics)).toContain('输出 101');
+    expect(JSON.stringify(metrics)).not.toContain('TPS ');
   });
 
   it('starts total elapsed time from the last message admitted to a Message Batch', async () => {

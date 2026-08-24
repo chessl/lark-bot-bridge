@@ -143,6 +143,8 @@ describe('OMP Reply CardKit budget', () => {
         terminalAtMono: 1_200,
         inputTokens: 1_250,
         outputTokens: 750,
+        outputDurationMs: 1_500,
+        outputTimingComplete: true,
         toolIds: tools.map((entry) => entry.id),
         modelId: 'gpt-budget',
         effort: 'high',
@@ -168,7 +170,7 @@ describe('OMP Reply CardKit budget', () => {
       '总耗时 1.1s',
       '输入 1.3k',
       '输出 750',
-      'TPS 833.3',
+      'TPS 500.0',
     ]) {
       expect(outbound).toContain(metric);
     }

@@ -97,7 +97,7 @@ function buildOmpReplyCard(
           element_id: 'answer',
           content: running
             ? "**正在完成请求**\n<font color='grey'>回复会在确认后原位出现。</font>"
-            : `**${finalText}**`,
+            : finalText,
           text_size: 'body',
         },
         ...metricsElements(state),
@@ -275,12 +275,11 @@ function metricParts(state: RunState): string[] {
   const contextPercent = validPercent(metrics.contextPercent);
   const outputDurationMs =
     terminal &&
-    metrics.firstTextAtMono !== undefined &&
-    metrics.terminalAtMono !== undefined &&
-    Number.isFinite(metrics.firstTextAtMono) &&
-    Number.isFinite(metrics.terminalAtMono) &&
-    metrics.terminalAtMono > metrics.firstTextAtMono
-      ? metrics.terminalAtMono - metrics.firstTextAtMono
+    metrics.outputTimingComplete === true &&
+    metrics.outputDurationMs !== undefined &&
+    Number.isFinite(metrics.outputDurationMs) &&
+    metrics.outputDurationMs > 0
+      ? metrics.outputDurationMs
       : undefined;
   const tps =
     metrics.outputTokens !== undefined &&

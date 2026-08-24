@@ -35,6 +35,8 @@ export interface RunMetrics {
   terminalAtMono?: number;
   inputTokens?: number;
   outputTokens?: number;
+  outputDurationMs?: number;
+  outputTimingComplete?: boolean;
   toolIds: readonly string[];
   modelId?: string;
   effort?: string;
@@ -231,6 +233,14 @@ function addUsage(state: RunState, event: Extract<AgentEvent, { type: 'usage' }>
     event.outputTokens >= 0
       ? event.outputTokens
       : undefined;
+  const outputDurationMs =
+    output !== undefined &&
+    output > 0 &&
+    event.outputDurationMs !== undefined &&
+    Number.isFinite(event.outputDurationMs) &&
+    event.outputDurationMs > 0
+      ? event.outputDurationMs
+      : undefined;
   if (inputParts.length === 0 && output === undefined) return state;
   const input = inputParts.reduce((sum, value) => sum + value, 0);
   return {
@@ -239,6 +249,15 @@ function addUsage(state: RunState, event: Extract<AgentEvent, { type: 'usage' }>
       ...state.metrics,
       ...(inputParts.length > 0 ? { inputTokens: (state.metrics.inputTokens ?? 0) + input } : {}),
       ...(output !== undefined ? { outputTokens: (state.metrics.outputTokens ?? 0) + output } : {}),
+      ...(output !== undefined && output > 0
+        ? {
+            outputTimingComplete:
+              state.metrics.outputTimingComplete !== false && outputDurationMs !== undefined,
+          }
+        : {}),
+      ...(outputDurationMs !== undefined
+        ? { outputDurationMs: (state.metrics.outputDurationMs ?? 0) + outputDurationMs }
+        : {}),
     },
   };
 }

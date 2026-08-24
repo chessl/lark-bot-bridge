@@ -60,6 +60,7 @@ export type AgentEvent =
       outputTokens?: number;
       cacheReadTokens?: number;
       cacheWriteTokens?: number;
+      outputDurationMs?: number;
     }
   | {
       type: 'done';

@@ -148,7 +148,7 @@ export class OmpRpcTranslator {
         for (const content of explicitReasoning(message.content)) {
           yield { type: 'reasoning', content };
         }
-        const usage = usageEvent(message.usage);
+        const usage = usageEvent(message);
         if (usage) yield usage;
       }
       this.assistantDraft = '';
@@ -338,9 +338,18 @@ function frameType(frame: unknown): string {
   return typeof type === 'string' ? type : 'malformed';
 }
 
-function usageEvent(value: unknown): Extract<AgentEvent, { type: 'usage' }> | undefined {
+function usageEvent(
+  message: Record<string, unknown>,
+): Extract<AgentEvent, { type: 'usage' }> | undefined {
+  const value = message.usage;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const usage = value as Record<string, unknown>;
+  const durationMs = numberField(message, 'duration');
+  const ttftMs = numberField(message, 'ttft');
+  const outputDurationMs =
+    durationMs !== undefined && ttftMs !== undefined && ttftMs >= 0 && durationMs > ttftMs
+      ? durationMs - ttftMs
+      : undefined;
   const event: Extract<AgentEvent, { type: 'usage' }> = {
     type: 'usage',
     inputTokens: numberField(usage, 'inputTokens') ?? numberField(usage, 'input'),
@@ -350,6 +359,7 @@ function usageEvent(value: unknown): Extract<AgentEvent, { type: 'usage' }> | un
       numberField(usage, 'cachedInputTokens') ??
       numberField(usage, 'cacheRead'),
     cacheWriteTokens: numberField(usage, 'cacheWriteTokens') ?? numberField(usage, 'cacheWrite'),
+    ...(outputDurationMs !== undefined ? { outputDurationMs } : {}),
   };
   return Object.values(event).some((entry) => typeof entry === 'number') ? event : undefined;
 }
