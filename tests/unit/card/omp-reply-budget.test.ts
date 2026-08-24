@@ -107,9 +107,7 @@ describe('OMP Reply CardKit budget', () => {
     expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(MAX_CARD_BYTES);
     expect(answer).toContain(TRUNCATION_MARKER);
     expect(answer).not.toContain('�');
-    expect(beforeMarker?.charCodeAt((beforeMarker?.length ?? 0) - 1)).not.toBeGreaterThanOrEqual(
-      0xd800,
-    );
+    expect(beforeMarker).not.toMatch(/[\uD800-\uDBFF]$/);
   });
 
   it('budgets terminal Markdown using the serialized post envelope', () => {
@@ -122,7 +120,7 @@ describe('OMP Reply CardKit budget', () => {
     expect(JSON.stringify(post)).toContain(TRUNCATION_MARKER);
     expect(markerIndex).toBeGreaterThan(0);
     expect(markdown).not.toContain('�');
-    expect(markdown.charCodeAt(markerIndex - 1)).not.toBeGreaterThanOrEqual(0xd800);
+    expect(markdown.slice(0, markerIndex)).not.toMatch(/[\uD800-\uDBFF]$/);
   });
 
   it('removes all oldest Reasoning before oldest Tools and retains the metrics unit', () => {
@@ -168,14 +166,11 @@ describe('OMP Reply CardKit budget', () => {
       'effort high',
       'ctx 42%',
       '总耗时 1.1s',
-      '飞书到达 ≈0.5s',
-      '前置 0.1s',
-      '首字 0.1s',
-      'OMP 1.0s',
       '输入 1.3k',
       '输出 750',
     ]) {
       expect(outbound).toContain(metric);
     }
+    expect(outbound).not.toMatch(/飞书到达|前置|首字|OMP/);
   });
 });

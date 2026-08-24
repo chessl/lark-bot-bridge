@@ -60,7 +60,7 @@ function buildOmpReplyCard(
       summary: { content: presentation.summary },
     },
     header: {
-      title: { tag: 'plain_text', content: running ? 'OMP 正在处理' : 'OMP Reply' },
+      title: { tag: 'plain_text', content: running ? '正在处理' : '回复' },
       subtitle: { tag: 'plain_text', content: activity ?? presentation.statusLabel },
       template: state.terminal === 'done' ? 'green' : running ? 'blue' : 'red',
       icon: { tag: 'standard_icon', token: 'ai-common_colorful' },
@@ -96,7 +96,7 @@ function buildOmpReplyCard(
           tag: 'markdown',
           element_id: 'answer',
           content: running
-            ? "**正在完成请求**\n<font color='grey'>Final Reply 会在确认后原位出现。</font>"
+            ? "**正在完成请求**\n<font color='grey'>回复会在确认后原位出现。</font>"
             : `**${finalText}**`,
           text_size: 'body',
         },
@@ -251,7 +251,7 @@ function buildOmpReplyMarkdown(state: RunState, finalText: string): string {
   const presentation = ompReplyPresentation(state);
   const metrics = metricParts(state).join(' · ');
   return maskEmails(
-    `**Final Reply**\n\n${finalText}\n\n_Run Termination: ${presentation.statusLabel}_${metrics ? `\n\n_${metrics}_` : ''}`,
+    `**回复**\n\n${finalText}\n\n_状态: ${presentation.statusLabel}_${metrics ? `\n\n_${metrics}_` : ''}`,
   );
 }
 
@@ -273,23 +273,11 @@ function metricParts(state: RunState): string[] {
   const metrics = state.metrics;
   const terminal = state.terminal !== 'running';
   const contextPercent = validPercent(metrics.contextPercent);
-  const arrival =
-    metrics.receivedAtWall !== undefined && metrics.messageCreatedAtWall !== undefined
-      ? metrics.receivedAtWall - metrics.messageCreatedAtWall
-      : undefined;
   return [
     metrics.modelId,
     metrics.effort ? `effort ${metrics.effort}` : undefined,
     contextPercent !== undefined ? `ctx ${formatPercent(contextPercent)}%` : undefined,
     terminal ? formatInterval('总耗时', metrics.receivedAtMono, metrics.terminalAtMono) : undefined,
-    terminal && arrival !== undefined && arrival >= 0 && arrival <= 10 * 60_000
-      ? `飞书到达 ≈${formatDuration(arrival)}`
-      : undefined,
-    terminal ? formatInterval('前置', metrics.receivedAtMono, metrics.promptSentAtMono) : undefined,
-    terminal
-      ? formatInterval('首字', metrics.promptSentAtMono, metrics.firstTextAtMono)
-      : undefined,
-    terminal ? formatInterval('OMP', metrics.promptSentAtMono, metrics.terminalAtMono) : undefined,
     terminal && metrics.inputTokens !== undefined
       ? `输入 ${formatTokens(metrics.inputTokens)}`
       : undefined,

@@ -618,10 +618,6 @@ describe('P2P OMP Reply', () => {
       'effort high',
       'ctx 7.3%',
       '总耗时 2m5s',
-      '飞书到达 ≈0.5s',
-      '前置 2.5s',
-      '首字 1.3s',
-      'OMP 2m3s',
       '输入 975',
       '输出 999',
     ]) {
@@ -935,7 +931,7 @@ describe('P2P OMP Reply', () => {
     expect(rejection.channel.rawClient.im.v1.message.reply).not.toHaveBeenCalled();
     expect(rejection.channel.sent[0]?.options).toMatchObject({ replyTo: 'om_rejection' });
   });
-  it('renders measured identity, timing, and usage facts without tool count in the footer', async () => {
+  it('renders model, configuration, total duration, and usage in one footer', async () => {
     const h = await createHarness({
       wallNow: clock(1_000_500),
       monoNow: clock(100, 2_600, 3_850, 125_100),
@@ -984,48 +980,13 @@ describe('P2P OMP Reply', () => {
     expect(metrics).toEqual([
       expect.objectContaining({
         content:
-          "<font color='grey'>gpt-test · effort high · ctx 7.3% · 总耗时 2m5s · 飞书到达 ≈0.5s · 前置 2.5s · 首字 1.3s · OMP 2m3s · 输入 1.1k · 输出 1.0k</font>",
+          "<font color='grey'>gpt-test · effort high · ctx 7.3% · 总耗时 2m5s · 输入 1.1k · 输出 1.0k</font>",
       }),
     ]);
-    expect(JSON.stringify(metrics)).not.toMatch(/provider|工具/);
+    expect(JSON.stringify(metrics)).not.toMatch(/provider|工具|飞书到达|前置|首字|OMP/);
   });
 
-  it.each([
-    {
-      name: 'streamed assistant text',
-      visible: [{ type: 'text_started' }, { type: 'final_text', content: 'streamed' }],
-    },
-    {
-      name: 'non-streaming assistant text',
-      visible: [{ type: 'final_text', content: 'complete' }],
-    },
-    {
-      name: 'local command output',
-      visible: [
-        { type: 'command_text_started' },
-        { type: 'text', delta: 'local', source: 'command' },
-      ],
-    },
-  ] satisfies readonly {
-    name: string;
-    visible: readonly AgentEvent[];
-  }[])('measures first text for $name at the same high seam', async ({ visible }) => {
-    const h = await createHarness({
-      wallNow: clock(1_000),
-      monoNow: clock(0, 100, 500, 1_000),
-      events: [{ type: 'prompt_sent' }, ...visible, { type: 'done', terminationReason: 'normal' }],
-    });
-    await startTestBridge(h);
-
-    await h.channel.handlers.message?.(message(`om_first_${visible.length}`, 'run'));
-    await waitFor(() =>
-      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
-    );
-
-    expect(JSON.stringify(h.channel.updates.at(-1)?.card)).toContain('首字 0.4s');
-  });
-
-  it('starts receipt intervals from the last message admitted to a Message Batch', async () => {
+  it('starts total elapsed time from the last message admitted to a Message Batch', async () => {
     const h = await createHarness({
       wallNow: clock(1_000, 2_000),
       monoNow: clock(0, 100, 1_100, 2_100),
@@ -1041,35 +1002,9 @@ describe('P2P OMP Reply', () => {
 
     const outbound = JSON.stringify(h.channel.updates.at(-1)?.card);
     expect(outbound).toContain('总耗时 2.0s');
-    expect(outbound).toContain('前置 1.0s');
     expect(h.channel.rawClient.im.v1.message.reply.mock.calls[0]?.[0]).toMatchObject({
       path: { message_id: 'om_batch_last' },
     });
-  });
-
-  it.each([
-    { name: 'zero', received: 600_000, created: 600_000, expected: '飞书到达 ≈0.0s' },
-    { name: 'ten minutes', received: 600_000, created: 0, expected: '飞书到达 ≈10m0s' },
-    { name: 'negative', received: 599_999, created: 600_000, expected: undefined },
-    { name: 'over ten minutes', received: 600_001, created: 0, expected: undefined },
-    { name: 'missing', received: 600_000, created: null, expected: undefined },
-  ])('gates $name Feishu arrival at the inclusive trust boundary', async (sample) => {
-    const h = await createHarness({
-      wallNow: clock(sample.received),
-      monoNow: clock(0, 1_000, 2_000),
-      events: [{ type: 'prompt_sent' }, { type: 'done', terminationReason: 'normal' }],
-    });
-    await startTestBridge(h);
-
-    await h.channel.handlers.message?.(message(`om_arrival_${sample.name}`, 'run', sample.created));
-    await waitFor(() =>
-      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
-    );
-
-    const outbound = JSON.stringify(h.channel.updates.at(-1)?.card);
-    if (sample.expected) expect(outbound).toContain(sample.expected);
-    else expect(outbound).not.toContain('飞书到达');
-    expect(outbound).not.toContain('首字');
   });
 
   it.each([
@@ -1114,11 +1049,9 @@ describe('P2P OMP Reply', () => {
 
       const outbound = JSON.stringify(h.channel.updates.at(-1)?.card);
       expect(outbound).toContain('总耗时 1m1s');
-      expect(outbound).toContain('前置 1.0s');
-      expect(outbound).toContain('OMP 1m0s');
       expect(outbound).toContain('输入 12');
       expect(outbound).not.toContain('输出 ');
-      expect(outbound).not.toContain('首字');
+      expect(outbound).not.toMatch(/飞书到达|前置|首字|OMP/);
       expect(outbound).not.toContain('999');
     },
   );

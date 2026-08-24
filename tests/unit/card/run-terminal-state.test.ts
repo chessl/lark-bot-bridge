@@ -122,22 +122,30 @@ describe('terminal OMP Run state', () => {
     warn.mockRestore();
   });
 
+  it('keeps harness branding out of running cards', () => {
+    const card = renderOmpReplyCard(initialState);
+    const outbound = JSON.stringify(card);
+
+    expect(card).toMatchObject({ header: { title: { content: '正在处理' } } });
+    expect(outbound).toContain('回复会在确认后原位出现');
+    expect(outbound).not.toMatch(/OMP|Final Reply|Run Termination/);
+  });
+
   it('omits empty terminal details and renders fixed Markdown', () => {
     const noContent = stateFrom([{ type: 'done', terminationReason: 'normal' }]);
     const card = renderOmpReplyCard(noContent);
     const outbound = JSON.stringify(card);
 
     expect(card).toMatchObject({
+      header: { title: { content: '回复' } },
       body: {
         elements: [{ element_id: 'answer', content: '**未返回内容**' }],
       },
     });
     expect(outbound).not.toContain('"element_id":"reasoning"');
     expect(outbound).not.toContain('"element_id":"tools"');
-    expect(outbound).not.toContain('工具 0');
-    expect(renderOmpReplyMarkdown(noContent)).toBe(
-      '**Final Reply**\n\n未返回内容\n\n_Run Termination: 已完成_',
-    );
+    expect(outbound).not.toMatch(/工具 0|OMP/);
+    expect(renderOmpReplyMarkdown(noContent)).toBe('**回复**\n\n未返回内容\n\n_状态: 已完成_');
     expect(() => renderOmpReplyMarkdown(initialState)).toThrow('running OMP Reply');
   });
 });
