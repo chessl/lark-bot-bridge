@@ -61,7 +61,7 @@ function buildOmpReplyCard(
     },
     header: {
       title: { tag: 'plain_text', content: running ? '正在处理' : '回复' },
-      subtitle: { tag: 'plain_text', content: activity ?? presentation.statusLabel },
+      ...(activity ? { subtitle: { tag: 'plain_text', content: activity } } : {}),
       template: state.terminal === 'done' ? 'green' : running ? 'blue' : 'red',
       icon: { tag: 'standard_icon', token: 'ai-common_colorful' },
       text_tag_list: [
@@ -273,6 +273,22 @@ function metricParts(state: RunState): string[] {
   const metrics = state.metrics;
   const terminal = state.terminal !== 'running';
   const contextPercent = validPercent(metrics.contextPercent);
+  const outputDurationMs =
+    terminal &&
+    metrics.firstTextAtMono !== undefined &&
+    metrics.terminalAtMono !== undefined &&
+    Number.isFinite(metrics.firstTextAtMono) &&
+    Number.isFinite(metrics.terminalAtMono) &&
+    metrics.terminalAtMono > metrics.firstTextAtMono
+      ? metrics.terminalAtMono - metrics.firstTextAtMono
+      : undefined;
+  const tps =
+    metrics.outputTokens !== undefined &&
+    Number.isFinite(metrics.outputTokens) &&
+    metrics.outputTokens > 0 &&
+    outputDurationMs !== undefined
+      ? metrics.outputTokens / (outputDurationMs / 1000)
+      : undefined;
   return [
     metrics.modelId,
     metrics.effort ? `effort ${metrics.effort}` : undefined,
@@ -284,6 +300,7 @@ function metricParts(state: RunState): string[] {
     terminal && metrics.outputTokens !== undefined
       ? `输出 ${formatTokens(metrics.outputTokens)}`
       : undefined,
+    tps !== undefined ? `TPS ${tps.toFixed(1)}` : undefined,
   ].filter((part): part is string => part !== undefined);
 }
 

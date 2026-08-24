@@ -136,6 +136,7 @@ describe('terminal OMP Run state', () => {
     const card = renderOmpReplyCard(noContent);
     const outbound = JSON.stringify(card);
 
+    expect(outbound).not.toContain('"subtitle"');
     expect(card).toMatchObject({
       header: { title: { content: '回复' } },
       body: {

@@ -168,6 +168,7 @@ describe('OMP Reply CardKit budget', () => {
       '总耗时 1.1s',
       '输入 1.3k',
       '输出 750',
+      'TPS 833.3',
     ]) {
       expect(outbound).toContain(metric);
     }

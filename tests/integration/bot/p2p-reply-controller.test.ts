@@ -620,6 +620,7 @@ describe('P2P OMP Reply', () => {
       '总耗时 2m5s',
       '输入 975',
       '输出 999',
+      'TPS 8.2',
     ]) {
       expect(JSON.stringify(metrics)).toContain(metric);
     }
@@ -931,7 +932,7 @@ describe('P2P OMP Reply', () => {
     expect(rejection.channel.rawClient.im.v1.message.reply).not.toHaveBeenCalled();
     expect(rejection.channel.sent[0]?.options).toMatchObject({ replyTo: 'om_rejection' });
   });
-  it('renders model, configuration, total duration, and usage in one footer', async () => {
+  it('renders model, configuration, total duration, usage, and TPS in one footer', async () => {
     const h = await createHarness({
       wallNow: clock(1_000_500),
       monoNow: clock(100, 2_600, 3_850, 125_100),
@@ -980,7 +981,7 @@ describe('P2P OMP Reply', () => {
     expect(metrics).toEqual([
       expect.objectContaining({
         content:
-          "<font color='grey'>gpt-test · effort high · ctx 7.3% · 总耗时 2m5s · 输入 1.1k · 输出 1.0k</font>",
+          "<font color='grey'>gpt-test · effort high · ctx 7.3% · 总耗时 2m5s · 输入 1.1k · 输出 1.0k · TPS 8.2</font>",
       }),
     ]);
     expect(JSON.stringify(metrics)).not.toMatch(/provider|工具|飞书到达|前置|首字|OMP/);
@@ -1051,6 +1052,7 @@ describe('P2P OMP Reply', () => {
       expect(outbound).toContain('总耗时 1m1s');
       expect(outbound).toContain('输入 12');
       expect(outbound).not.toContain('输出 ');
+      expect(outbound).not.toContain('TPS ');
       expect(outbound).not.toMatch(/飞书到达|前置|首字|OMP/);
       expect(outbound).not.toContain('999');
     },
