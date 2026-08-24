@@ -174,7 +174,6 @@ describe('OMP Reply CardKit budget', () => {
       'OMP 1.0s',
       '输入 1.3k',
       '输出 750',
-      '工具 20',
     ]) {
       expect(outbound).toContain(metric);
     }

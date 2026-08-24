@@ -775,9 +775,7 @@ async function patchRecoveredMessage(
   }
   const content =
     entry.transport === 'markdown'
-      ? JSON.stringify(
-          renderOmpReplyMarkdownPost(markInterrupted(emptyRunState), { toolCount: null }),
-        )
+      ? JSON.stringify(renderOmpReplyMarkdownPost(markInterrupted(emptyRunState)))
       : projection.serialized;
   const pending: DurablePendingOperation = {
     kind: 'patch',

@@ -84,7 +84,6 @@ describe('terminal OMP Run state', () => {
           elements: [
             { element_id: 'reasoning', expanded: false },
             { element_id: 'answer' },
-            { element_id: 'metrics' },
             { element_id: 'tools', expanded: false },
           ],
         },
@@ -123,11 +122,21 @@ describe('terminal OMP Run state', () => {
     warn.mockRestore();
   });
 
-  it('renders fixed terminal Markdown and rejects running state', () => {
+  it('omits empty terminal details and renders fixed Markdown', () => {
     const noContent = stateFrom([{ type: 'done', terminationReason: 'normal' }]);
+    const card = renderOmpReplyCard(noContent);
+    const outbound = JSON.stringify(card);
 
+    expect(card).toMatchObject({
+      body: {
+        elements: [{ element_id: 'answer', content: '**未返回内容**' }],
+      },
+    });
+    expect(outbound).not.toContain('"element_id":"reasoning"');
+    expect(outbound).not.toContain('"element_id":"tools"');
+    expect(outbound).not.toContain('工具 0');
     expect(renderOmpReplyMarkdown(noContent)).toBe(
-      '**Final Reply**\n\n未返回内容\n\n_Run Termination: 已完成_\n\n_工具 0_',
+      '**Final Reply**\n\n未返回内容\n\n_Run Termination: 已完成_',
     );
     expect(() => renderOmpReplyMarkdown(initialState)).toThrow('running OMP Reply');
   });

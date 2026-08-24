@@ -46,8 +46,11 @@ function buildOmpReplyCard(
   const running = state.terminal === 'running';
   const presentation = ompReplyPresentation(state);
   const activity = state.activityStack?.at(-1)?.label;
+  const reasoningTotal = state.reasoningTotal ?? reasoning.length;
   const toolCount =
     options?.toolCount === null ? undefined : (options?.toolCount ?? state.metrics.toolIds.length);
+  const showReasoning = running || reasoningTotal > 0;
+  const showTools = running || (toolCount !== undefined && toolCount > 0);
   return deepMaskEmails({
     schema: '2.0',
     config: {
@@ -74,17 +77,21 @@ function buildOmpReplyCard(
       padding: '12px 12px 20px 12px',
       vertical_spacing: '12px',
       elements: [
-        disclosure(
-          'reasoning',
-          `💭 中间过程（${state.reasoningTotal ?? reasoning.length} 条）`,
-          running,
-          reasoning.length > 0
-            ? reasoning.flatMap((entry, index) => [
-                ...(index > 0 ? [{ tag: 'hr' }] : []),
-                { tag: 'markdown', content: escapeMarkdown(entry), text_size: 'body' },
-              ])
-            : [placeholder('等待思考过程…')],
-        ),
+        ...(showReasoning
+          ? [
+              disclosure(
+                'reasoning',
+                `💭 中间过程（${reasoningTotal} 条）`,
+                running,
+                reasoning.length > 0
+                  ? reasoning.flatMap((entry, index) => [
+                      ...(index > 0 ? [{ tag: 'hr' }] : []),
+                      { tag: 'markdown', content: escapeMarkdown(entry), text_size: 'body' },
+                    ])
+                  : [placeholder('等待思考过程…')],
+              ),
+            ]
+          : []),
         {
           tag: 'markdown',
           element_id: 'answer',
@@ -93,11 +100,10 @@ function buildOmpReplyCard(
             : `**${finalText}**`,
           text_size: 'body',
         },
-        ...metricsElements(state, toolCount),
-        ...(toolCount === undefined
-          ? []
-          : [
-              disclosure('tools', `🔧 调用工具 ${toolCount} 次`, running, [
+        ...metricsElements(state),
+        ...(showTools
+          ? [
+              disclosure('tools', `🔧 调用工具 ${toolCount ?? 0} 次`, running, [
                 {
                   tag: 'markdown',
                   content:
@@ -107,7 +113,8 @@ function buildOmpReplyCard(
                   text_size: 'notation',
                 },
               ]),
-            ]),
+            ]
+          : []),
       ],
     },
   });
@@ -195,27 +202,23 @@ function previousCodePointBoundary(value: string, index: number): number {
     : previous;
 }
 
-export function renderOmpReplyMarkdown(
-  state: RunState,
-  options?: Pick<RenderOptions, 'toolCount'>,
-): string {
+export function renderOmpReplyMarkdown(state: RunState): string {
   if (state.terminal === 'running') {
     throw new Error('cannot render a running OMP Reply as terminal Markdown');
   }
   const finalText = ompReplyPresentation(state).finalReply;
-  const full = buildOmpReplyMarkdown(state, finalText, options);
+  const full = buildOmpReplyMarkdown(state, finalText);
   if (withinMarkdownBudget(full) || state.terminal !== 'done') return full;
 
   let lower = 0;
   let upper = finalText.length;
-  let best = buildOmpReplyMarkdown(state, TRUNCATION_MARKER, options);
+  let best = buildOmpReplyMarkdown(state, TRUNCATION_MARKER);
   while (lower < upper) {
     let middle = codePointBoundary(finalText, Math.floor((lower + upper + 1) / 2));
     if (middle <= lower) middle = upper;
     const candidate = buildOmpReplyMarkdown(
       state,
       `${finalText.slice(0, middle)}${TRUNCATION_MARKER}`,
-      options,
     );
     if (withinMarkdownBudget(candidate)) {
       lower = middle;
@@ -227,11 +230,8 @@ export function renderOmpReplyMarkdown(
   return best;
 }
 
-export function renderOmpReplyMarkdownPost(
-  state: RunState,
-  options?: Pick<RenderOptions, 'toolCount'>,
-): object {
-  return markdownPost(renderOmpReplyMarkdown(state, options));
+export function renderOmpReplyMarkdownPost(state: RunState): object {
+  return markdownPost(renderOmpReplyMarkdown(state));
 }
 
 function withinMarkdownBudget(markdown: string): boolean {
@@ -247,22 +247,16 @@ function markdownPost(markdown: string): object {
   };
 }
 
-function buildOmpReplyMarkdown(
-  state: RunState,
-  finalText: string,
-  options: Pick<RenderOptions, 'toolCount'> | undefined,
-): string {
+function buildOmpReplyMarkdown(state: RunState, finalText: string): string {
   const presentation = ompReplyPresentation(state);
-  const toolCount =
-    options?.toolCount === null ? undefined : (options?.toolCount ?? state.metrics.toolIds.length);
-  const metrics = metricParts(state, toolCount).join(' · ');
+  const metrics = metricParts(state).join(' · ');
   return maskEmails(
     `**Final Reply**\n\n${finalText}\n\n_Run Termination: ${presentation.statusLabel}_${metrics ? `\n\n_${metrics}_` : ''}`,
   );
 }
 
-function metricsElements(state: RunState, toolCount: number | undefined): object[] {
-  const content = metricParts(state, toolCount).join(' · ');
+function metricsElements(state: RunState): object[] {
+  const content = metricParts(state).join(' · ');
   return content
     ? [
         {
@@ -275,7 +269,7 @@ function metricsElements(state: RunState, toolCount: number | undefined): object
     : [];
 }
 
-function metricParts(state: RunState, toolCount: number | undefined): string[] {
+function metricParts(state: RunState): string[] {
   const metrics = state.metrics;
   const terminal = state.terminal !== 'running';
   const contextPercent = validPercent(metrics.contextPercent);
@@ -302,7 +296,6 @@ function metricParts(state: RunState, toolCount: number | undefined): string[] {
     terminal && metrics.outputTokens !== undefined
       ? `输出 ${formatTokens(metrics.outputTokens)}`
       : undefined,
-    terminal && toolCount !== undefined ? `工具 ${toolCount}` : undefined,
   ].filter((part): part is string => part !== undefined);
 }
 

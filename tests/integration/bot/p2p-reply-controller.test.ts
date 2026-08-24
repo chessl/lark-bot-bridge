@@ -272,10 +272,10 @@ describe('P2P OMP Reply', () => {
       expect(h.channel.updates.every((update) => update.cardId === 'card_1')).toBe(true);
       const elements = cardElements(finalUpdate?.card);
       expect(elements).toMatchObject([
-        { element_id: 'reasoning', expanded: false },
+        ...(expectedReasoning ? [{ element_id: 'reasoning', expanded: false }] : []),
         { element_id: 'answer', content: `**${expectedAnswer}**` },
         { element_id: 'metrics' },
-        { element_id: 'tools', expanded: false },
+        ...(unfinishedTool ? [{ element_id: 'tools', expanded: false }] : []),
       ]);
       const outbound = JSON.stringify(finalUpdate?.card);
       if (expectedReasoning) expect(outbound).toContain(expectedReasoning);
@@ -624,7 +624,6 @@ describe('P2P OMP Reply', () => {
       'OMP 2m3s',
       '输入 975',
       '输出 999',
-      '工具 1',
     ]) {
       expect(JSON.stringify(metrics)).toContain(metric);
     }
@@ -936,7 +935,7 @@ describe('P2P OMP Reply', () => {
     expect(rejection.channel.rawClient.im.v1.message.reply).not.toHaveBeenCalled();
     expect(rejection.channel.sent[0]?.options).toMatchObject({ replyTo: 'om_rejection' });
   });
-  it('renders all measured identity, timing, usage, and unique-tool facts in one footer', async () => {
+  it('renders measured identity, timing, and usage facts without tool count in the footer', async () => {
     const h = await createHarness({
       wallNow: clock(1_000_500),
       monoNow: clock(100, 2_600, 3_850, 125_100),
@@ -985,10 +984,10 @@ describe('P2P OMP Reply', () => {
     expect(metrics).toEqual([
       expect.objectContaining({
         content:
-          "<font color='grey'>gpt-test · effort high · ctx 7.3% · 总耗时 2m5s · 飞书到达 ≈0.5s · 前置 2.5s · 首字 1.3s · OMP 2m3s · 输入 1.1k · 输出 1.0k · 工具 2</font>",
+          "<font color='grey'>gpt-test · effort high · ctx 7.3% · 总耗时 2m5s · 飞书到达 ≈0.5s · 前置 2.5s · 首字 1.3s · OMP 2m3s · 输入 1.1k · 输出 1.0k</font>",
       }),
     ]);
-    expect(JSON.stringify(metrics)).not.toContain('provider');
+    expect(JSON.stringify(metrics)).not.toMatch(/provider|工具/);
   });
 
   it.each([
@@ -1157,7 +1156,6 @@ describe('P2P OMP Reply', () => {
     expect(updates).toEqual([updates[0], updates[0], updates[0]]);
     expect(updates[0]).toContain('输入 7');
     expect(updates[0]).toContain('输出 3');
-    expect(updates[0]).toContain('工具 1');
   });
 });
 
