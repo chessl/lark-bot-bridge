@@ -1287,6 +1287,8 @@ type ReplyMentionReason =
   | 'mention-rejected'
   | ImSenderOwnershipReason;
 
+type ReplyRecoveryReason = 'interrupted-after-restart' | 'terminal-request-replayed';
+
 function interruptedReplyPlan(replyPolicy: ImReplyPolicy): ImReplyPlan {
   return {
     ...replyPolicy,

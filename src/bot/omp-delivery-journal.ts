@@ -168,7 +168,10 @@ export type DeliveryState = z.infer<typeof DeliveryStateSchema>;
 export type ReplyTransport = z.infer<typeof ReplyTransportSchema>;
 export type DurablePendingOperation = z.infer<typeof PendingOperationSchema>;
 export type DurableMentionFallback = z.infer<typeof MentionFallbackSchema>;
-export type ActiveDelivery = z.infer<typeof ActiveDeliverySchema>;
+export type ActiveDelivery = Omit<
+  z.infer<typeof ActiveDeliverySchema>,
+  'replyPolicy'
+> & { replyPolicy: ImReplyPolicy };
 
 export type DeliveryFailureReason =
   | 'journal-read-failed'
