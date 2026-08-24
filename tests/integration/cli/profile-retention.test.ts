@@ -11,9 +11,9 @@ import { resolveAppPaths } from '../../../src/config/app-paths';
 import { clearKeystoreDerivedKeyCache, setSecret } from '../../../src/config/keystore';
 import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import { secretKeyForApp } from '../../../src/config/schema';
-import { withRuntimeLocks } from '../../helpers/runtime-locks';
 import type { ProcessEntry } from '../../../src/runtime/registry';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
+import { withRuntimeLocks } from '../../helpers/runtime-locks';
 
 const auth = vi.hoisted(() => ({
   validateAppCredentials: vi.fn(async () => ({ ok: true, botName: 'Recreated Bot' })),

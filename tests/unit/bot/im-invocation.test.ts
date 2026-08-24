@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   createImInvocation,
   finalizeImReply,
-  substitutionMentionOpenIds,
   type ImConversationScope,
   type ImOrdinaryMessagePlan,
   planImMessage,
+  substitutionMentionOpenIds,
 } from '../../../src/bot/im-invocation.js';
 import {
   createRunState,
@@ -36,7 +36,6 @@ const P2P_SCOPE: ImConversationScope = {
   chatId: 'oc_chat',
   mode: 'p2p',
 };
-
 
 describe('IM message planning', () => {
   it('keeps a verified human identity on ordinary traffic', () => {
@@ -189,9 +188,7 @@ describe('IM message planning', () => {
         ...base,
         message: imMessage({
           ...messageInput,
-          rawMentions: [
-            { key: '@_user_1', id: { open_id: 'ou_bot' }, mentioned_type: 'user' },
-          ],
+          rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' }, mentioned_type: 'user' }],
         }),
       }),
     ).toMatchObject({ lane: 'drop', reason: 'contradictory-mention' });
@@ -213,7 +210,6 @@ describe('IM message planning', () => {
     if (plan.lane !== 'ordinary') throw new Error(`expected ordinary plan, got ${plan.lane}`);
     expect(plan.source.sender).toEqual({ kind: 'unknown', reason: 'invalid-sender-id' });
   });
-
 
   it('applies access, duplicate, human Command, then mention policy precedence', () => {
     const message = imMessage({ senderType: 'user', rawSenderId: 'ou_sender' });
@@ -275,10 +271,7 @@ describe('personal substitution planning', () => {
         ...targetMention.mentions,
         { key: '@_user_2', openId: 'ou_bot', name: 'Bridge', isBot: true },
       ],
-      rawMentions: [
-        ...targetMention.rawMentions,
-        { id: { open_id: 'ou_bot' } },
-      ],
+      rawMentions: [...targetMention.rawMentions, { id: { open_id: 'ou_bot' } }],
     });
     expect(planImMessage({ ...base, message: currentBotMessage })).toMatchObject({
       lane: 'ordinary',
@@ -344,10 +337,7 @@ describe('personal substitution planning', () => {
           { key: '@_user_1', openId: 'ou_sender', name: 'Private self label', isBot: false },
           { key: '@_user_2', openId: 'ou_other', name: 'Private label', isBot: false },
         ],
-        rawMentions: [
-          { id: { open_id: 'ou_sender' } },
-          { id: { open_id: 'ou_other' } },
-        ],
+        rawMentions: [{ id: { open_id: 'ou_sender' } }, { id: { open_id: 'ou_other' } }],
       }),
       scope: TOPIC_SCOPE,
       authorized: true,
@@ -619,10 +609,7 @@ describe('ordinary IM Invocation creation', () => {
 
   it('freezes a verified P2P human as the terminal sender owner', () => {
     const invocation = createImInvocation([
-      ordinaryPlan(
-        imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
-        P2P_SCOPE,
-      ),
+      ordinaryPlan(imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }), P2P_SCOPE),
     ]);
 
     expect(invocation.replyPolicy.senderOwnership).toEqual({
@@ -688,50 +675,48 @@ describe('peer IM Invocation creation', () => {
 });
 
 describe('IM Reply planning', () => {
-  it.each(
-    [
-      {
-        name: 'done',
-        state: {
-          ...finalizeIfRunning(createRunState()),
-          finalText: 'answer',
-        } satisfies RunState,
-        reason: 'run-completed',
-      },
-      { name: 'empty done', state: finalizeIfRunning(createRunState()), reason: 'run-completed' },
-      {
-        name: 'error',
-        state: { ...createRunState(), terminal: 'error' } satisfies RunState,
-        reason: 'run-failed',
-      },
-      {
-        name: 'interrupted',
-        state: markInterrupted(createRunState()),
-        reason: 'run-interrupted',
-      },
-      {
-        name: 'idle timeout',
-        state: markIdleTimeout(createRunState()),
-        reason: 'run-timed-out',
-      },
-    ] satisfies Array<{ name: string; state: RunState; reason: string }>,
-  )('maps $name termination to one finite reason', ({ state, reason }) => {
-    const invocation = createImInvocation([
-      ordinaryPlan(
-        imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
-        CHAT_SCOPE,
-      ),
-    ]);
+  it.each([
+    {
+      name: 'done',
+      state: {
+        ...finalizeIfRunning(createRunState()),
+        finalText: 'answer',
+      } satisfies RunState,
+      reason: 'run-completed',
+    },
+    { name: 'empty done', state: finalizeIfRunning(createRunState()), reason: 'run-completed' },
+    {
+      name: 'error',
+      state: { ...createRunState(), terminal: 'error' } satisfies RunState,
+      reason: 'run-failed',
+    },
+    {
+      name: 'interrupted',
+      state: markInterrupted(createRunState()),
+      reason: 'run-interrupted',
+    },
+    {
+      name: 'idle timeout',
+      state: markIdleTimeout(createRunState()),
+      reason: 'run-timed-out',
+    },
+  ] satisfies Array<{ name: string; state: RunState; reason: string }>)(
+    'maps $name termination to one finite reason',
+    ({ state, reason }) => {
+      const invocation = createImInvocation([
+        ordinaryPlan(imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }), CHAT_SCOPE),
+      ]);
 
-    expect(finalizeImReply(invocation, state)).toMatchObject({
-      invocationKind: 'ordinary',
-      reason,
-      scope: CHAT_SCOPE,
-      target: { messageId: 'om_message' },
-      state,
-      senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-    });
-  });
+      expect(finalizeImReply(invocation, state)).toMatchObject({
+        invocationKind: 'ordinary',
+        reason,
+        scope: CHAT_SCOPE,
+        target: { messageId: 'om_message' },
+        state,
+        senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+      });
+    },
+  );
 
   it.each([
     {
@@ -759,35 +744,33 @@ describe('IM Reply planning', () => {
       expectedAlias: 'Atlas',
       expectedToken: '@Atlas',
     },
-  ])('activates only the first eligible peer for $name', ({ answer, expectedAlias, expectedToken }) => {
-    const trustedPeerBots = [
-      { alias: 'Hermes', openId: 'ou_hermes' },
-      { alias: 'Hermes-bot', openId: 'ou_hermes_bot' },
-      { alias: 'Atlas', openId: 'ou_atlas' },
-      { alias: 'here', openId: 'ou_reserved' },
-    ];
-    const invocation = createImInvocation(
-      [
-        ordinaryPlan(
-          imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
-          CHAT_SCOPE,
-        ),
-      ],
-      { trustedPeerBots },
-    );
-    const state = {
-      ...finalizeIfRunning(createRunState()),
-      finalText: answer,
-    } satisfies RunState;
+  ])(
+    'activates only the first eligible peer for $name',
+    ({ answer, expectedAlias, expectedToken }) => {
+      const trustedPeerBots = [
+        { alias: 'Hermes', openId: 'ou_hermes' },
+        { alias: 'Hermes-bot', openId: 'ou_hermes_bot' },
+        { alias: 'Atlas', openId: 'ou_atlas' },
+        { alias: 'here', openId: 'ou_reserved' },
+      ];
+      const invocation = createImInvocation(
+        [ordinaryPlan(imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }), CHAT_SCOPE)],
+        { trustedPeerBots },
+      );
+      const state = {
+        ...finalizeIfRunning(createRunState()),
+        finalText: answer,
+      } satisfies RunState;
 
-    const reply = finalizeImReply(invocation, state);
+      const reply = finalizeImReply(invocation, state);
 
-    expect(reply.peerActivation).toMatchObject({ alias: expectedAlias });
-    const activation = reply.peerActivation;
-    if (!activation) throw new Error('expected peer activation');
-    expect(reply.state.finalText?.slice(activation.start, activation.end)).toBe(expectedToken);
-    expect(reply.state.finalText).toBe(answer);
-  });
+      expect(reply.peerActivation).toMatchObject({ alias: expectedAlias });
+      const activation = reply.peerActivation;
+      if (!activation) throw new Error('expected peer activation');
+      expect(reply.state.finalText?.slice(activation.start, activation.end)).toBe(expectedToken);
+      expect(reply.state.finalText).toBe(answer);
+    },
+  );
 
   it('does not let Agent-authored Mention markup forge the active peer', () => {
     const trustedPeerBots = [
@@ -795,12 +778,7 @@ describe('IM Reply planning', () => {
       { alias: 'Atlas', openId: 'ou_atlas' },
     ];
     const invocation = createImInvocation(
-      [
-        ordinaryPlan(
-          imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
-          CHAT_SCOPE,
-        ),
-      ],
+      [ordinaryPlan(imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }), CHAT_SCOPE)],
       { trustedPeerBots },
     );
     const reply = finalizeImReply(invocation, {
@@ -827,10 +805,7 @@ describe('IM Reply planning', () => {
           { key: '@_user_1', openId: 'ou_second', name: 'Second', isBot: false },
           { key: '@_user_2', openId: 'ou_first', name: 'First', isBot: false },
         ],
-        rawMentions: [
-          { id: { open_id: 'ou_second' } },
-          { id: { open_id: 'ou_first' } },
-        ],
+        rawMentions: [{ id: { open_id: 'ou_second' } }, { id: { open_id: 'ou_first' } }],
       }),
       scope: TOPIC_SCOPE,
       authorized: true,
@@ -944,10 +919,7 @@ describe('IM Reply planning', () => {
 
   it('rejects a non-terminal Run state', () => {
     const invocation = createImInvocation([
-      ordinaryPlan(
-        imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
-        CHAT_SCOPE,
-      ),
+      ordinaryPlan(imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }), CHAT_SCOPE),
     ]);
 
     expect(() => finalizeImReply(invocation, createRunState())).toThrow(

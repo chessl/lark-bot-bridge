@@ -2,6 +2,7 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { LarkChannel } from '@larksuite/channel';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
+import type { ImReplyPolicy } from '../../../src/bot/im-invocation.js';
 import {
   type ActiveDelivery,
   type DeliveryFailure,
@@ -12,7 +13,6 @@ import {
   activateOmpReplyRecovery,
   OmpReplyController,
 } from '../../../src/bot/omp-reply-controller.js';
-import type { ImReplyPolicy } from '../../../src/bot/im-invocation.js';
 import { initialState } from '../../../src/card/run-state.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
 
@@ -623,9 +623,7 @@ function initialReplyOperation(): DurablePendingOperation {
   };
 }
 
-function updateOperation(
-  sequence: number,
-): Extract<DurablePendingOperation, { kind: 'update' }> {
+function updateOperation(sequence: number): Extract<DurablePendingOperation, { kind: 'update' }> {
   return {
     kind: 'update',
     terminal: true,

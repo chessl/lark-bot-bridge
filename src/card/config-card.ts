@@ -6,7 +6,6 @@ export type PersonalSubstitutionDraft = Readonly<{
   targetOpenIds: readonly string[];
 }>;
 
-
 export interface ConfigFormOpts {
   /** Deployment mode: 'personal' (default) or 'team'. */
   mode: ProfileMode;
@@ -31,11 +30,7 @@ export interface ConfigFormOpts {
   consoleUrl?: string;
 }
 
-function collapsedAccessPanel(
-  title: string,
-  elements: object[],
-  expanded = false,
-): object {
+function collapsedAccessPanel(title: string, elements: object[], expanded = false): object {
   return {
     tag: 'collapsible_panel',
     expanded,

@@ -11,11 +11,7 @@ import type {
   VerifiedBotId,
 } from '../../../src/bot/im-invocation.js';
 import { OmpReplyController } from '../../../src/bot/omp-reply-controller.js';
-import {
-  createRunState,
-  finalizeIfRunning,
-  type RunState,
-} from '../../../src/card/run-state.js';
+import { createRunState, finalizeIfRunning, type RunState } from '../../../src/card/run-state.js';
 import type { Controls } from '../../../src/commands/index.js';
 import {
   createDefaultProfileConfig,
@@ -678,8 +674,7 @@ describe('P2P OMP Reply', () => {
         (element) => 'element_id' in element && element.element_id === 'answer',
       ),
     ).toMatchObject({
-      content:
-        '<at id="ou_sender"></at>\n\nbefore <at id="ou_peer">@Hermes</at> after',
+      content: '<at id="ou_sender"></at>\n\nbefore <at id="ou_peer">@Hermes</at> after',
     });
     expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledOnce();
     const patch = JSON.stringify(channel.rawClient.im.v1.message.patch.mock.calls[0]?.[0]);
@@ -706,9 +701,7 @@ describe('P2P OMP Reply', () => {
       let patchAttempt = 0;
       const patch = async () => {
         patchAttempt++;
-        return patchAttempt === 1
-          ? { code: 230001, msg: 'mention rejected' }
-          : { code: 0 };
+        return patchAttempt === 1 ? { code: 230001, msg: 'mention rejected' } : { code: 0 };
       };
       const channel = createFakeLarkChannel(
         branch === 'update'
@@ -727,15 +720,12 @@ describe('P2P OMP Reply', () => {
       });
 
       expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledTimes(2);
-      const degraded = JSON.stringify(
-        channel.rawClient.im.v1.message.patch.mock.calls.at(-1)?.[0],
-      );
+      const degraded = JSON.stringify(channel.rawClient.im.v1.message.patch.mock.calls.at(-1)?.[0]);
       expect(degraded).toContain('Mention 不可用');
       expect(degraded).toContain('\\\\@请求者');
       expect(degraded).not.toContain('<at');
     },
   );
-
 
   it('keeps combined substitution ownership and peer degradation inside one managed Reply', async () => {
     const target = {
@@ -805,21 +795,21 @@ describe('P2P OMP Reply', () => {
     expect(channel.sent).toEqual([]);
   });
 
-function testReplyPolicy(
-  target: ImReplyTarget,
-): Extract<ImReplyPolicy, { invocationKind: 'ordinary' }> {
-  return {
-    invocationKind: 'ordinary',
-    scope: {
-      kind: 'chat',
-      id: target.chatId,
-      chatId: target.chatId,
-      mode: 'group',
-    },
-    target,
-    senderOwnership: { kind: 'none', reason: 'verified-bot-sender' },
-  };
-}
+  function testReplyPolicy(
+    target: ImReplyTarget,
+  ): Extract<ImReplyPolicy, { invocationKind: 'ordinary' }> {
+    return {
+      invocationKind: 'ordinary',
+      scope: {
+        kind: 'chat',
+        id: target.chatId,
+        chatId: target.chatId,
+        mode: 'group',
+      },
+      target,
+      senderOwnership: { kind: 'none', reason: 'verified-bot-sender' },
+    };
+  }
 
   it('captures an exact 30 KB terminal card with metrics, marker, and one IM Reply', async () => {
     const h = await createHarness({

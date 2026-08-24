@@ -59,7 +59,6 @@ describe('profile-aware account and config commands', () => {
     expect((root as unknown as { accounts?: unknown }).accounts).toBeUndefined();
   });
 
-
   it('atomically saves a complete trusted peer directory', async () => {
     vi.useFakeTimers();
     const h = await createHarness();
@@ -119,8 +118,7 @@ describe('profile-aware account and config commands', () => {
 
     const root = await waitForRoot(
       h.rootDir,
-      (candidate) =>
-        candidate.profiles.claude?.collaboration.personalSubstitution.enabled === true,
+      (candidate) => candidate.profiles.claude?.collaboration.personalSubstitution.enabled === true,
     );
     expect(root.profiles.claude?.collaboration.personalSubstitution).toEqual({
       enabled: true,

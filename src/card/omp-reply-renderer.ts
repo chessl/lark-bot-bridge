@@ -1,7 +1,7 @@
 import {
+  type ImReplyPlan,
   sanitizeImAnswer,
   substitutionMentionOpenIds,
-  type ImReplyPlan,
 } from '../bot/im-invocation';
 import { deepMaskEmails, maskEmails } from './mask-email';
 import type { RunState, ToolEntry, ToolStatus } from './run-state';
@@ -347,10 +347,7 @@ function renderedOmpReplyMarkdown(
   );
 }
 
-export function renderOmpReplyMarkdown(
-  input: ReplyInput,
-  mentionMode?: ReplyMentionMode,
-): string {
+export function renderOmpReplyMarkdown(input: ReplyInput, mentionMode?: ReplyMentionMode): string {
   return renderedOmpReplyMarkdown(input, mentionMode).markdown;
 }
 
@@ -692,7 +689,6 @@ function escapeAttribute(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
 }
 
-
 export function ompReplyPresentation(state: RunState): OmpReplyPresentation {
   const statusLabel =
     state.terminal === 'done'
@@ -728,4 +724,3 @@ export function ompReplyPresentation(state: RunState): OmpReplyPresentation {
 function escapeMarkdown(value: string): string {
   return sanitizeImAnswer(value).replace(/([\\`*_{}[\]()#+.!\-|>])/g, '\\$1');
 }
-

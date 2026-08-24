@@ -825,8 +825,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     scope: conversationScope(scope, msg.chatId, chatMode, threadId),
     authorized: accessDecision.ok,
     duplicate: seenImMessageIds.has(msg.messageId),
-    mentionRequired:
-      msg.chatType !== 'p2p' && requireMentionForChat(controls.cfg, msg.chatId),
+    mentionRequired: msg.chatType !== 'p2p' && requireMentionForChat(controls.cfg, msg.chatId),
     recognizedCommand: isKnownTextCommand(msg.content),
     currentBotOpenId: channel.botIdentity?.openId,
     trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
@@ -875,7 +874,11 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   // fetch_failed sentinel. Feeding it to the agent would read as an empty
   // forward, so surface a recoverable hint and skip the run — the user can
   // resend once the upstream recovers.
-  if (plan.lane !== 'peer' && plan.lane !== 'substitution' && isForwardFetchFailed(plannedMessage)) {
+  if (
+    plan.lane !== 'peer' &&
+    plan.lane !== 'substitution' &&
+    isForwardFetchFailed(plannedMessage)
+  ) {
     log.warn('intake', 'forward-fetch-failed', {
       scope,
       msgId: plannedMessage.messageId,
@@ -885,9 +888,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
       channel,
       plannedMessage.chatId,
       plannedMessage.messageId,
-    ).catch((err) =>
-      log.warn('intake', 'forward-fetch-failed-hint-failed', { err: String(err) }),
-    );
+    ).catch((err) => log.warn('intake', 'forward-fetch-failed-hint-failed', { err: String(err) }));
     return;
   }
 
@@ -1418,9 +1419,9 @@ function buildPrompt(
   const collaborationInstructions =
     policy.kind === 'peer'
       ? [
-          `本次是可信 peer @${policy.message.senderAlias} 发起的隔离调用。冻结的可信 alias 为: ${policy.trustedPeerAliases
-            .map((alias) => `@${alias}`)
-            .join('、') || '无'}。只返回答案正文;transport 不会激活任何 alias,本次保持 zero-hop。`,
+          `本次是可信 peer @${policy.message.senderAlias} 发起的隔离调用。冻结的可信 alias 为: ${
+            policy.trustedPeerAliases.map((alias) => `@${alias}`).join('、') || '无'
+          }。只返回答案正文;transport 不会激活任何 alias,本次保持 zero-hop。`,
         ]
       : policy.kind === 'substitution'
         ? [

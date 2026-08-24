@@ -75,11 +75,11 @@ import type { SessionStore } from '../session/store';
 import { readUiSidecar } from '../ui/sidecar';
 import { validateAppCredentials } from '../utils/feishu-auth';
 import type { WorkspaceStore } from '../workspace/store';
+
 type PersonalSubstitutionDraft = {
   enabled: boolean;
   targetOpenIds: string[];
 };
-
 
 export interface Controls {
   profile: string;
@@ -1485,11 +1485,7 @@ function parseConfigDraftCounts(value: string | undefined): ConfigDraftCounts {
   const peerCount = Number(match[1]);
   const substitutionCount = Number(match[2]);
   const deleteIndex = match[3] === undefined ? undefined : Number(match[3]);
-  if (
-    peerCount > 10 ||
-    substitutionCount > 10 ||
-    (deleteIndex !== undefined && deleteIndex > 9)
-  ) {
+  if (peerCount > 10 || substitutionCount > 10 || (deleteIndex !== undefined && deleteIndex > 9)) {
     return {};
   }
   return {
@@ -1499,10 +1495,7 @@ function parseConfigDraftCounts(value: string | undefined): ConfigDraftCounts {
   };
 }
 
-function trustedPeerDraft(
-  ctx: CommandContext,
-  count: number | undefined,
-): TrustedPeerBot[] {
+function trustedPeerDraft(ctx: CommandContext, count: number | undefined): TrustedPeerBot[] {
   const fv = ctx.formValue ?? {};
   const indexes =
     count === undefined
@@ -1949,7 +1942,6 @@ async function saveAccountConfig(
   return configOps.saveAccountConfig(ctx.controls, newApp, plaintextSecret);
 }
 
-
 // ────────────── /meeting — in-meeting agent (智能体入会) ──────────────
 
 /**
@@ -2136,7 +2128,9 @@ function pickMeetingSession(
   if (remaining.length === 0) return { ok: true, session: first };
 
   // Multiple meetings: prefer the one started from this chat.
-  const fromHere = [first, ...remaining].filter((session) => session.originChatId === ctx.msg.chatId);
+  const fromHere = [first, ...remaining].filter(
+    (session) => session.originChatId === ctx.msg.chatId,
+  );
   const onlyHere = fromHere[0];
   if (fromHere.length === 1 && onlyHere) return { ok: true, session: onlyHere };
 

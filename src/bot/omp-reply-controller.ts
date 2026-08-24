@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { LarkChannel } from '@larksuite/channel';
 import {
   ompReplyPresentation,
+  type ReplyMentionMode,
   renderOmpReplyCard,
   renderOmpReplyMarkdownPost,
-  type ReplyMentionMode,
 } from '../card/omp-reply-renderer';
 import {
   initialState as emptyRunState,
@@ -25,8 +25,8 @@ import type {
   ActiveDelivery,
   DeliveryFailureReason,
   DeliveryState,
-  DurablePendingOperation,
   DurableMentionFallback,
+  DurablePendingOperation,
   OmpDeliveryJournal,
   ReplyTransport,
 } from './omp-delivery-journal';
@@ -62,10 +62,7 @@ interface PendingAttempt {
 const PROJECTION_THROTTLE_MS = 400;
 const RETRY_DELAYS_MS = [0, 500, 1_000] as const;
 
-const TERMINAL_BY_IM_REPLY_REASON: Record<
-  ImReplyReason,
-  Exclude<Terminal, 'running'>
-> = {
+const TERMINAL_BY_IM_REPLY_REASON: Record<ImReplyReason, Exclude<Terminal, 'running'>> = {
   'run-completed': 'done',
   'run-failed': 'error',
   'run-interrupted': 'interrupted',
@@ -229,9 +226,7 @@ export class OmpReplyController {
           JSON.stringify(renderOmpReplyMarkdownPost(plan)),
           true,
           plan.target,
-          degradedTerminal
-            ? JSON.stringify(renderOmpReplyMarkdownPost(plan, 'plain'))
-            : undefined,
+          degradedTerminal ? JSON.stringify(renderOmpReplyMarkdownPost(plan, 'plain')) : undefined,
         );
         if (markdown === 'mention_rejected' && hasReplyMentions(plan)) {
           logReplyMention('degraded', plan, transport, 'mention-rejected');
@@ -444,8 +439,7 @@ export class OmpReplyController {
         if (operation.kind === 'update' || operation.kind === 'close') {
           this.#sequence = operation.sequence;
         }
-        const mentionFallback =
-          operation.kind === 'close' ? undefined : operation.mentionFallback;
+        const mentionFallback = operation.kind === 'close' ? undefined : operation.mentionFallback;
         if (result === 'mention_rejected' && mentionFallback) {
           this.#pending = pendingMentionFallback(mentionFallback);
         } else {
@@ -553,10 +547,7 @@ export class OmpReplyController {
   }
 }
 
-function replyMentionFallback(
-  target: ImReplyTarget,
-  content: string,
-): DurableMentionFallback {
+function replyMentionFallback(target: ImReplyTarget, content: string): DurableMentionFallback {
   const uuid = randomUUID();
   return {
     kind: 'reply',
@@ -576,10 +567,7 @@ function replyMentionFallback(
   };
 }
 
-function patchMentionFallback(
-  messageId: string,
-  projection: Projection,
-): DurableMentionFallback {
+function patchMentionFallback(messageId: string, projection: Projection): DurableMentionFallback {
   return {
     kind: 'patch',
     terminal: true,
@@ -951,15 +939,7 @@ async function recoverInterrupted(
       await recoverInterruptedWithoutMessage(channel, journal, entry, plan);
       return;
     }
-    await patchRecoveredMessage(
-      channel,
-      journal,
-      entry,
-      plan,
-      staticProjection,
-      'mention',
-      true,
-    );
+    await patchRecoveredMessage(channel, journal, entry, plan, staticProjection, 'mention', true);
   } finally {
     journal.release(entry.runId);
   }
@@ -1166,10 +1146,7 @@ async function attemptDurableOperation(
         return { result: exactRetry ? 'success' : 'unknown' };
       }
       return {
-        result:
-          typeof code === 'number' && code !== 0
-            ? rejectedOperation(response)
-            : 'unknown',
+        result: typeof code === 'number' && code !== 0 ? rejectedOperation(response) : 'unknown',
       };
     }
     if (operation.kind === 'patch') {
@@ -1191,11 +1168,7 @@ async function attemptDurableOperation(
     const code = response.code;
     return {
       result:
-        code === 0
-          ? 'success'
-          : typeof code === 'number'
-            ? rejectedOperation(response)
-            : 'unknown',
+        code === 0 ? 'success' : typeof code === 'number' ? rejectedOperation(response) : 'unknown',
     };
   } catch (error) {
     return {
@@ -1204,7 +1177,9 @@ async function attemptDurableOperation(
   }
 }
 
-function rejectedOperation(value: unknown): Extract<OperationResult, 'rejected' | 'mention_rejected'> {
+function rejectedOperation(
+  value: unknown,
+): Extract<OperationResult, 'rejected' | 'mention_rejected'> {
   if (value && typeof value === 'object') {
     const message =
       'msg' in value && typeof value.msg === 'string'
@@ -1249,10 +1224,7 @@ function validateFinalPlan(plan: ImReplyPlan, progressPolicy: ImReplyPolicy): vo
   }
 
   const expectedScopeId =
-    plan.scope.kind === 'topic'
-
-      ? `${plan.scope.chatId}:${plan.scope.threadId}`
-      : plan.scope.chatId;
+    plan.scope.kind === 'topic' ? `${plan.scope.chatId}:${plan.scope.threadId}` : plan.scope.chatId;
   if (plan.scope.id !== expectedScopeId || plan.scope.chatId !== plan.target.chatId) {
     throw new Error('IM Reply target does not belong to its Conversation Scope');
   }
@@ -1316,7 +1288,6 @@ function hasReplyMentions(plan: ImReplyPlan): boolean {
     substitutionMentionOpenIds(plan).length > 0
   );
 }
-
 
 function logReplyMention(
   event: ReplyMentionEvent,

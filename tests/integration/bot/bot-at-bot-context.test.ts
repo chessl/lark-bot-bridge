@@ -189,9 +189,7 @@ describe('sender identity in bridge_context', () => {
         rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' }, name: 'Bridge' }],
       }),
     );
-    h.controls.cfg.collaboration.trustedPeerBots = [
-      { alias: 'Atlas', openId: 'ou_atlas' },
-    ];
+    h.controls.cfg.collaboration.trustedPeerBots = [{ alias: 'Atlas', openId: 'ou_atlas' }];
     h.controls.cfg.collaboration.personalSubstitution = {
       enabled: true,
       targetOpenIds: ['ou_target'],
@@ -204,7 +202,6 @@ describe('sender identity in bridge_context', () => {
     expect(prompt).toContain('Target label');
     expect(prompt).not.toMatch(/ou_(?:atlas|target)/);
   });
-
 
   it('does not waive requireMention from normalized mentionedBot alone', async () => {
     vi.useFakeTimers();
@@ -403,9 +400,7 @@ describe('personal substitution intake', () => {
         rawSenderType: 'user',
         mentionedBot: false,
         mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Target', isBot: false }],
-        rawMentions: [
-          { key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Target' },
-        ],
+        rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Target' }],
       }),
     );
     await vi.advanceTimersByTimeAsync(800);
@@ -425,9 +420,7 @@ describe('personal substitution intake', () => {
         rawSenderType: 'user',
         mentionedBot: false,
         mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Target', isBot: false }],
-        rawMentions: [
-          { key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Target' },
-        ],
+        rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Target' }],
       }),
     );
     expect(h.agent.runOptions).toHaveLength(0);
@@ -493,9 +486,7 @@ describe('personal substitution intake', () => {
         rawSenderType: 'user',
         mentionedBot: false,
         mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Old', isBot: false }],
-        rawMentions: [
-          { key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Old' },
-        ],
+        rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Old' }],
       }),
     );
     await h.channel.handlers.message?.(
@@ -505,16 +496,13 @@ describe('personal substitution intake', () => {
         rawSenderType: 'user',
         mentionedBot: false,
         mentions: [{ key: '@_user_1', openId: 'ou_next', name: 'Next', isBot: false }],
-        rawMentions: [
-          { key: '@_user_1', id: { open_id: 'ou_next' }, name: 'Next' },
-        ],
+        rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_next' }, name: 'Next' }],
       }),
     );
     await waitFor(() => h.agent.runOptions.length === 2);
     expect(h.agent.runOptions[1]?.prompt).toContain('new target');
     expect(h.agent.runOptions[1]?.prompt).not.toContain('old target');
   });
-
 
   it('sends one Mention-free Topic control Reply and no Run when every target is invalid', async () => {
     const h = await createHarness();
@@ -567,9 +555,7 @@ describe('personal substitution intake', () => {
         mentionedBot: false,
         threadId: 'omt_topic',
         mentions: [{ key: '@_user_1', openId: 'ou_target', name: 'Target', isBot: false }],
-        rawMentions: [
-          { key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Target' },
-        ],
+        rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_target' }, name: 'Target' }],
       }),
     );
     await h.channel.handlers.message?.(

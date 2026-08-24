@@ -32,7 +32,6 @@ export interface CollaborationConfig {
   personalSubstitution: PersonalSubstitutionConfig;
 }
 
-
 export interface AttachmentConfig {
   maxCount: number;
   maxBytes: number;
@@ -208,10 +207,8 @@ export function normalizeTrustedPeerBots(
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       throw new Error('trusted peer entry is invalid');
     }
-    const alias =
-      'alias' in entry && typeof entry.alias === 'string' ? entry.alias : undefined;
-    const openId =
-      'openId' in entry && typeof entry.openId === 'string' ? entry.openId : undefined;
+    const alias = 'alias' in entry && typeof entry.alias === 'string' ? entry.alias : undefined;
+    const openId = 'openId' in entry && typeof entry.openId === 'string' ? entry.openId : undefined;
     if (alias === undefined || openId === undefined) {
       throw new Error('trusted peer entry is invalid');
     }

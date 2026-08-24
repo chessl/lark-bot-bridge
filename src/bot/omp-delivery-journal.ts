@@ -183,10 +183,9 @@ export type DeliveryState = z.infer<typeof DeliveryStateSchema>;
 export type ReplyTransport = z.infer<typeof ReplyTransportSchema>;
 export type DurablePendingOperation = z.infer<typeof PendingOperationSchema>;
 export type DurableMentionFallback = z.infer<typeof MentionFallbackSchema>;
-export type ActiveDelivery = Omit<
-  z.infer<typeof ActiveDeliverySchema>,
-  'replyPolicy'
-> & { replyPolicy: ImReplyPolicy };
+export type ActiveDelivery = Omit<z.infer<typeof ActiveDeliverySchema>, 'replyPolicy'> & {
+  replyPolicy: ImReplyPolicy;
+};
 
 export type DeliveryFailureReason =
   | 'journal-read-failed'
@@ -261,12 +260,7 @@ export class OmpDeliveryJournal {
       this.recordFailure(undefined, 'corrupt-journal-json');
       return;
     }
-    if (
-      typeof raw === 'object' &&
-      raw !== null &&
-      'version' in raw &&
-      raw.version !== 2
-    ) {
+    if (typeof raw === 'object' && raw !== null && 'version' in raw && raw.version !== 2) {
       this.recordFailure(undefined, 'incompatible-journal-version');
       return;
     }

@@ -4,6 +4,7 @@ import * as lockfile from 'proper-lockfile';
 import { writeFileAtomic } from '../platform/atomic-write';
 import { resolveAppPaths } from './app-paths';
 import { normalizeProfileConfig, type ProfileConfig, type RootConfig } from './profile-schema';
+
 interface RawRootConfig {
   schemaVersion: 3;
   activeProfile: string;

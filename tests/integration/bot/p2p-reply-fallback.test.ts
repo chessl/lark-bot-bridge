@@ -203,7 +203,8 @@ describe('P2P OMP Reply safe fallback', () => {
 
       const outbound =
         transport === 'managed'
-          ? updateCardData(h.channel.rawClient.cardkit.v1.card.update.mock.calls.at(-1)?.[0]) ?? ''
+          ? (updateCardData(h.channel.rawClient.cardkit.v1.card.update.mock.calls.at(-1)?.[0]) ??
+            '')
           : transport === 'inline'
             ? JSON.stringify(h.channel.patches.at(-1)?.card)
             : replyContent(replyInputs(h.channel).at(-1));
@@ -212,9 +213,9 @@ describe('P2P OMP Reply safe fallback', () => {
       expect(outbound).toContain('ou_peer');
       expect(outbound.match(/ou_peer/g)).toHaveLength(1);
       expect(outbound).not.toContain('```');
-      expect(replyInputs(h.channel).every((input) => requestMessageId(input) === `om_${transport}`)).toBe(
-        true,
-      );
+      expect(
+        replyInputs(h.channel).every((input) => requestMessageId(input) === `om_${transport}`),
+      ).toBe(true);
       expect(h.channel.successfulReplyIds).toHaveLength(1);
     }
   });
@@ -261,7 +262,8 @@ describe('P2P OMP Reply safe fallback', () => {
 
       const outbound =
         transport === 'managed'
-          ? updateCardData(h.channel.rawClient.cardkit.v1.card.update.mock.calls.at(-1)?.[0]) ?? ''
+          ? (updateCardData(h.channel.rawClient.cardkit.v1.card.update.mock.calls.at(-1)?.[0]) ??
+            '')
           : transport === 'inline'
             ? JSON.stringify(h.channel.patches.at(-1)?.card)
             : replyContent(replyInputs(h.channel).at(-1));

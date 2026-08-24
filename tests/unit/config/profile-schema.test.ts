@@ -17,9 +17,9 @@ describe('OMP profile schema', () => {
   it('defaults deployment mode to personal and parses team', () => {
     expect(createDefaultProfileConfig({ app, omp }).mode).toBe('personal');
     expect(createDefaultProfileConfig({ mode: 'team', app, omp }).mode).toBe('team');
-    expect(
-      normalizeProfileConfig({ app, omp, collaboration, mode: 'nonsense' }).mode,
-    ).toBe('personal');
+    expect(normalizeProfileConfig({ app, omp, collaboration, mode: 'nonsense' }).mode).toBe(
+      'personal',
+    );
   });
 
   it('requires and normalizes OMP configuration when loading', () => {
@@ -89,9 +89,9 @@ describe('OMP profile schema', () => {
     expect(
       normalizePersonalSubstitution({ enabled: false, targetOpenIds: ['ou_first', 'ou_second'] }),
     ).toEqual({ enabled: false, targetOpenIds: ['ou_first', 'ou_second'] });
-    expect(() =>
-      normalizePersonalSubstitution({ enabled: true, targetOpenIds: [] }),
-    ).toThrow(/at least one target/);
+    expect(() => normalizePersonalSubstitution({ enabled: true, targetOpenIds: [] })).toThrow(
+      /at least one target/,
+    );
     expect(() =>
       normalizePersonalSubstitution({
         enabled: true,

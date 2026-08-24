@@ -70,15 +70,8 @@ export type ImPromptReason =
   | 'trusted-peer-message'
   | 'personal-substitution-message';
 
-export type ImReplyReason =
-  | 'run-completed'
-  | 'run-failed'
-  | 'run-interrupted'
-  | 'run-timed-out';
-export type ImSenderOwnershipReason =
-  | ImIdentityReason
-  | 'direct-message'
-  | 'verified-bot-sender';
+export type ImReplyReason = 'run-completed' | 'run-failed' | 'run-interrupted' | 'run-timed-out';
+export type ImSenderOwnershipReason = ImIdentityReason | 'direct-message' | 'verified-bot-sender';
 
 export type ImSenderOwnership =
   | Readonly<{ kind: 'mention'; openId: string }>
@@ -257,10 +250,7 @@ export type ImReplyPolicy =
   | (ImReplyPolicyBase &
       Readonly<{
         invocationKind: 'substitution';
-        substitutionTargets: readonly [
-          ImSubstitutionReplyTarget,
-          ...ImSubstitutionReplyTarget[],
-        ];
+        substitutionTargets: readonly [ImSubstitutionReplyTarget, ...ImSubstitutionReplyTarget[]];
         invalidTargetCount: number;
       }>);
 
@@ -539,9 +529,7 @@ export function createImInvocation(
     policy.personalSubstitutionTargetOpenIds ?? [],
   );
   const promptMessages = nonEmpty(
-    sourceMessages.map((source) =>
-      toPromptMessage(source, trustedPeers, configuredTargetOpenIds),
-    ),
+    sourceMessages.map((source) => toPromptMessage(source, trustedPeers, configuredTargetOpenIds)),
   );
   const replyPolicy = Object.freeze({
     invocationKind: 'ordinary',
@@ -802,10 +790,7 @@ function codePointAt(value: string, start: number): { value: string; end: number
   return { value: character, end: start + character.length };
 }
 
-function previousCodePoint(
-  value: string,
-  end: number,
-): { value: string; start: number } {
+function previousCodePoint(value: string, end: number): { value: string; start: number } {
   let start = end - 1;
   const trailing = value.charCodeAt(start);
   if (start > 0 && trailing >= 0xdc00 && trailing <= 0xdfff) start--;
@@ -968,14 +953,11 @@ function snapshotConfiguredHumanIds(openIds: readonly string[]): readonly Verifi
   return Object.freeze(openIds.map((openId) => VerifiedHumanIdSchema.parse(openId)));
 }
 
-
 function directSubstitutionMentions(
   message: NormalizedMessage,
   configuredTargetOpenIds: readonly VerifiedHumanId[],
   senderOpenId: VerifiedHumanId,
-):
-  | Readonly<{ targets: readonly ImSubstitutionTarget[]; invalidTargetCount: number }>
-  | undefined {
+): Readonly<{ targets: readonly ImSubstitutionTarget[]; invalidTargetCount: number }> | undefined {
   const raw = message.raw;
   if (
     typeof raw !== 'object' ||
@@ -1015,11 +997,7 @@ function directSubstitutionMentions(
         : undefined;
     let hasRawMentionType = false;
     let rawMentionType: unknown;
-    if (
-      rawMention !== null &&
-      typeof rawMention === 'object' &&
-      'mentioned_type' in rawMention
-    ) {
+    if (rawMention !== null && typeof rawMention === 'object' && 'mentioned_type' in rawMention) {
       hasRawMentionType = true;
       rawMentionType = rawMention.mentioned_type;
     }
@@ -1180,10 +1158,7 @@ function replyTarget(message: NormalizedMessage): ImReplyTarget {
   });
 }
 
-function senderOwnership(
-  scope: ImConversationScope,
-  sender: ImSenderIdentity,
-): ImSenderOwnership {
+function senderOwnership(scope: ImConversationScope, sender: ImSenderIdentity): ImSenderOwnership {
   if (sender.kind === 'human') {
     return Object.freeze({ kind: 'mention', openId: sender.id });
   }
@@ -1223,5 +1198,3 @@ function nonEmpty<T>(items: readonly T[]): [T, ...T[]] {
   }
   return [first, ...items.slice(1)];
 }
-
-

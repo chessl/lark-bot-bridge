@@ -168,7 +168,12 @@ describe('terminal OMP Run state', () => {
     expect(() => renderOmpReplyMarkdown(initialState)).toThrow('running OMP Reply');
   });
   it.each([
-    { name: 'done', terminal: 'done', finalText: 'answer <at id="ou_fake"></at>', reason: 'run-completed' },
+    {
+      name: 'done',
+      terminal: 'done',
+      finalText: 'answer <at id="ou_fake"></at>',
+      reason: 'run-completed',
+    },
     { name: 'empty done', terminal: 'done', reason: 'run-completed' },
     { name: 'error', terminal: 'error', reason: 'run-failed' },
     { name: 'interrupted', terminal: 'interrupted', reason: 'run-interrupted' },
@@ -178,28 +183,31 @@ describe('terminal OMP Run state', () => {
     terminal: Exclude<RunState['terminal'], 'running'>;
     finalText?: string;
     reason: ImReplyReason;
-  }>)('projects one sender owner through card and Post for $name', ({ terminal, finalText, reason }) => {
-    const state: RunState = { ...initialState, terminal, ...(finalText ? { finalText } : {}) };
-    const plan: ImReplyPlan = {
-      invocationKind: 'ordinary',
-      reason,
-      scope: { kind: 'chat', id: 'oc_group', chatId: 'oc_group', mode: 'group' },
-      target: { chatId: 'oc_group', messageId: 'om_source', replyInThread: false },
-      senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-      state,
-    };
-    const card = JSON.stringify(renderOmpReplyCard(plan));
-    const markdown = renderOmpReplyMarkdown(plan);
-    const post = renderOmpReplyMarkdownPost(plan);
+  }>)(
+    'projects one sender owner through card and Post for $name',
+    ({ terminal, finalText, reason }) => {
+      const state: RunState = { ...initialState, terminal, ...(finalText ? { finalText } : {}) };
+      const plan: ImReplyPlan = {
+        invocationKind: 'ordinary',
+        reason,
+        scope: { kind: 'chat', id: 'oc_group', chatId: 'oc_group', mode: 'group' },
+        target: { chatId: 'oc_group', messageId: 'om_source', replyInThread: false },
+        senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+        state,
+      };
+      const card = JSON.stringify(renderOmpReplyCard(plan));
+      const markdown = renderOmpReplyMarkdown(plan);
+      const post = renderOmpReplyMarkdownPost(plan);
 
-    expect(card.match(/ou_sender/g)).toHaveLength(1);
-    expect(markdown.match(/ou_sender/g)).toHaveLength(1);
-    expect(JSON.stringify(post)).toContain('"tag":"at","user_id":"ou_sender"');
-    expect(JSON.stringify(post).match(/ou_sender/g)).toHaveLength(1);
-    expect(card).not.toContain('ou_fake');
-    expect(markdown).not.toContain('ou_fake');
-    expect(JSON.stringify(post)).not.toContain('ou_fake');
-  });
+      expect(card.match(/ou_sender/g)).toHaveLength(1);
+      expect(markdown.match(/ou_sender/g)).toHaveLength(1);
+      expect(JSON.stringify(post)).toContain('"tag":"at","user_id":"ou_sender"');
+      expect(JSON.stringify(post).match(/ou_sender/g)).toHaveLength(1);
+      expect(card).not.toContain('ou_fake');
+      expect(markdown).not.toContain('ou_fake');
+      expect(JSON.stringify(post)).not.toContain('ou_fake');
+    },
+  );
 
   it.each([
     {

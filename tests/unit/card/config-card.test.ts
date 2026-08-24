@@ -82,11 +82,7 @@ describe('config personal substitution controls', () => {
   it('safe-echoes only enabled state and target count on success or failure', () => {
     const saved = JSON.stringify(configSavedCard({ ...base, personalSubstitution }));
     const failed = JSON.stringify(
-      configFailedCard(
-        'target@example.com failed for ou_target_secret_123456',
-        [],
-        2,
-      ),
+      configFailedCard('target@example.com failed for ou_target_secret_123456', [], 2),
     );
     expect(saved).toContain('启用（2 个已保存目标）');
     expect(failed).toContain('2 个目标（内容已隐藏）');
