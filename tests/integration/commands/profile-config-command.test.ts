@@ -191,7 +191,6 @@ describe('profile-aware account and config commands', () => {
     expect(lookup).not.toHaveBeenCalled();
   });
   it('preserves unsaved substitution drafts through add and delete card actions', async () => {
-    vi.useFakeTimers();
     const h = await createHarness();
     await h.command('/config');
     h.channel.rawClient.requests.splice(0);
@@ -204,7 +203,7 @@ describe('profile-aware account and config commands', () => {
       },
       'om_fake_1',
     );
-    await vi.runAllTimersAsync();
+    await h.waitForCardUpdate();
     const added = JSON.stringify(h.channel.rawClient.requests.at(-1));
     expect(added).toContain('draft@example.com');
     expect(added).toContain('personal_substitution_target_1');
@@ -218,7 +217,7 @@ describe('profile-aware account and config commands', () => {
       },
       'om_fake_1',
     );
-    await vi.runAllTimersAsync();
+    await h.waitForCardUpdate();
     const deleted = JSON.stringify(h.channel.rawClient.requests.at(-1));
     expect(deleted).toContain('draft@example.com');
     expect(deleted).not.toContain('remove@example.com');
@@ -267,6 +266,7 @@ async function createHarness(
 ): Promise<{
   rootDir: string;
   channel: ReturnType<typeof createFakeChannel>;
+  waitForCardUpdate(): Promise<void>;
   command(
     content: string,
     formValue?: Record<string, unknown>,
@@ -283,6 +283,13 @@ async function createHarness(
   Object.assign(channel, {
     recallMessage: vi.fn(async () => {}),
   });
+  let nextCardUpdate = Promise.withResolvers<void>();
+  const updateCard = channel.rawClient.cardkit.v1.card.update;
+  channel.rawClient.cardkit.v1.card.update = async (params) => {
+    const result = await updateCard(params);
+    nextCardUpdate.resolve();
+    return result;
+  };
   const sessions = new SessionStore(appPaths.sessionsFile);
   const workspaces = new WorkspaceStore(appPaths.workspacesFile);
   const controls = {
@@ -308,6 +315,10 @@ async function createHarness(
   return {
     rootDir,
     channel,
+    async waitForCardUpdate() {
+      await nextCardUpdate.promise;
+      nextCardUpdate = Promise.withResolvers<void>();
+    },
     command: (content: string, formValue?: Record<string, unknown>, messageId?: string) =>
       tryHandleCommand({
         channel: channel as unknown as CommandContext['channel'],
