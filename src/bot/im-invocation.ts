@@ -300,7 +300,7 @@ function parseSender(message: NormalizedMessage): ImSenderIdentity {
   if (
     (normalizedKind !== undefined && normalizedKind !== rawKind) ||
     (message.senderIsBot === true && rawKind !== 'bot') ||
-    (message.senderIsBot === false && senderType === 'bot')
+    (message.senderIsBot === false && rawKind === 'bot')
   ) {
     return Object.freeze({ kind: 'unknown', reason: 'contradictory-sender-type' });
   }
@@ -396,10 +396,10 @@ function senderOwnership(
   scope: ImConversationScope,
   sender: ImSenderIdentity,
 ): ImSenderOwnership {
-  if (scope.mode === 'p2p') return Object.freeze({ kind: 'none', reason: 'direct-message' });
   if (sender.kind === 'human') {
     return Object.freeze({ kind: 'mention', openId: sender.id });
   }
+  if (scope.mode === 'p2p') return Object.freeze({ kind: 'none', reason: 'direct-message' });
   return Object.freeze({
     kind: 'none',
     reason: sender.kind === 'bot' ? 'verified-bot-sender' : sender.reason,

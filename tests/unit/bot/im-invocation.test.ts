@@ -29,6 +29,13 @@ const TOPIC_SCOPE: ImConversationScope = {
   threadId: 'omt_topic',
   mode: 'topic',
 };
+const P2P_SCOPE: ImConversationScope = {
+  kind: 'chat',
+  id: 'oc_chat',
+  chatId: 'oc_chat',
+  mode: 'p2p',
+};
+
 
 describe('IM message planning', () => {
   it.each(
@@ -76,24 +83,36 @@ describe('IM message planning', () => {
         rawSenderId: 'ou_sender',
         expected: { kind: 'unknown', reason: 'contradictory-sender-type' },
       },
+      {
+        name: 'contradictory app bot marker',
+        senderType: 'app',
+        normalizedSenderIsBot: false,
+        rawSenderId: 'ou_sender',
+        expected: { kind: 'unknown', reason: 'contradictory-sender-type' },
+      },
     ] satisfies Array<{
       name: string;
       senderType: string | undefined;
       normalizedSenderType?: string;
+      normalizedSenderIsBot?: boolean;
       rawSenderId: string | undefined;
       expected: object;
     }>,
-  )('keeps $name explicit', ({ name, senderType, normalizedSenderType, rawSenderId, expected }) => {
-    const message = imMessage({
-      messageId: `om_${name}`,
-      ...(senderType === undefined ? {} : { senderType }),
-      ...(normalizedSenderType === undefined ? {} : { normalizedSenderType }),
-      ...(rawSenderId === undefined ? {} : { rawSenderId }),
-    });
-    const plan = ordinaryPlan(message, CHAT_SCOPE);
+  )(
+    'keeps $name explicit',
+    ({ name, senderType, normalizedSenderType, normalizedSenderIsBot, rawSenderId, expected }) => {
+      const message = imMessage({
+        messageId: `om_${name}`,
+        ...(senderType === undefined ? {} : { senderType }),
+        ...(normalizedSenderType === undefined ? {} : { normalizedSenderType }),
+        ...(normalizedSenderIsBot === undefined ? {} : { normalizedSenderIsBot }),
+        ...(rawSenderId === undefined ? {} : { rawSenderId }),
+      });
+      const plan = ordinaryPlan(message, CHAT_SCOPE);
 
-    expect(plan.source.sender).toEqual(expected);
-  });
+      expect(plan.source.sender).toEqual(expected);
+    },
+  );
 
   it('applies access, duplicate, mention, and human Command precedence in that order', () => {
     const message = imMessage({ senderType: 'user', rawSenderId: 'ou_sender' });
@@ -192,6 +211,20 @@ describe('ordinary IM Invocation creation', () => {
     expect(Object.isFrozen(invocation)).toBe(true);
     expect(Object.isFrozen(invocation.sourceMessages)).toBe(true);
   });
+
+  it('freezes a verified P2P human as the terminal sender owner', () => {
+    const invocation = createImInvocation([
+      ordinaryPlan(
+        imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
+        P2P_SCOPE,
+      ),
+    ]);
+
+    expect(invocation.replyPolicy.senderOwnership).toEqual({
+      kind: 'mention',
+      openId: 'ou_sender',
+    });
+  });
 });
 
 describe('IM Reply planning', () => {
@@ -279,19 +312,23 @@ function imMessage(
     senderType?: string;
     rawSenderId?: string;
     normalizedSenderType?: string;
+    normalizedSenderIsBot?: boolean;
     threadId?: string;
   } = {},
 ): NormalizedMessage {
   const senderId = input.senderId ?? 'ou_sender';
+  const normalizedSenderType = input.normalizedSenderType ?? input.senderType;
   return {
     messageId: input.messageId ?? 'om_message',
     chatId: 'oc_chat',
     chatType: 'group',
     senderId,
-    ...(input.normalizedSenderType ?? input.senderType
+    ...(normalizedSenderType
       ? {
-          senderType: input.normalizedSenderType ?? input.senderType,
-          senderIsBot: (input.normalizedSenderType ?? input.senderType) === 'bot',
+          senderType: normalizedSenderType,
+          senderIsBot:
+            input.normalizedSenderIsBot ??
+            (normalizedSenderType === 'app' || normalizedSenderType === 'bot'),
         }
       : {}),
     ...(input.senderName ? { senderName: input.senderName } : {}),
