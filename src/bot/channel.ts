@@ -414,6 +414,19 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     );
   };
 
+  const intakeTails = new Map<string, Promise<void>>();
+  function enqueueIntake(chatId: string, task: () => Promise<void>): Promise<void> {
+    const previous = intakeTails.get(chatId) ?? Promise.resolve();
+    const next = previous
+      .catch(() => {})
+      .then(task)
+      .finally(() => {
+        if (intakeTails.get(chatId) === next) intakeTails.delete(chatId);
+      });
+    intakeTails.set(chatId, next);
+    return next;
+  }
+
   // Counter for stdout reconnect escalation; reset on `reconnected`.
   let consecutiveReconnects = 0;
 
@@ -426,24 +439,26 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         receivedAtMono,
         ...(Number.isFinite(msg.createTime) ? { messageCreatedAtWall: msg.createTime } : {}),
       });
-      await withTrace({ chatId: msg.chatId, msgId: msg.messageId }, () =>
-        intakeMessage({
-          channel,
-          agent,
-          sessions,
-          sessionCatalog,
-          workspaces,
-          pending,
-          msg,
-          controls,
-          chatModeCache,
-          logThreadModeOverride,
-          scopedRuns,
-          imPlans,
-          seenImMessageIds,
-          messageReceipts,
-          enqueueInvocation,
-        }),
+      await enqueueIntake(msg.chatId, () =>
+        withTrace({ chatId: msg.chatId, msgId: msg.messageId }, () =>
+          intakeMessage({
+            channel,
+            agent,
+            sessions,
+            sessionCatalog,
+            workspaces,
+            pending,
+            msg,
+            controls,
+            chatModeCache,
+            logThreadModeOverride,
+            scopedRuns,
+            imPlans,
+            seenImMessageIds,
+            messageReceipts,
+            enqueueInvocation,
+          }),
+        ),
       ).catch((err) => log.fail('intake', err));
     },
     reject: (evt) => {

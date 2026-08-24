@@ -227,38 +227,56 @@ describe('sender identity in bridge_context', () => {
     expect(userInput.text).toContain('没有正文');
   });
 
-  it('runs peer messages independently and in arrival order', async () => {
+  it('admits concurrent peer messages in arrival order before async scope resolution', async () => {
     const h = await createHarness();
     h.profileConfig.collaboration.trustedPeerBots.push({
       alias: 'Hermes',
       openId: 'ou_hermes',
     });
+    const modeGate = Promise.withResolvers<void>();
+    const firstLookupStarted = Promise.withResolvers<void>();
+    let modeLookups = 0;
+    h.channel.getChatMode = async () => {
+      modeLookups++;
+      if (modeLookups === 1) {
+        firstLookupStarted.resolve();
+        await modeGate.promise;
+      }
+      return 'group';
+    };
     await startTestBridge(h);
 
-    for (const [messageId, content] of [
-      ['om_peer_first', 'first peer request'],
-      ['om_peer_second', 'second peer request'],
-    ] satisfies Array<[string, string]>) {
-      await h.channel.handlers.message?.(
-        message({
-          messageId,
-          senderId: 'ou_hermes',
-          senderName: 'HermesBot',
-          content,
-          rawSenderType: 'bot',
-          mentions: [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }],
-          rawMentions: [
-            {
-              key: '@_user_1',
-              id: { open_id: 'ou_bot' },
-              name: 'Bridge',
-            },
-          ],
-        }),
-      );
-    }
+    const peerMessages: [NormalizedMessage, NormalizedMessage] = [
+      message({
+        messageId: 'om_peer_first',
+        senderId: 'ou_hermes',
+        senderName: 'HermesBot',
+        content: 'first peer request',
+        rawSenderType: 'bot',
+        mentions: [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }],
+        rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' }, name: 'Bridge' }],
+      }),
+      message({
+        messageId: 'om_peer_second',
+        senderId: 'ou_hermes',
+        senderName: 'HermesBot',
+        content: 'second peer request',
+        rawSenderType: 'bot',
+        mentions: [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }],
+        rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' }, name: 'Bridge' }],
+      }),
+    ];
+    const [firstMessage, secondMessage] = peerMessages;
+    const first = h.channel.handlers.message?.(firstMessage);
+    await firstLookupStarted.promise;
+    const second = h.channel.handlers.message?.(secondMessage);
+    const lookupsBeforeRelease = modeLookups;
+    modeGate.resolve();
+    await Promise.all([first, second]);
     await waitFor(() => h.agent.runOptions.length === 2);
 
+    expect(lookupsBeforeRelease).toBe(1);
+    expect(modeLookups).toBe(1);
     expect(h.agent.runOptions[0]?.prompt).toContain('first peer request');
     expect(h.agent.runOptions[1]?.prompt).toContain('second peer request');
     expect(h.agent.runOptions[0]?.prompt).not.toContain('second peer request');
