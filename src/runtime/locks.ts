@@ -2,7 +2,6 @@ import { chmod, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import * as lockfile from 'proper-lockfile';
 import type { AppPaths } from '../config/app-paths';
-import type { AgentKind } from '../config/profile-schema';
 
 export type RuntimeLockKind = 'profile' | 'app';
 
@@ -16,7 +15,6 @@ export interface RuntimeLockMeta {
   kind: RuntimeLockKind;
   target: string;
   profile: string;
-  agentKind: AgentKind;
   appId?: string;
   pid: number;
   startedAt: string;
@@ -38,7 +36,6 @@ export class RuntimeLockConflictError extends Error {
 export async function withProfileAndAppLocks<T>(
   paths: Pick<AppPaths, 'profile' | 'profileLockFile' | 'appLockFile'>,
   appId: string,
-  agentKind: AgentKind,
   fn: (locks: AcquiredRuntimeLock[]) => Promise<T> | T,
 ): Promise<T> {
   const acquired: AcquiredRuntimeLock[] = [];
@@ -48,7 +45,6 @@ export async function withProfileAndAppLocks<T>(
         kind: 'profile',
         target: paths.profileLockFile,
         profile: paths.profile,
-        agentKind,
       }),
     );
     acquired.push(
@@ -56,7 +52,6 @@ export async function withProfileAndAppLocks<T>(
         kind: 'app',
         target: paths.appLockFile(appId),
         profile: paths.profile,
-        agentKind,
         appId,
       }),
     );
@@ -71,26 +66,22 @@ export async function withProfileAndAppLocks<T>(
 export async function acquireAppRuntimeLock(
   paths: Pick<AppPaths, 'profile' | 'appLockFile'>,
   appId: string,
-  agentKind: AgentKind,
 ): Promise<AcquiredRuntimeLock> {
   return acquireRuntimeLock({
     kind: 'app',
     target: paths.appLockFile(appId),
     profile: paths.profile,
-    agentKind,
     appId,
   });
 }
 
 export async function acquireProfileRuntimeLock(
   paths: Pick<AppPaths, 'profile' | 'profileLockFile'>,
-  agentKind: AgentKind,
 ): Promise<AcquiredRuntimeLock> {
   return acquireRuntimeLock({
     kind: 'profile',
     target: paths.profileLockFile,
     profile: paths.profile,
-    agentKind,
   });
 }
 
@@ -183,7 +174,6 @@ function isRuntimeLockMeta(value: unknown): value is RuntimeLockMeta {
     (meta.kind === 'profile' || meta.kind === 'app') &&
     typeof meta.target === 'string' &&
     typeof meta.profile === 'string' &&
-    (meta.agentKind === 'claude' || meta.agentKind === 'codex' || meta.agentKind === 'omp') &&
     typeof meta.pid === 'number' &&
     typeof meta.startedAt === 'string' &&
     (meta.appId === undefined || typeof meta.appId === 'string')

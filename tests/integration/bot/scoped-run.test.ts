@@ -70,7 +70,7 @@ describe('ScopedRuns', () => {
   });
 
   it('reports OMP runtime access in canonical access terms', async () => {
-    const h = await createHarness({ defaultWorkspace: true, agentKind: 'omp' });
+    const h = await createHarness({ defaultWorkspace: true });
 
     const result = await start(h, 'chat-1');
 
@@ -166,7 +166,6 @@ describe('ScopedRuns', () => {
     });
     h.sessionCatalog.upsertActive({
       scopeId: 'chat-1',
-      agentId: 'claude',
       cwdRealpath: await realpath(h.tmp.workspace),
       policyFingerprint: 'user-policy',
       sessionId: 'user-session',
@@ -189,7 +188,6 @@ describe('ScopedRuns', () => {
     await collect(result.run.events);
 
     expect(h.agent.runOptions[0]?.sessionId).toBeUndefined();
-    expect(h.agent.runOptions[0]?.threadId).toBeUndefined();
     expect(h.sessionCatalog.entries()).toEqual(before);
     expect(opened).toEqual([]);
   });
@@ -433,7 +431,6 @@ interface ScopedRunHarness {
 }
 
 interface HarnessOptions {
-  agentKind?: 'claude' | 'omp';
   defaultWorkspace?: boolean;
   personal?: boolean;
   events?: FakeAgentEvents;
@@ -455,7 +452,6 @@ async function createHarness(options: HarnessOptions = {}): Promise<ScopedRunHar
   const activeRuns = new ActiveRuns();
   let nextRun = 1;
   const profileConfig = createDefaultProfileConfig({
-    agentKind: options.agentKind ?? 'claude',
     accounts: {
       app: {
         id: 'cli_test',
@@ -463,7 +459,7 @@ async function createHarness(options: HarnessOptions = {}): Promise<ScopedRunHar
         tenant: 'feishu',
       },
     },
-    ...(options.agentKind === 'omp' ? { omp: { binaryPath: 'omp' } } : {}),
+    omp: { binaryPath: 'omp' },
   });
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
   const finalConfig = {
@@ -493,7 +489,7 @@ async function createHarness(options: HarnessOptions = {}): Promise<ScopedRunHar
       nativeTools: options.nativeTools,
       sessionCatalog,
       workspaces,
-      profile: 'claude',
+      profile: 'work',
       profileConfig: () => finalConfig,
       now: () => 1000,
     }),

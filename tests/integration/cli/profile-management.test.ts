@@ -4,14 +4,15 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runProfileList, runProfileUse } from '../../../src/cli/commands/profile';
 import { resolveAppPaths } from '../../../src/config/app-paths';
-import {
-  type AgentKind,
-  createDefaultProfileConfig,
-  type RootConfig,
-} from '../../../src/config/profile-schema';
+import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import type { ProcessEntry } from '../../../src/runtime/registry';
 
 const roots: string[] = [];
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 async function makeRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'bridge-profile-management-'));
@@ -19,62 +20,36 @@ async function makeRoot(): Promise<string> {
   return root;
 }
 
-afterEach(async () => {
-  vi.restoreAllMocks();
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
-
 describe('profile management commands', () => {
-  it('lists active profile first with running pid and agent identity', async () => {
+  it('lists the active profile first with running pid and no engine column', async () => {
     const root = await makeRoot();
-    await writeProfiles(root, 'codex-dev', ['alpha', 'claude', 'codex-dev']);
-    await writeRegistry(root, [
-      processEntry({
-        id: 'run1',
-        pid: 12345,
-        profileName: 'codex-dev',
-        agentKind: 'codex',
-        appId: 'cli_codex',
-      }),
-    ]);
+    await writeProfiles(root, 'personal', ['alpha', 'work', 'personal']);
+    await writeRegistry(root, [processEntry({ pid: 12345, profileName: 'personal' })]);
     const lines: string[] = [];
-    vi.spyOn(console, 'log').mockImplementation((line: string) => {
-      lines.push(line);
-    });
+    vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
 
     await runProfileList({ rootDir: root });
 
     expect(lines).toEqual([
-      'ACTIVE  PROFILE    AGENT   STATUS',
-      '*       codex-dev  codex   pid=12345 agent=codex',
-      '        alpha      claude  -',
-      '        claude     claude  -',
+      'ACTIVE  PROFILE   STATUS',
+      '*       personal  pid=12345',
+      '        alpha     -',
+      '        work      -',
     ]);
   });
 
-  it('switches active profile atomically without rewriting running process entries', async () => {
+  it('switches active profile without rewriting running process entries', async () => {
     const root = await makeRoot();
-    await writeProfiles(root, 'claude', ['claude', 'codex-dev']);
+    await writeProfiles(root, 'work', ['work', 'personal']);
     const registryFile = resolveAppPaths({ rootDir: root }).userRegistryFile;
-    const registry = {
-      entries: [
-        processEntry({
-          id: 'run1',
-          pid: 12345,
-          profileName: 'claude',
-          agentKind: 'claude',
-          appId: 'cli_claude',
-        }),
-      ],
-    };
-    await writeJson(registryFile, registry);
+    await writeJson(registryFile, { entries: [processEntry({ profileName: 'work' })] });
     const beforeRegistry = await readFile(registryFile, 'utf8');
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await runProfileUse('codex-dev', { rootDir: root });
+    await runProfileUse('personal', { rootDir: root });
 
     const rootConfig = JSON.parse(await readFile(join(root, 'config.json'), 'utf8')) as RootConfig;
-    expect(rootConfig.activeProfile).toBe('codex-dev');
+    expect(rootConfig.activeProfile).toBe('personal');
     expect(await readFile(registryFile, 'utf8')).toBe(beforeRegistry);
   });
 });
@@ -82,26 +57,19 @@ describe('profile management commands', () => {
 async function writeProfiles(root: string, activeProfile: string, names: string[]): Promise<void> {
   const profiles: RootConfig['profiles'] = {};
   for (const name of names) {
-    const agentKind: AgentKind = name.startsWith('codex') ? 'codex' : 'claude';
     profiles[name] = createDefaultProfileConfig({
-      agentKind,
       accounts: {
         app: {
           id: `cli_${name.replace(/[^A-Za-z0-9]/g, '_')}`,
-          secret: '${APP_SECRET}',
+          secret: 'secret',
           tenant: 'feishu',
         },
       },
-      ...(agentKind === 'codex' ? { codex: { binaryPath: 'codex' } } : {}),
+      omp: { binaryPath: '/usr/local/bin/omp' },
     });
     await mkdir(join(root, 'profiles', name), { recursive: true });
   }
-  const config: RootConfig = {
-    schemaVersion: 2,
-    activeProfile,
-    profiles,
-  };
-  await writeFile(join(root, 'config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  await writeJson(join(root, 'config.json'), { schemaVersion: 2, activeProfile, profiles });
 }
 
 function processEntry(overrides: Partial<ProcessEntry>): ProcessEntry {
@@ -110,8 +78,7 @@ function processEntry(overrides: Partial<ProcessEntry>): ProcessEntry {
     pid: process.pid,
     appId: 'cli_test',
     tenant: 'feishu',
-    profileName: 'claude',
-    agentKind: 'claude',
+    profileName: 'work',
     configPath: '/tmp/config.json',
     startedAt: new Date().toISOString(),
     version: '0.1.32',

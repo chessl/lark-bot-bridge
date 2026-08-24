@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { NativeToolProvider } from '../agent/native-tools';
-import type { AgentAdapter, AgentEvent, AgentRun } from '../agent/types';
+import type { AgentEvent, AgentRun, OmpRunEngine } from '../agent/types';
 import type { ActiveRuns, RunHandle } from '../bot/active-runs';
 import type { ProcessPool } from '../bot/process-pool';
 import { log } from '../core/logger';
@@ -8,7 +8,7 @@ import type { RunPolicyAllow, ScopeContext } from '../policy/run-policy';
 import { RunRejected, SpawnFailed } from './errors';
 
 export interface RunExecutorDeps {
-  agent: AgentAdapter;
+  agent: OmpRunEngine;
   pool: ProcessPool;
   activeRuns: ActiveRuns;
   createRunId?: () => string;
@@ -23,14 +23,12 @@ export interface SubmitRunInput {
   scope?: ScopeContext;
   allowUserIdentity?: boolean;
   sessionId?: string;
-  threadId?: string;
   model?: string;
   images?: readonly string[];
   stopGraceMs?: number;
   nowait?: boolean;
   observability?: {
     profile: string;
-    agent: string;
     source: string;
     stage: string;
   };
@@ -46,7 +44,7 @@ export interface RunExecution {
 const DEFAULT_POST_DONE_EXIT_GRACE_MS = 2000;
 
 export class RunExecutor {
-  private readonly agent: AgentAdapter;
+  private readonly agent: OmpRunEngine;
   private readonly pool: ProcessPool;
   private readonly activeRuns: ActiveRuns;
   private readonly createRunId: () => string;
@@ -104,11 +102,8 @@ export class RunExecutor {
         prompt: input.policy.prompt,
         cwd: input.policy.cwdRealpath,
         sessionId: input.sessionId,
-        threadId: input.threadId,
         model: input.model,
         images: input.images,
-        sandbox: input.policy.sandbox,
-        permissionMode: input.policy.permissionMode,
         stopGraceMs: input.stopGraceMs,
         nativeMcp:
           this.nativeTools && input.scope
@@ -127,7 +122,7 @@ export class RunExecutor {
       releaseScope();
       await this.nativeTools?.closeRun(runId);
       if (err instanceof SpawnFailed) throw err;
-      throw new SpawnFailed('agent start failed', err);
+      throw new SpawnFailed('OMP start failed', err);
     }
     if (this.activeRuns.newRunsPaused()) {
       release();
@@ -142,7 +137,7 @@ export class RunExecutor {
     const dimensions = {
       runId,
       profile: input.observability?.profile ?? 'unknown',
-      agent: input.observability?.agent ?? this.agent.id,
+      agent: 'omp',
       scope: input.scopeId,
       source: input.observability?.source ?? 'unknown',
       stage: input.observability?.stage ?? 'submit',
@@ -151,8 +146,6 @@ export class RunExecutor {
       ...dimensions,
       queueWaitMs,
       accessMode: input.policy.accessMode,
-      sandbox: input.policy.sandbox,
-      permissionMode: input.policy.permissionMode,
     });
 
     let handle: RunHandle;

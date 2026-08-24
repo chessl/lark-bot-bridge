@@ -9,11 +9,7 @@ import { resolveAppPaths } from '../../../src/config/app-paths';
 import { getSecret, listSecretIds } from '../../../src/config/keystore';
 import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import { runtimeProfileConfig } from '../../../src/config/profile-store';
-import {
-  getMessageReplyMode,
-  getRequireMentionInGroup,
-  secretKeyForApp,
-} from '../../../src/config/schema';
+import { getRequireMentionInGroup, secretKeyForApp } from '../../../src/config/schema';
 import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
@@ -42,8 +38,6 @@ describe('profile-aware account and config commands', () => {
     const h = await createHarness();
 
     await h.command('/config submit', {
-      message_reply: 'text',
-      show_tool_calls: 'hide',
       max_concurrent_runs: '7',
       run_idle_timeout_minutes: '15',
       require_mention_in_group: 'no',
@@ -51,68 +45,18 @@ describe('profile-aware account and config commands', () => {
 
     const root = await waitForRoot(
       h.rootDir,
-      (candidate) => candidate.profiles.claude?.preferences.messageReply === 'text',
+      (candidate) => candidate.profiles.claude?.preferences.maxConcurrentRuns === 7,
     );
     expect(root.schemaVersion).toBe(2);
     expect(root.activeProfile).toBe('claude');
     expect(root.profiles['codex-dev']).toBeDefined();
     expect(root.profiles.claude?.preferences).toMatchObject({
-      messageReply: 'text',
-      showToolCalls: false,
       maxConcurrentRuns: 7,
       runIdleTimeoutMinutes: 15,
     });
     expect(root.profiles.claude?.access.requireMentionInGroup).toBe(false);
     expect(getRequireMentionInGroup(runtimeProfileConfig(root, 'claude'))).toBe(false);
     expect((root as unknown as { accounts?: unknown }).accounts).toBeUndefined();
-  });
-
-  it('persists the picked model and clears it when "default" is chosen', async () => {
-    vi.useFakeTimers();
-    const h = await createHarness();
-
-    await h.command('/config submit', {
-      model: 'claude-opus-4-8',
-      message_reply: 'text',
-    });
-    const withModel = await waitForRoot(
-      h.rootDir,
-      (candidate) => candidate.profiles.claude?.preferences.model === 'claude-opus-4-8',
-    );
-    expect(withModel.profiles.claude?.preferences.model).toBe('claude-opus-4-8');
-
-    await h.command('/config submit', {
-      model: 'default',
-      message_reply: 'text',
-    });
-    const cleared = await waitForRoot(
-      h.rootDir,
-      (candidate) => candidate.profiles.claude?.preferences.model === undefined,
-    );
-    expect(cleared.profiles.claude?.preferences.model).toBeUndefined();
-  });
-
-  it('keeps the current message reply mode when the config submit payload omits it', async () => {
-    vi.useFakeTimers();
-    const h = await createHarness({
-      preferences: {
-        messageReply: 'text',
-      },
-    });
-
-    await h.command('/config submit', {
-      show_tool_calls: 'show',
-      max_concurrent_runs: '8',
-      run_idle_timeout_minutes: '20',
-      require_mention_in_group: 'yes',
-    });
-
-    const root = await waitForRoot(
-      h.rootDir,
-      (candidate) => candidate.profiles.claude?.preferences.maxConcurrentRuns === 8,
-    );
-    expect(root.profiles.claude?.preferences.messageReply).toBe('text');
-    expect(getMessageReplyMode(runtimeProfileConfig(root, 'claude'))).toBe('text');
   });
 
   it('saves /account submit into the active profile and profile-local keystore', async () => {
@@ -223,18 +167,16 @@ async function writeRoot(
     activeProfile: 'claude',
     profiles: {
       claude: createDefaultProfileConfig({
-        agentKind: 'claude',
         accounts: {
           app: { id: 'cli_old', secret: '${APP_SECRET}', tenant: 'feishu' },
         },
         access: { admins: ['ou-admin'] },
       }),
       'codex-dev': createDefaultProfileConfig({
-        agentKind: 'codex',
         accounts: {
           app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' },
         },
-        codex: { binaryPath: 'codex' },
+        omp: { binaryPath: '/usr/local/bin/omp' },
       }),
     },
   };

@@ -34,7 +34,6 @@ process.on('uncaughtException', (err) => {
 export interface StartOptions {
   config?: string;
   profile?: string;
-  agent?: string;
   workspace?: string;
   appId?: string;
   appSecret?: string;
@@ -196,7 +195,7 @@ async function handleRuntimeLockConflict(
   if (err.meta) {
     const app = err.meta.appId ? ` app=${err.meta.appId}` : '';
     console.error(
-      `  holder: profile=${err.meta.profile}${app} agent=${err.meta.agentKind} pid=${err.meta.pid} startedAt=${err.meta.startedAt}`,
+      `  holder: profile=${err.meta.profile}${app} pid=${err.meta.pid} startedAt=${err.meta.startedAt}`,
     );
   } else {
     console.error(`  lock: ${err.target}`);

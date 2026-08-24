@@ -9,11 +9,7 @@ import {
 } from '../../../src/cli/commands/profile';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import { clearKeystoreDerivedKeyCache, setSecret } from '../../../src/config/keystore';
-import {
-  type AgentKind,
-  createDefaultProfileConfig,
-  type RootConfig,
-} from '../../../src/config/profile-schema';
+import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import { secretKeyForApp } from '../../../src/config/schema';
 import { withProfileAndAppLocks } from '../../../src/runtime/locks';
 import type { ProcessEntry } from '../../../src/runtime/registry';
@@ -40,7 +36,7 @@ describe('profile retention and export', () => {
   it('ignores stale registry entries that are not protected by a runtime lock', async () => {
     const root = await makeRoot();
     await writeProfiles(root, 'claude', ['claude', 'codex-dev']);
-    await writeRegistry(root, [processEntry({ profileName: 'codex-dev', agentKind: 'codex' })]);
+    await writeRegistry(root, [processEntry({ profileName: 'codex-dev' })]);
 
     await runProfileRemove('codex-dev', { rootDir: root });
 
@@ -54,7 +50,7 @@ describe('profile retention and export', () => {
     await writeProfiles(root, 'claude', ['claude', 'codex-dev']);
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'codex-dev' });
 
-    await withProfileAndAppLocks(appPaths, 'cli_codex_dev', 'codex', async () => {
+    await withProfileAndAppLocks(appPaths, 'cli_codex_dev', async () => {
       await expect(runProfileRemove('codex-dev', { rootDir: root })).rejects.toThrow(
         /locked|running/i,
       );
@@ -115,33 +111,32 @@ describe('profile retention and export', () => {
 
   it('archives the last active profile and clears root config so the name can be recreated', async () => {
     const root = await makeRoot();
-    await writeProfiles(root, 'codex', ['codex']);
-    const codex = await writeVersionExecutable(root, 'codex-bin', 'codex 1.2.3');
-    const oldCodexBin = process.env.LARK_CHANNEL_CODEX_BIN;
-    process.env.LARK_CHANNEL_CODEX_BIN = codex;
+    await writeProfiles(root, 'omp', ['omp']);
+    const omp = await writeVersionExecutable(root, 'omp-bin', 'omp 1.0');
+    const oldOmpBin = process.env.LARK_CHANNEL_OMP_BIN;
+    process.env.LARK_CHANNEL_OMP_BIN = omp;
 
     try {
-      await runProfileRemove('codex', { rootDir: root });
+      await runProfileRemove('omp', { rootDir: root });
 
       await expect(stat(join(root, 'config.json'))).rejects.toMatchObject({ code: 'ENOENT' });
-      await expect(stat(join(root, 'profiles', 'codex'))).rejects.toMatchObject({ code: 'ENOENT' });
-      await runProfileCreate('codex', {
+      await expect(stat(join(root, 'profiles', 'omp'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await runProfileCreate('omp', {
         rootDir: root,
-        agent: 'codex',
         appId: 'cli_recreated',
         appSecret: 'manual-secret',
         tenant: 'feishu',
       });
     } finally {
-      if (oldCodexBin === undefined) {
-        delete process.env.LARK_CHANNEL_CODEX_BIN;
+      if (oldOmpBin === undefined) {
+        delete process.env.LARK_CHANNEL_OMP_BIN;
       } else {
-        process.env.LARK_CHANNEL_CODEX_BIN = oldCodexBin;
+        process.env.LARK_CHANNEL_OMP_BIN = oldOmpBin;
       }
     }
     const config = await readRoot(root);
-    expect(config.activeProfile).toBe('codex');
-    expect(config.profiles.codex?.agentKind).toBe('codex');
+    expect(config.activeProfile).toBe('omp');
+    expect(config.profiles.omp?.omp.binaryPath).toBe(omp);
   });
 
   it('adds a suffix when archive names collide', async () => {
@@ -269,9 +264,7 @@ async function makeRoot(): Promise<string> {
 async function writeProfiles(root: string, activeProfile: string, names: string[]): Promise<void> {
   const profiles: RootConfig['profiles'] = {};
   for (const name of names) {
-    const agentKind: AgentKind = name.startsWith('codex') ? 'codex' : 'claude';
     profiles[name] = createDefaultProfileConfig({
-      agentKind,
       accounts: {
         app: {
           id: `cli_${name.replace(/[^A-Za-z0-9]/g, '_')}`,
@@ -279,7 +272,7 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
           tenant: 'feishu',
         },
       },
-      ...(agentKind === 'codex' ? { codex: { binaryPath: 'codex' } } : {}),
+      omp: { binaryPath: '/usr/local/bin/omp' },
     });
     await mkdir(join(root, 'profiles', name), { recursive: true });
   }
@@ -302,7 +295,6 @@ function processEntry(overrides: Partial<ProcessEntry>): ProcessEntry {
     appId: 'cli_test',
     tenant: 'feishu',
     profileName: 'claude',
-    agentKind: 'claude',
     configPath: '/tmp/config.json',
     startedAt: new Date().toISOString(),
     version: '0.1.32',

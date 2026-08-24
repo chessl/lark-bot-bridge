@@ -106,7 +106,6 @@ function entry(overrides: Partial<ProcessEntry> = {}): ProcessEntry {
     appId: 'cli_codex',
     tenant: 'feishu',
     profileName: 'codex-dev',
-    agentKind: 'codex',
     configPath: '/tmp/config.json',
     startedAt: new Date().toISOString(),
     version: '0.6.1',

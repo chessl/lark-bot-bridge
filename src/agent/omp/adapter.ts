@@ -14,16 +14,15 @@ import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { log } from '../../core/logger';
 import { mergeProcessEnv, type SpawnedProcessByStdio, spawnProcess } from '../../platform/spawn';
-import { SpawnFailed } from '../../runtime/errors';
 import { buildBridgeSystemPrompt } from '../bridge-system-prompt';
 import type { NativeMcpEndpoint } from '../native-tools';
 import { type AgentAvailability, checkAgentAvailability } from '../preflight';
 import type {
-  AgentAdapter,
   AgentBotIdentity,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
+  OmpRunEngine,
 } from '../types';
 import { OmpRpcFrameDecoder, OmpRpcTranslator } from './rpc';
 
@@ -41,7 +40,7 @@ interface OmpMcpPatch {
   refs: number;
 }
 
-export class OmpAdapter implements AgentAdapter {
+export class OmpAdapter implements OmpRunEngine {
   readonly id = 'omp';
   readonly displayName = 'Oh My Pi';
 
@@ -69,13 +68,6 @@ export class OmpAdapter implements AgentAdapter {
   }
 
   async start(opts: AgentRunOptions): Promise<AgentRun> {
-    if (opts.sandbox && opts.sandbox !== 'danger-full-access') {
-      throw new SpawnFailed(
-        'OMP currently requires full access because its RPC mode does not expose an enforceable workspace sandbox',
-        undefined,
-        'agent-prepare-failed',
-      );
-    }
     if (!opts.cwd) throw new Error('cwd is required for OmpAdapter.start');
 
     const systemPromptFile = writeSystemPromptFile(buildBridgeSystemPrompt(this.botIdentity));
@@ -284,11 +276,11 @@ async function* createEventStream(
   const promptId = `prompt-${opts.runId}`;
   let started = false;
 
-  const startPrompt = (): void => {
-    if (started) return;
+  const startPrompt = (): boolean => {
+    if (started) return false;
     started = true;
     writeFrame(child, { id: stateId, type: 'get_state' });
-    writeFrame(child, {
+    return writeFrame(child, {
       id: promptId,
       type: 'prompt',
       message: opts.prompt,
@@ -315,8 +307,8 @@ async function* createEventStream(
             type: 'negotiate_protocol',
             protocolVersion: 2,
           });
-        } else {
-          startPrompt();
+        } else if (startPrompt()) {
+          yield { type: 'prompt_sent' };
         }
         continue;
       }
@@ -327,7 +319,7 @@ async function* createEventStream(
         rpcFrame.command === 'negotiate_protocol' &&
         rpcFrame.success === true
       ) {
-        startPrompt();
+        if (startPrompt()) yield { type: 'prompt_sent' };
       }
 
       if (rpcFrame.type === 'extension_ui_request') {
@@ -373,10 +365,10 @@ async function* createEventStream(
     yield* translator.fail('OMP RPC stream ended before a terminal event');
   }
 }
-
-function writeFrame(child: OmpChild, frame: Record<string, unknown>): void {
-  if (child.stdin.destroyed || child.stdin.writableEnded) return;
+function writeFrame(child: OmpChild, frame: Record<string, unknown>): boolean {
+  if (child.stdin.destroyed || child.stdin.writableEnded) return false;
   child.stdin.write(`${JSON.stringify(frame)}\n`, 'utf8');
+  return true;
 }
 
 function readImage(path: string): { type: 'image'; data: string; mimeType: string } {

@@ -1,4 +1,3 @@
-import { setTimeout as delay } from 'node:timers/promises';
 import type { LarkChannel, LarkChannelOptions, NormalizedMessage } from '@larksuite/channel';
 import { createLarkChannel } from '@larksuite/channel';
 import { modelLabel, normalizeModelSelection } from '../agent/models';
@@ -9,31 +8,24 @@ import {
   type BridgePromptTopicMessage,
   buildAgentPrompt,
 } from '../agent/prompt';
-import type { AgentAdapter, AgentEvent } from '../agent/types';
+import type { AgentEvent, OmpRunEngine } from '../agent/types';
 import { CallbackAuth } from '../card/callback-auth';
 import { CallbackNonceStore } from '../card/callback-store';
 import { handleCardAction } from '../card/dispatcher';
-import { renderCard } from '../card/run-renderer';
 import {
+  createRunState,
   finalizeIfRunning,
   initialState,
   markIdleTimeout,
   markInterrupted,
+  type RunMetricReceipt,
   type RunState,
-  reduce,
+  reduceWithClock,
 } from '../card/run-state';
-import { renderText } from '../card/text-renderer';
 import { type Controls, tryHandleCommand } from '../commands';
 import type { AppPaths } from '../config/app-paths';
 import type { AppConfig } from '../config/schema';
-import {
-  getAgentStopGraceMs,
-  getCotMessages,
-  getMaxConcurrentRuns,
-  getMessageReplyMode,
-  getRunIdleTimeoutMs,
-  getShowToolCalls,
-} from '../config/schema';
+import { getAgentStopGraceMs, getMaxConcurrentRuns, getRunIdleTimeoutMs } from '../config/schema';
 import { resolveAppSecret } from '../config/secret-resolver';
 import { log, withTrace } from '../core/logger';
 import { NativeLarkServer } from '../lark-native/server';
@@ -51,20 +43,22 @@ import type { WorkspaceStore } from '../workspace/store';
 import { ActiveRuns } from './active-runs';
 import { type ChatMode, ChatModeCache } from './chat-mode-cache';
 import { handleCommentMention } from './comments';
-import { CotClient, CotPublisher, finalAnswerOnlyState, withCotEvents } from './cot';
 import { startKeepalive } from './keepalive';
 import { fetchKnownChats } from './lark-info';
+import { OmpDeliveryJournal } from './omp-delivery-journal';
+import {
+  activateOmpReplyRecovery,
+  deriveOmpReplyTarget,
+  OmpReplyController,
+} from './omp-reply-controller';
 import { PendingQueue } from './pending-queue';
 import { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
-import { addWorkingReaction, removeReaction } from './reaction';
 import { type ScopedRun, ScopedRuns } from './run-flow';
 import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { lookupMessageThreadId } from './thread-id';
 
 const DEBOUNCE_MS = 600;
-const STREAM_TERMINAL_GRACE_MS = 3000;
-const REACTION_CLEANUP_GRACE_MS = 1000;
 
 const BRIDGE_AGENT_INSTRUCTIONS = [
   '本次运行已注入 lark_bridge MCP 工具；飞书读写、用户授权和发卡片都直接使用这些工具。',
@@ -155,23 +149,36 @@ function stringifyArgs(args: unknown[]): string {
 export interface BridgeChannel {
   channel: LarkChannel;
   disconnect(): Promise<void>;
+  activateDeliveryRecovery?(): Promise<void>;
 }
 
 export interface StartChannelDeps {
   cfg: AppConfig;
-  agent: AgentAdapter;
+  agent: OmpRunEngine;
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
   controls: Controls;
+  deliveryJournal?: OmpDeliveryJournal;
   appPaths?: Pick<
     AppPaths,
-    'rootDir' | 'secretsFile' | 'keystoreSaltFile' | 'mediaDir' | 'callbackNoncesFile'
+    | 'rootDir'
+    | 'secretsFile'
+    | 'keystoreSaltFile'
+    | 'mediaDir'
+    | 'callbackNoncesFile'
+    | 'activeDeliveriesFile'
   >;
+  wallNow?: () => number;
+  monoNow?: () => number;
+  deferDeliveryRecovery?: boolean;
 }
 
 export async function startChannel(deps: StartChannelDeps): Promise<BridgeChannel> {
   const { cfg, agent, sessions, sessionCatalog, workspaces, controls } = deps;
+  const wallNow = deps.wallNow ?? Date.now;
+  const monoNow = deps.monoNow ?? performance.now.bind(performance);
+  const messageReceipts = new WeakMap<NormalizedMessage, RunMetricReceipt>();
   const activeRuns = new ActiveRuns();
   // ChatModeCache stays per-bridge-instance — invalidated on restart along
   // with everything else. Topic-mode chats only need one chat.get() call ever.
@@ -250,7 +257,18 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   };
 
   const channel = createLarkChannel(opts);
-  const cotClient = new CotClient(channel.rawClient);
+  const deliveryJournal =
+    deps.deliveryJournal ??
+    (deps.appPaths?.activeDeliveriesFile
+      ? new OmpDeliveryJournal({ path: deps.appPaths.activeDeliveriesFile })
+      : undefined);
+  await deliveryJournal?.load();
+  let deliveryRecoveryActivated = false;
+  const activateDeliveryRecovery = async (): Promise<void> => {
+    if (!deliveryJournal || deliveryRecoveryActivated) return;
+    deliveryRecoveryActivated = true;
+    await activateOmpReplyRecovery({ channel, journal: deliveryJournal });
+  };
   const nativeServer = await NativeLarkServer.start({
     profile: controls.profile,
     rootDir: deps.appPaths?.rootDir,
@@ -309,11 +327,12 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           sessions,
           sessionCatalog,
           media,
+          deliveryJournal,
           batch,
           controls,
-          cotClient,
-          callbackAuth,
           lastRunModelByScope,
+          messageReceipts,
+          monoNow,
           scope,
           mode,
         });
@@ -331,6 +350,13 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
 
   channel.on({
     message: async (msg) => {
+      const receivedAtWall = wallNow();
+      const receivedAtMono = monoNow();
+      messageReceipts.set(msg, {
+        receivedAtWall,
+        receivedAtMono,
+        ...(Number.isFinite(msg.createTime) ? { messageCreatedAtWall: msg.createTime } : {}),
+      });
       await withTrace({ chatId: msg.chatId, msgId: msg.messageId }, () =>
         intakeMessage({
           channel,
@@ -451,6 +477,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     await nativeServer.close();
     throw error;
   }
+  if (!deps.deferDeliveryRecovery) await activateDeliveryRecovery();
   const ownerRefresh = createOwnerRefreshController({
     controls,
     source: channel,
@@ -490,12 +517,14 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   });
 
   return {
+    activateDeliveryRecovery,
     channel,
     disconnect: async () => {
       scopedRuns.pauseNewRuns('bridge-disconnect');
       ownerRefresh.stop();
       knownChatsRefresh.stop();
       keepalive.stop();
+      await deliveryJournal?.stopScanner();
       // Stop meeting timers but stay in the meetings: /reconnect tears the
       // channel down and rebuilds it, and auto-leaving every meeting on a
       // reconnect would be surprising.
@@ -510,6 +539,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         sessionCatalog?.flush(),
         callbackNonceStore?.flush(),
         workspaces.flush(),
+        deliveryJournal?.flush(),
       ]);
       if (stopAllResult.status === 'rejected') {
         log.fail('disconnect', stopAllResult.reason, { step: 'stopAll' });
@@ -588,7 +618,7 @@ async function sendForwardFetchFailedHint(
 
 interface IntakeDeps {
   channel: LarkChannel;
-  agent: AgentAdapter;
+  agent: OmpRunEngine;
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
@@ -762,9 +792,10 @@ interface RunBatchDeps {
   media: MediaCache;
   batch: NormalizedMessage[];
   controls: Controls;
-  cotClient: CotClient;
-  callbackAuth?: CallbackAuth;
+  deliveryJournal?: OmpDeliveryJournal;
   lastRunModelByScope: Map<string, string>;
+  messageReceipts: WeakMap<NormalizedMessage, RunMetricReceipt>;
+  monoNow: () => number;
   scope: string;
   mode: ChatMode;
 }
@@ -778,9 +809,10 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     media,
     batch,
     controls,
-    cotClient,
-    callbackAuth,
+    deliveryJournal,
     lastRunModelByScope,
+    messageReceipts,
+    monoNow,
     scope,
     mode,
   } = deps;
@@ -788,6 +820,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const firstMsg = batch[0];
   const lastMsg = batch[batch.length - 1];
   if (!firstMsg || !lastMsg) return;
+
+  const replyTarget = deriveOmpReplyTarget(lastMsg);
 
   const chatId = firstMsg.chatId;
   const threadId = firstMsg.threadId;
@@ -872,15 +906,14 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // for this scope (never on the first run) and the selection actually
   // changed. The scoped-run seam owns translating this preference into the
   // adapter's model argument.
-  const agentKind = controls.profileConfig.agentKind;
   const modelPref = controls.profileConfig.preferences.model;
-  const modelSelection = normalizeModelSelection(agentKind, modelPref);
+  const modelSelection = normalizeModelSelection(modelPref);
   const prevModel = lastRunModelByScope.get(scope);
   const modelSwitched = prevModel !== undefined && prevModel !== modelSelection;
   lastRunModelByScope.set(scope, modelSelection);
   const extraInstructions = modelSwitched
     ? [
-        `用户刚把本会话使用的模型切换为「${modelLabel(agentKind, modelPref)}」。` +
+        `用户刚把本会话使用的模型切换为「${modelLabel(modelPref)}」。` +
           '之前的对话里可能提到别的模型,请以当前模型为准;若被问到你用的是什么模型,据此回答。',
       ]
     : undefined;
@@ -900,20 +933,20 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     ...(modelSwitched ? { modelSwitchedTo: modelSelection } : {}),
   });
 
-  // For topic groups: thread the reply so it lands in the same topic as the
-  // user's message. Otherwise the SDK posts at top level and the user's
-  // topic discussion breaks visually.
+  // A message-carried thread ID is authoritative even when cached Chat
+  // metadata still says group; without the native option, the Reply escapes
+  // to the Chat top level.
   const sendOpts = {
-    replyTo: lastMsg.messageId,
-    ...(mode === 'topic' && threadId ? { replyInThread: true } : {}),
+    replyTo: replyTarget.messageId,
+    ...(replyTarget.replyInThread ? { replyInThread: true } : {}),
   };
   log.info('flush', 'reply-target', {
     scope,
     mode,
-    chatId,
-    threadId,
-    replyTo: sendOpts.replyTo,
-    replyInThread: sendOpts.replyInThread === true,
+    chatId: replyTarget.chatId,
+    threadId: replyTarget.replyInThread ? replyTarget.threadId : undefined,
+    replyTo: replyTarget.messageId,
+    replyInThread: replyTarget.replyInThread,
   });
 
   const accessDecision =
@@ -947,7 +980,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   }
 
   const { run } = flow;
-  const { cwdRealpath: cwd, resumeFrom, policyFingerprint } = run.metadata;
+  const { cwdRealpath: cwd, resumeFrom } = run.metadata;
   if (resumeFrom) {
     log.info('session', 'resume', { sessionId: resumeFrom, cwd });
   } else {
@@ -967,495 +1000,46 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     log.info('flush', 'idle-watchdog', { idleTimeoutMs });
   }
 
-  const replyMode = getMessageReplyMode(controls.cfg);
-  log.info('flush', 'reply-mode', { mode: replyMode });
-  const cotMessages = getCotMessages(controls.cfg);
-  const cotEnabled = cotMessages !== 'off';
-
-  // Re-read prefs on every flush so toggling /config mid-stream takes
-  // effect immediately. Cheap object lookups, no allocation when on.
-  const filterForPrefs = (state: RunState): RunState => {
-    if (getShowToolCalls(controls.cfg)) return state;
-    return { ...state, blocks: state.blocks.filter((b) => b.kind !== 'tool') };
-  };
-  const cardRenderOptions = callbackAuth
-    ? {
-        signCallback: (action: string) =>
-          callbackAuth.sign({
-            runId: run.metadata.runId,
-            scope,
-            chatId,
-            operatorOpenId: firstMsg.senderId,
-            action,
-            policyFingerprint,
-            ttlMs: 24 * 60 * 60 * 1000,
-          }),
-      }
-    : {};
-
-  // For non-card modes Claude's output doesn't surface visually until either
-  // a first streamed token (markdown mode) or the whole run ends (text mode).
-  // Add a "Typing" reaction to the triggering message as an instant ack, but
-  // never let that outbound API call block agent event draining.
-  const reactionPromise =
-    cotEnabled || replyMode === 'card' ? undefined : addWorkingReaction(channel, lastMsg.messageId);
-
-  try {
-    if (cotEnabled) {
-      const cotPublisher = new CotPublisher({
-        client: cotClient,
-        chatId,
-        // The CoT bubble follows this origin message's thread. In a topic the
-        // triggering message is itself in-topic, so the bubble lands in the
-        // topic; message_cot has no thread_id receive type, so origin is the
-        // only lever we have (see CotClient.create).
-        originMessageId: lastMsg.messageId,
-        runId: run.metadata.runId,
-        scope,
-        inputPreview: lastMsg.content,
-      });
-      await cotPublisher.start();
-      if (!cotPublisher.disabled) {
-        const finalState = await processAgentStream(
-          run,
-          withCotEvents(run.events, cotPublisher, { detail: cotMessages }),
-          scope,
-          idleTimeoutMs,
-          async () => {},
-        );
-        if (cotPublisher.degradedReason) {
-          await sendCotDegradedNotice({
-            channel,
-            chatId,
-            scope,
-            sendOpts,
-            reason: cotPublisher.degradedReason,
-          });
+  const state = createRunState(messageReceipts.get(lastMsg));
+  const reply = new OmpReplyController({
+    channel,
+    target: replyTarget,
+    ...(deliveryJournal
+      ? {
+          journal: deliveryJournal,
+          runId: run.metadata.runId,
         }
-        await sendFinalReply({
-          channel,
-          chatId,
-          scope,
-          state: finalAnswerOnlyState(finalState),
-          replyMode,
-          sendOpts,
-          cardRenderOptions,
-        });
-        return;
-      }
-      log.warn('cot', 'fallback-existing-reply', { reason: 'create-disabled' });
-    }
-
-    if (replyMode === 'card') {
-      let latestState: RunState = initialState;
-      let producerStarted = false;
-      let cardCtrl:
-        | { update(next: object | ((current: object) => object)): Promise<void> }
-        | undefined;
-      const progress = createLazyProgressStream(scope, replyMode, () =>
-        channel.stream(
-          chatId,
-          {
-            card: {
-              initial: renderCard(initialState, cardRenderOptions),
-              producer: async (ctrl) => {
-                producerStarted = true;
-                if (progress.abandoned()) return;
-                cardCtrl = ctrl;
-                await ctrl.update(renderCard(filterForPrefs(latestState), cardRenderOptions));
-                await renderDone;
-              },
-            },
-          },
-          sendOpts,
-        ),
-      );
-      const renderDone = processAgentStream(
-        run,
-        run.events,
-        scope,
-        idleTimeoutMs,
-        async (state) => {
-          latestState = state;
-          if (shouldOpenProgressStream(filterForPrefs(state))) progress.ensureOpen();
-          if (cardCtrl) {
-            await cardCtrl.update(renderCard(filterForPrefs(state), cardRenderOptions));
-          }
-        },
-      );
-      try {
-        await awaitRenderAwareStream({
-          mode: replyMode,
-          progress,
-          renderDone,
-          producerStarted: () => producerStarted,
-          fallback: async (state) => {
-            if (controls.profileConfig.agentKind === 'codex') return;
-            if (renderText(filterForPrefs(state)).trim() === '') return;
-            await channel.send(
-              chatId,
-              { card: renderCard(filterForPrefs(state), cardRenderOptions) },
-              sendOpts,
-            );
-          },
-        });
-      } catch (err) {
-        if (controls.profileConfig.agentKind !== 'codex') throw err;
-        log.fail('stream', err, { mode: replyMode, step: 'progress-stream' });
-      }
-      await recallIfEmptyStreamedReply(channel, progress, filterForPrefs(latestState), scope);
-      if (controls.profileConfig.agentKind === 'codex') {
-        await sendFinalReply({
-          channel,
-          chatId,
-          scope,
-          state: finalReplyState(progress, filterForPrefs(latestState)),
-          replyMode,
-          sendOpts,
-          cardRenderOptions,
-        });
-      }
-    } else if (replyMode === 'markdown') {
-      let latestState: RunState = initialState;
-      let producerStarted = false;
-      let markdownCtrl: { setContent(markdown: string): Promise<void> } | undefined;
-      const progress = createLazyProgressStream(scope, replyMode, () =>
-        channel.stream(
-          chatId,
-          {
-            markdown: async (ctrl) => {
-              producerStarted = true;
-              if (progress.abandoned()) return;
-              markdownCtrl = ctrl;
-              await ctrl.setContent(renderText(filterForPrefs(latestState)));
-              await renderDone;
-            },
-          },
-          sendOpts,
-        ),
-      );
-      const renderDone = processAgentStream(
-        run,
-        run.events,
-        scope,
-        idleTimeoutMs,
-        async (state) => {
-          latestState = state;
-          if (shouldOpenProgressStream(filterForPrefs(state))) progress.ensureOpen();
-          if (markdownCtrl) {
-            await markdownCtrl.setContent(renderText(filterForPrefs(state)));
-          }
-        },
-      );
-      try {
-        await awaitRenderAwareStream({
-          mode: replyMode,
-          progress,
-          renderDone,
-          producerStarted: () => producerStarted,
-          fallback: async (state) => {
-            if (controls.profileConfig.agentKind === 'codex') return;
-            const body = renderText(filterForPrefs(state));
-            if (body.trim()) {
-              await channel.send(chatId, { markdown: body }, sendOpts);
-            }
-          },
-        });
-      } catch (err) {
-        if (controls.profileConfig.agentKind !== 'codex') throw err;
-        log.fail('stream', err, { mode: replyMode, step: 'progress-stream' });
-      }
-      await recallIfEmptyStreamedReply(channel, progress, filterForPrefs(latestState), scope);
-      if (controls.profileConfig.agentKind === 'codex') {
-        await sendFinalReply({
-          channel,
-          chatId,
-          scope,
-          state: finalReplyState(progress, filterForPrefs(latestState)),
-          replyMode,
-          sendOpts,
-          cardRenderOptions,
-        });
-      }
-    } else {
-      // text mode: drain the agent stream without sending anything during
-      // the run, then post the final rendered text once as a plain markdown
-      // (msg_type=post) message — no card, no streaming, no typewriter.
-      const finalState = await processAgentStream(
-        run,
-        run.events,
-        scope,
-        idleTimeoutMs,
-        async () => {},
-      );
-      await sendFinalReply({
-        channel,
-        chatId,
-        scope,
-        state:
-          controls.profileConfig.agentKind === 'codex'
-            ? finalAnswerOnlyState(filterForPrefs(finalState))
-            : filterForPrefs(finalState),
-        replyMode,
-        sendOpts,
-        cardRenderOptions,
-      });
-    }
-  } catch (err) {
-    log.fail('stream', err);
-  } finally {
-    scheduleWorkingReactionCleanup(channel, lastMsg.messageId, reactionPromise);
-  }
-}
-
-interface LazyProgressStream {
-  /**
-   * Mirrors the underlying `channel.stream(...)` promise, and stays pending
-   * forever while no stream has been opened — so callers can race it against
-   * the render loop exactly as if the stream had been created up front.
-   */
-  readonly settled: Promise<unknown>;
-  opened(): boolean;
-  ensureOpen(): void;
-  /**
-   * True once the reply went out without this stream. A producer that starts
-   * after that must render nothing, or the user gets the same answer twice.
-   */
-  abandoned(): boolean;
-  abandon(): void;
-}
-
-/**
- * Wrap a progress stream so the user-visible message is only created once the
- * run has something worth showing (see `shouldOpenProgressStream`).
- *
- * The SDK starts a stream eagerly: `channel.stream(...)` sends a card before
- * the producer runs, and finishes it with a "(no content)" placeholder when the
- * producer never supplied any text. A Codex round that only produces a final
- * answer (delivered separately by `sendFinalReply`) used to hit exactly that:
- * an empty card sat in the chat for seconds until `recall-empty` cleaned it up.
- */
-function createLazyProgressStream(
-  scope: string,
-  mode: 'card' | 'markdown',
-  open: () => Promise<unknown>,
-): LazyProgressStream {
-  let stream: Promise<unknown> | undefined;
-  let givenUp = false;
-  let settle!: (result: Promise<unknown>) => void;
-  const settled = new Promise<unknown>((resolve, reject) => {
-    settle = (result) => {
-      result.then(resolve, reject);
-    };
+      : {}),
   });
-  return {
-    settled,
-    opened: () => stream !== undefined,
-    ensureOpen: () => {
-      if (stream) return;
-      log.info('outbound', 'progress-stream-open', { scope, mode });
-      stream = open();
-      settle(stream);
-    },
-    abandoned: () => givenUp,
-    abandon: () => {
-      givenUp = true;
-    },
-  };
-}
-
-/**
- * Is there anything in this state that will still be on screen when the run
- * ends? Footer status lines ("正在思考…") don't count: the terminal event drops
- * them, so a stream opened for a footer alone can still finish empty — which is
- * the placeholder-then-recall churn we're avoiding.
- *
- * Terminal states don't count either. By then the stream has nothing left to
- * stream, and whatever the run produced goes out as a normal reply
- * (`sendFinalReply`, or the stream fallback) instead of a card that would be
- * created only to be finished a moment later.
- *
- * `state` must already be `filterForPrefs`-projected, and emptiness is measured
- * with `renderText` in both reply modes so it matches the rule
- * `recallIfEmptyStreamedReply` applies: a stream we open is one that survives.
- */
-function shouldOpenProgressStream(state: RunState): boolean {
-  if (state.terminal !== 'running') return false;
-  return renderText({ ...state, footer: null }).trim() !== '';
-}
-
-/**
- * What Codex's dedicated final reply may carry, given what the progress stream
- * already put on screen.
- *
- * `finalAnswerOnlyState` falls back to the run's text blocks when Codex held
- * nothing back for the end — correct where nothing was streamed (CoT, text
- * mode, a stream we gave up on), but those blocks are already visible once a
- * stream rendered them, and repeating them posts the same words a second time.
- * Codex leaves the answer in `blocks` more often than it looks: any abnormal
- * turn end (`turn.failed`, or the process exiting before `turn.completed`)
- * flushes the pending message as text instead of `final_text`.
- *
- * Terminal notices are dropped for the same reason — the stream rendered them.
- */
-function finalReplyState(progress: LazyProgressStream, state: RunState): RunState {
-  if (!progress.opened() || progress.abandoned()) return finalAnswerOnlyState(state);
-  return {
-    ...state,
-    blocks: state.finalText ? [{ kind: 'text', content: state.finalText, streaming: false }] : [],
-    reasoning: { content: '', active: false },
-    footer: null,
-    terminal: 'done',
-    errorMsg: undefined,
-  };
-}
-
-/**
- * Backstop for a progress stream that was opened on real content and still
- * ended up empty — e.g. `/config` hiding tool calls mid-run, which retroactively
- * empties a tool-only render. The SDK fills such a card with its "(no content)"
- * placeholder, so recall it instead of leaving noise in the chat.
- *
- * `finalState` must already be `filterForPrefs`-projected (what the user sees).
- */
-async function recallIfEmptyStreamedReply(
-  channel: LarkChannel,
-  progress: LazyProgressStream,
-  finalState: RunState,
-  scope: string,
-): Promise<void> {
-  if (!progress.opened()) return;
-  // An abandoned stream renders nothing, so whatever message it eventually
-  // posts is empty by construction. It is still in flight (that is why we gave
-  // up on it), so clean up in the background instead of blocking the run on it.
-  if (progress.abandoned()) {
-    void progress.settled.then(
-      (result) => recallStreamedMessage(channel, result, scope),
-      () => {},
-    );
-    return;
-  }
-  if (renderText(finalState).trim() !== '') return;
-  const result = await progress.settled.catch(() => undefined);
-  await recallStreamedMessage(channel, result, scope);
-}
-
-async function recallStreamedMessage(
-  channel: LarkChannel,
-  streamResult: unknown,
-  scope: string,
-): Promise<void> {
-  const messageId = (streamResult as { messageId?: string } | undefined)?.messageId;
-  if (!messageId) return;
   try {
-    await channel.recallMessage(messageId);
-    log.info('outbound', 'recall-empty', { scope, messageId });
-  } catch (err) {
-    log.warn('outbound', 'recall-empty-failed', {
+    await reply.open(state);
+    const finalState = await processAgentStream(
+      run,
+      run.events,
       scope,
-      messageId,
-      err: err instanceof Error ? err.message : String(err),
-    });
-  }
-}
-
-async function sendFinalReply(input: {
-  channel: LarkChannel;
-  chatId: string;
-  scope: string;
-  state: RunState;
-  replyMode: ReturnType<typeof getMessageReplyMode>;
-  sendOpts: { replyTo: string; replyInThread?: boolean };
-  cardRenderOptions: { signCallback?: (action: string) => string };
-}): Promise<void> {
-  const body = renderText(input.state);
-
-  // Nothing deliverable to send (agent produced no text on a clean finish;
-  // error/interrupt/timeout keep `body` non-empty via their notices). Skip
-  // rather than post an empty card that renders as "(no content)".
-  if (!body.trim()) {
-    log.info('outbound', 'skip-empty', { scope: input.scope, mode: input.replyMode });
-    return;
-  }
-
-  if (input.replyMode === 'card') {
-    const result = await input.channel.send(
-      input.chatId,
-      { card: renderCard(input.state, input.cardRenderOptions) },
-      input.sendOpts,
+      idleTimeoutMs,
+      async (nextState) => {
+        if (nextState.terminal === 'running') await reply.project(nextState);
+      },
+      state,
+      monoNow,
     );
-    requireMessageReceipt(result, 'card');
-    log.info('outbound', 'sent', outboundLogFields(input, 'card', body, result));
-  } else if (input.replyMode === 'markdown') {
-    if (body.trim()) {
-      const result = await input.channel.send(input.chatId, { markdown: body }, input.sendOpts);
-      requireMessageReceipt(result, 'markdown');
-      log.info('outbound', 'sent', outboundLogFields(input, 'markdown', body, result));
-    }
-  } else if (body.trim()) {
-    const result = await input.channel.send(input.chatId, { markdown: body }, input.sendOpts);
-    requireMessageReceipt(result, 'text');
-    log.info('outbound', 'sent', outboundLogFields(input, 'text', body, result));
-  }
-}
-
-function requireMessageReceipt(result: { messageId?: string }, type: string): void {
-  if (!result.messageId?.trim()) {
-    throw new Error(`final ${type} reply missing message receipt`);
-  }
-}
-
-async function sendCotDegradedNotice(input: {
-  channel: LarkChannel;
-  chatId: string;
-  scope: string;
-  sendOpts: { replyTo: string; replyInThread?: boolean };
-  reason: string;
-}): Promise<void> {
-  log.warn('cot', 'degraded', {
-    scope: input.scope,
-    reason: input.reason,
-    replyInThread: input.sendOpts.replyInThread === true,
-  });
-  try {
-    await input.channel.send(
-      input.chatId,
-      { markdown: 'COT 过程消息更新失败，已停止展示过程；最终答案仍会继续发送。' },
-      input.sendOpts,
-    );
+    await reply.finish(finalState);
   } catch (err) {
-    log.warn('cot', 'degraded-notice-failed', {
-      scope: input.scope,
-      err: err instanceof Error ? err.message : String(err),
-    });
+    log.fail('reply', err, { scope, step: 'im' });
+    await run.stop().catch((stopErr) =>
+      log.warn('reply', 'stop-failed', {
+        scope,
+        err: stopErr instanceof Error ? stopErr.message : String(stopErr),
+      }),
+    );
+  } finally {
+    reply.release();
   }
-}
-
-function outboundLogFields(
-  input: {
-    scope?: string;
-    replyMode: ReturnType<typeof getMessageReplyMode>;
-    sendOpts?: { replyTo?: string; replyInThread?: boolean };
-  },
-  type: string,
-  body: string,
-  result?: { messageId?: string },
-): Record<string, unknown> {
-  return {
-    type,
-    scope: input.scope,
-    mode: input.replyMode,
-    chars: body.length,
-    messageId: result?.messageId,
-    replyTo: input.sendOpts?.replyTo,
-    replyInThread: input.sendOpts?.replyInThread === true,
-  };
 }
 
 /**
- * Drive the agent's event stream into a stateful RunState, calling `flush`
- * on every state transition. Used by both card and markdown reply modes —
- * the only difference between the two is what `flush` does with the state.
+ * Reduce the ordered OMP event stream and project each visible state.
  */
 async function processAgentStream(
   run: ScopedRun,
@@ -1463,10 +1047,12 @@ async function processAgentStream(
   scope: string,
   idleTimeoutMs: number | undefined,
   flush: (state: RunState) => Promise<void>,
+  startState: RunState = initialState,
+  monoNow: () => number = () => performance.now(),
 ): Promise<RunState> {
-  let state: RunState = initialState;
+  let state = startState;
 
-  // Idle watchdog: claude going silent for `idleTimeoutMs` is treated as
+  // Idle watchdog: OMP going silent for `idleTimeoutMs` is treated as
   // "presumed hung", we stop() and surface a timeout marker on the card.
   //
   // BUT — the agent can legitimately be silent while a long-running tool call
@@ -1514,29 +1100,25 @@ async function processAgentStream(
       }
       armOrPauseIdle();
 
-      if (evt.type === 'system') continue;
       if (evt.type === 'usage') {
-        const { costUsd, inputTokens, outputTokens } = evt;
-        if (costUsd !== undefined || inputTokens !== undefined || outputTokens !== undefined) {
-          log.info('agent', 'usage', {
-            ...(costUsd !== undefined ? { costUsd: Number(costUsd.toFixed(4)) } : {}),
-            ...(inputTokens !== undefined ? { inputTokens } : {}),
-            ...(outputTokens !== undefined ? { outputTokens } : {}),
-          });
-        }
-        continue;
+        const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = evt;
+        log.info('agent', 'usage', {
+          ...(inputTokens !== undefined ? { inputTokens } : {}),
+          ...(outputTokens !== undefined ? { outputTokens } : {}),
+          ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+          ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+        });
       }
 
       const prevTerminal = state.terminal;
       const prevFooter = state.footer;
-      state = reduce(state, evt);
+      state = reduceWithClock(state, evt, monoNow);
       if (state.footer !== prevFooter || state.terminal !== prevTerminal) {
         log.info('card', 'transition', { footer: state.footer, terminal: state.terminal });
       }
       await flush(state);
-      // Stop iterating as soon as we have a terminal state. Some claude
-      // versions don't close stdout immediately after the result event, which
-      // would leave the for-await waiting forever otherwise.
+      // Stop iterating as soon as we have a terminal state; the OMP process may
+      // still need a short cleanup tail before stdout closes.
       if (state.terminal !== 'running') break;
     }
   } finally {
@@ -1545,15 +1127,16 @@ async function processAgentStream(
 
   // If state already reached a terminal event (done/error/etc.) before the
   // watchdog or interrupt could land, don't clobber it — that real terminal
-  // wins. This avoids "claude finished but flush was slow → timer fired
+  // wins. This avoids "OMP finished but flush was slow → timer fired
   // mid-flush → user sees 'idle_timeout' on a successful run".
   if (state.terminal === 'running') {
+    const terminalAtMono = monoNow();
     if (idleFired) {
-      state = markIdleTimeout(state, Math.round(idleTimeoutMs! / 60_000));
+      state = markIdleTimeout(state, terminalAtMono);
     } else if (run.wasInterrupted()) {
-      state = markInterrupted(state);
+      state = markInterrupted(state, terminalAtMono);
     } else {
-      state = finalizeIfRunning(state);
+      state = finalizeIfRunning(state, terminalAtMono);
     }
   }
   log.info('card', 'final', {
@@ -1564,135 +1147,6 @@ async function processAgentStream(
   await flush(state);
   if (run.wasInterrupted()) await run.stop();
   return state;
-}
-
-async function awaitRenderAwareStream(input: {
-  mode: 'card' | 'markdown';
-  progress: LazyProgressStream;
-  renderDone: Promise<RunState>;
-  producerStarted: () => boolean;
-  fallback: (state: RunState) => Promise<void>;
-}): Promise<void> {
-  const streamResult = input.progress.settled.then(
-    () => ({ kind: 'stream' as const, ok: true as const }),
-    (err) => ({ kind: 'stream' as const, ok: false as const, err }),
-  );
-  const renderResult = input.renderDone.then(
-    (state) => ({ kind: 'render' as const, ok: true as const, state }),
-    (err) => ({ kind: 'render' as const, ok: false as const, err }),
-  );
-  const first = await Promise.race([streamResult, renderResult]);
-  if (!first.ok) {
-    if (first.kind === 'stream') {
-      log.fail('stream', first.err, { mode: input.mode, step: 'stream' });
-      const rendered = await renderResult;
-      if (!rendered.ok) throw rendered.err;
-      await runFallbackReply(input.mode, rendered.state, input.fallback);
-      return;
-    }
-    throw first.err;
-  }
-
-  if (first.kind === 'stream') {
-    const rendered = await renderResult;
-    if (!rendered.ok) throw rendered.err;
-    return;
-  }
-
-  // Nothing durable ever showed up, so no progress message was opened at all
-  // (the common Codex final-only round). Whatever the run ended with still has
-  // to reach the user as a standalone reply.
-  if (!input.progress.opened()) {
-    log.info('outbound', 'progress-stream-skipped', { mode: input.mode });
-    await runFallbackReply(input.mode, first.state, input.fallback);
-    return;
-  }
-
-  // The run ended before the stream did. A producer that hasn't started yet is
-  // usually just a card still being created (two API round trips), so give the
-  // stream its grace window rather than replying immediately — an immediate
-  // fallback would post the same answer twice once the stream catches up.
-  const terminal = await Promise.race([
-    streamResult,
-    delay(STREAM_TERMINAL_GRACE_MS).then(() => undefined),
-  ]);
-
-  if (!terminal) {
-    if (input.producerStarted()) {
-      log.warn('stream', 'terminal-grace-expired', {
-        mode: input.mode,
-        graceMs: STREAM_TERMINAL_GRACE_MS,
-      });
-      void streamResult.then((result) => {
-        if (!result.ok) {
-          log.fail('stream', result.err, { mode: input.mode, step: 'stream-terminal-late' });
-        }
-      });
-      return;
-    }
-    // Still nothing on screen after the grace window: give up on the stream and
-    // reply without it. `abandon()` keeps a late producer from rendering the
-    // same answer again; the empty message it leaves is recalled in cleanup.
-    input.progress.abandon();
-    log.warn('stream', 'producer-not-started-before-agent-terminal', { mode: input.mode });
-    await runFallbackReply(input.mode, first.state, input.fallback);
-    return;
-  }
-
-  if (!terminal.ok) {
-    // A stream that failed before producing anything delivered nothing, so the
-    // reply still has to go out; one that failed later already showed its
-    // content and the error is the caller's to handle.
-    if (input.producerStarted()) throw terminal.err;
-    log.fail('stream', terminal.err, { mode: input.mode, step: 'stream' });
-    await runFallbackReply(input.mode, first.state, input.fallback);
-  }
-}
-
-async function runFallbackReply(
-  mode: 'card' | 'markdown',
-  state: RunState,
-  fallback: (state: RunState) => Promise<void>,
-): Promise<void> {
-  try {
-    await fallback(state);
-  } catch (err) {
-    log.fail('stream', err, { mode, step: 'fallback' });
-  }
-}
-
-function scheduleWorkingReactionCleanup(
-  channel: LarkChannel,
-  messageId: string,
-  reactionPromise: Promise<string | undefined> | undefined,
-): void {
-  if (!reactionPromise) return;
-
-  void (async () => {
-    const reactionResult = reactionPromise.then(
-      (reactionId) => ({ ok: true as const, reactionId }),
-      (err) => ({ ok: false as const, err }),
-    );
-    const settled = await Promise.race([
-      reactionResult,
-      delay(REACTION_CLEANUP_GRACE_MS).then(() => undefined),
-    ]);
-
-    if (!settled) {
-      log.warn('reaction', 'cleanup-deferred', {
-        messageId,
-        graceMs: REACTION_CLEANUP_GRACE_MS,
-      });
-      void reactionResult.then((result) => {
-        if (!result.ok || !result.reactionId) return;
-        void removeReaction(channel, messageId, result.reactionId);
-      });
-      return;
-    }
-
-    if (!settled.ok || !settled.reactionId) return;
-    await removeReaction(channel, messageId, settled.reactionId);
-  })();
 }
 
 function buildPrompt(

@@ -3,9 +3,8 @@ import { registerApp } from '@larksuite/channel';
 import { resolveAppPaths } from '../config/app-paths';
 import { loadRootConfig } from '../config/profile-store';
 import type { TenantBrand } from '../config/schema';
-import type { AgentKind } from '../config/profile-schema';
-import { validateAppCredentials } from '../utils/feishu-auth';
 import { log } from '../core/logger';
+import { validateAppCredentials } from '../utils/feishu-auth';
 import { HttpError } from './http';
 import { writeNewProfile } from './onboard';
 
@@ -21,8 +20,7 @@ function sanitizeProfileName(name: string): string {
       .trim()
       // Strip only chars unsafe as a path segment (matches normalizeProfileName);
       // keep Unicode letters so a non-ASCII bot name stays as-is.
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\u0000-\u001f\s/\\:*?"<>|]+/g, '-')
+      .replace(/[\p{Cc}\s/\\:*?"<>|]+/gu, '-')
       .replace(/^[-.]+|[-.]+$/g, '')
       .slice(0, 40)
   );
@@ -159,11 +157,9 @@ export async function finishQrRegistration(
   if (s.status === 'error') throw new HttpError(400, s.error ?? '扫码创建失败');
   if (!s.app) throw new HttpError(409, '尚未完成扫码');
 
-  const agentKind: AgentKind =
-    fv.agentKind === 'codex' ? 'codex' : fv.agentKind === 'omp' ? 'omp' : 'claude';
-  const profile = String(fv.profile ?? '').trim() || s.suggestedProfile || agentKind;
+  const profile = String(fv.profile ?? '').trim() || s.suggestedProfile || 'omp';
   const created = await writeNewProfile(
-    { profile, agentKind, appId: s.app.appId, appSecret: s.app.appSecret, tenant: s.app.tenant },
+    { profile, appId: s.app.appId, appSecret: s.app.appSecret, tenant: s.app.tenant },
     rootDir,
   );
   s.status = 'done';

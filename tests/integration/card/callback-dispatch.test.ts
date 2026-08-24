@@ -146,7 +146,6 @@ async function createHarness(
   const controls = {
     profile: 'claude',
     profileConfig: createDefaultProfileConfig({
-      agentKind: 'claude',
       accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
       access: { allowedChats: ['oc_group'] },
     }),
@@ -157,7 +156,6 @@ async function createHarness(
     async exit() {},
     configPath: `${tmp.profile}/config.json`,
     cfg: createDefaultProfileConfig({
-      agentKind: 'claude',
       accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
       access: { allowedChats: ['oc_group'] },
     }),

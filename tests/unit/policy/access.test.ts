@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema';
+import type { AppConfig } from '../../../src/config/schema';
 import {
   accessPolicyDigest,
   canRunAdminCommand,
   canUseDm,
   canUseGroup,
   isCreator,
-  requireMentionForChat,
   type RuntimeControls,
+  requireMentionForChat,
 } from '../../../src/policy/access';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema';
-import type { AppConfig } from '../../../src/config/schema';
 
 const ownerControls: RuntimeControls = {
   botOwnerId: 'ou_owner',
@@ -169,7 +169,6 @@ function profileWithAccess(
   mode: ProfileConfig['mode'] = 'personal',
 ): ProfileConfig {
   return createDefaultProfileConfig({
-    agentKind: 'claude',
     mode,
     accounts: {
       app: {

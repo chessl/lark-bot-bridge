@@ -1,9 +1,9 @@
 import type {
-  AgentAdapter,
   AgentBotIdentity,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
+  OmpRunEngine,
 } from '../../src/agent/types.js';
 
 export interface FakeAgentRun extends AgentRun {
@@ -20,11 +20,16 @@ class FakeRun implements FakeAgentRun {
   #stopped = false;
   #waitForExitCalls = 0;
 
-  constructor(opts: AgentRunOptions, events: readonly AgentEvent[], waitForExitResult: boolean) {
+  constructor(
+    opts: AgentRunOptions,
+    events: readonly AgentEvent[],
+    waitForExitResult: boolean,
+    onEventStreamStart?: () => void,
+  ) {
     this.runId = opts.runId;
     this.opts = opts;
     this.waitForExitResult = waitForExitResult;
-    this.events = this.iterate(events);
+    this.events = this.iterate(events, onEventStreamStart);
   }
 
   get stopped(): boolean {
@@ -44,7 +49,11 @@ class FakeRun implements FakeAgentRun {
     return this.waitForExitResult;
   }
 
-  private async *iterate(events: readonly AgentEvent[]): AsyncIterable<AgentEvent> {
+  private async *iterate(
+    events: readonly AgentEvent[],
+    onEventStreamStart?: () => void,
+  ): AsyncIterable<AgentEvent> {
+    onEventStreamStart?.();
     for (const event of events) {
       if (this.#stopped) return;
       yield event;
@@ -54,27 +63,26 @@ class FakeRun implements FakeAgentRun {
 
 export type FakeAgentEvents = readonly AgentEvent[] | readonly (readonly AgentEvent[])[];
 
-export class FakeAgentAdapter implements AgentAdapter {
-  readonly id: string;
-  readonly displayName: string;
+export class FakeAgentAdapter implements OmpRunEngine {
+  readonly id = 'omp';
+  readonly displayName = 'Oh My Pi';
   readonly runs: FakeAgentRun[] = [];
   readonly runOptions: AgentRunOptions[] = [];
   botIdentity: AgentBotIdentity | undefined;
   #eventRuns: AgentEvent[][];
   #waitForExitResults: boolean[];
+  readonly #onEventStreamStart: (() => void) | undefined;
 
   constructor(
     options: {
-      id?: string;
-      displayName?: string;
       events?: FakeAgentEvents;
       waitForExit?: boolean | readonly boolean[];
+      onEventStreamStart?: () => void;
     } = {},
   ) {
-    this.id = options.id ?? 'fake-agent';
-    this.displayName = options.displayName ?? 'Fake Agent';
     this.#eventRuns = normalizeEventRuns(options.events ?? []);
     this.#waitForExitResults = normalizeWaitForExitResults(options.waitForExit);
+    this.#onEventStreamStart = options.onEventStreamStart;
   }
 
   async checkAvailability(): Promise<{ ok: true }> {
@@ -89,7 +97,7 @@ export class FakeAgentAdapter implements AgentAdapter {
     this.runOptions.push(opts);
     const events = this.#eventRuns.shift() ?? [];
     const waitForExitResult = this.#waitForExitResults.shift() ?? true;
-    const run = new FakeRun(opts, events, waitForExitResult);
+    const run = new FakeRun(opts, events, waitForExitResult, this.#onEventStreamStart);
     this.runs.push(run);
     return run;
   }

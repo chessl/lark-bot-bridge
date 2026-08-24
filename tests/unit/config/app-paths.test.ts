@@ -36,19 +36,17 @@ describe('resolveAppPaths', () => {
   it('keeps root config, active profile, registry, and locks under the user root', async () => {
     const root = await tempRoot();
 
-    const paths = resolveAppPaths({ rootDir: root, profile: 'codex-dev' });
+    const paths = resolveAppPaths({ rootDir: root, profile: 'personal' });
 
     expect(paths.rootDir).toBe(root);
-    expect(paths.profile).toBe('codex-dev');
+    expect(paths.profile).toBe('personal');
     expect(paths.profilesDir).toBe(join(root, 'profiles'));
     expect(paths.trashDir).toBe(join(root, '.trash'));
     expect(paths.configFile).toBe(join(root, 'config.json'));
     expect(paths.registryDir).toBe(join(root, 'registry'));
     expect(paths.userRegistryFile).toBe(join(root, 'registry', 'processes.json'));
     expect(paths.userLockDir).toBe(join(root, 'registry', 'locks'));
-    expect(paths.profileLockFile).toBe(
-      join(root, 'registry', 'locks', 'profile', 'codex-dev.lock'),
-    );
+    expect(paths.profileLockFile).toBe(join(root, 'registry', 'locks', 'profile', 'personal.lock'));
     expect(paths.appLockFile('cli/app')).toBe(
       join(root, 'registry', 'locks', 'app', 'cli_app.lock'),
     );
@@ -63,12 +61,11 @@ describe('resolveAppPaths', () => {
   it('places runtime state inside the selected profile directory', async () => {
     const root = await tempRoot();
 
-    const paths = resolveAppPaths({ rootDir: root, profile: 'claude' });
+    const paths = resolveAppPaths({ rootDir: root, profile: 'work' });
 
-    const profileDir = join(root, 'profiles', 'claude');
+    const profileDir = join(root, 'profiles', 'work');
     expect(paths.profileDir).toBe(profileDir);
-    expect(paths.codexHomeDir).toBe(join(profileDir, 'codex-home'));
-    expect(paths.defaultWorkspaceDir).toBe(join(`${root}-workspaces`, 'claude', 'default'));
+    expect(paths.defaultWorkspaceDir).toBe(join(`${root}-workspaces`, 'work', 'default'));
     expect(paths.sessionsFile).toBe(join(profileDir, 'sessions.json'));
     expect(paths.sessionCatalogFile).toBe(join(profileDir, 'sessions.json.catalog.json'));
     expect(paths.workspacesFile).toBe(join(profileDir, 'workspaces.json'));
@@ -77,6 +74,7 @@ describe('resolveAppPaths', () => {
     expect(paths.userAuthFile).toBe(join(profileDir, 'user-auth.json'));
     expect(paths.mediaDir).toBe(join(profileDir, 'media'));
     expect(paths.callbackNoncesFile).toBe(join(profileDir, 'callback-nonces.json'));
+    expect(paths.activeDeliveriesFile).toBe(join(profileDir, 'active-deliveries.json'));
     expect(paths.logsDir).toBe(join(profileDir, 'logs'));
     expect(paths.daemonLogsDir).toBe(join(profileDir, 'logs', 'daemon'));
     expect(paths.daemonStdoutFile).toBe(join(profileDir, 'logs', 'daemon', 'daemon-stdout.log'));
@@ -106,10 +104,10 @@ describe('resolveAppPaths', () => {
   it('rejects profile names that are unsafe POSIX path segments', async () => {
     const root = await tempRoot();
 
-    expect(() => resolveAppPaths({ rootDir: root, profile: 'codex dev' })).toThrow(
+    expect(() => resolveAppPaths({ rootDir: root, profile: 'work profile' })).toThrow(
       /invalid profile name/i,
     );
-    expect(() => resolveAppPaths({ rootDir: root, profile: 'b64_Y29kZXggZGV2' })).not.toThrow();
+    expect(() => resolveAppPaths({ rootDir: root, profile: 'b64_d29yayBwcm9maWxl' })).not.toThrow();
     // POSIX path separators and reserved dot segments are still rejected.
     expect(() => resolveAppPaths({ rootDir: root, profile: 'a/b' })).toThrow(
       /invalid profile name/i,

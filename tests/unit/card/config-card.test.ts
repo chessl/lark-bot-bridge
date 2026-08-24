@@ -2,12 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { type ConfigFormOpts, configFormCard } from '../../../src/card/config-card';
 
 const base: ConfigFormOpts = {
-  agentKind: 'claude',
   mode: 'personal',
   model: 'default',
-  messageReply: 'markdown',
-  showToolCalls: false,
-  cotMessages: 'off',
   maxConcurrentRuns: 1,
   runIdleTimeoutMinutes: 0,
   requireMentionInGroup: false,

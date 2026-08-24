@@ -1,12 +1,10 @@
 import { readdir } from 'node:fs/promises';
 import { resolveAppPaths } from '../config/app-paths';
-import type { AgentKind } from '../config/profile-schema';
 import { loadRootConfig, readActiveProfile } from '../config/profile-store';
 
 export interface DiscoveredProfile {
   name: string;
   active: boolean;
-  agentKind: AgentKind;
   profileDir: string;
 }
 
@@ -41,12 +39,9 @@ export async function listAllProfiles(rootDir?: string): Promise<DiscoveredProfi
   return configured
     .sort((a, b) => profileSort(a, b, activeProfile))
     .map((name) => {
-      const profile = root.profiles[name];
-      if (!profile) throw new Error(`profile not found: ${name}`);
       return {
         name,
         active: name === activeProfile,
-        agentKind: profile.agentKind,
         profileDir: resolveAppPaths({ rootDir: rootPaths.rootDir, profile: name }).profileDir,
       };
     });

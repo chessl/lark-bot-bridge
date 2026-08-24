@@ -10,6 +10,6 @@ describe('group chat helpers', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 4, 25, 16, 52, 0));
 
-    expect(defaultChatName('Codex')).toBe('Codex · 5-25 16:52');
+    expect(defaultChatName('OMP')).toBe('OMP · 5-25 16:52');
   });
 });

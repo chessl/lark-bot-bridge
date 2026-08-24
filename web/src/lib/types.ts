@@ -1,9 +1,5 @@
 export type { KnownChat } from "../../../src/bot/lark-info";
-export type { AgentKind, MeetingConfig, ProfileMode } from "../../../src/config/profile-schema";
-export type {
-  CotMessagesMode as CotMessages,
-  MessageReplyMode as MessageReply,
-} from "../../../src/config/schema";
+export type { MeetingConfig, ProfileMode } from "../../../src/config/profile-schema";
 export type { DeviceLogin, UserAuthStatus } from "../../../src/lark-native/user-im";
 export type { MeetingPreflight } from "../../../src/meeting/preflight";
 export type { MeetingSessionStatus as MeetingSessionInfo } from "../../../src/meeting/session";

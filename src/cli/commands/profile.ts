@@ -3,7 +3,6 @@ import { rm } from 'node:fs/promises';
 import { defaultAppPaths, resolveAppPaths } from '../../config/app-paths';
 import type { RootConfig } from '../../config/profile-schema';
 import {
-  agentKindFromString,
   formatRootConfig,
   loadRootConfig,
   removeProfile,
@@ -23,7 +22,6 @@ export interface ProfileCommandOptions {
 }
 
 export interface ProfileCreateOptions extends ProfileCommandOptions {
-  agent?: string;
   workspace?: string;
   appId?: string;
   appSecret?: string;
@@ -59,25 +57,22 @@ export async function runProfileList(opts: ProfileCommandOptions = {}): Promise<
   const rows = profiles.map((profile) => {
     const holders = running
       .filter((entry) => entry.profileName === profile.name)
-      .map((entry) => `pid=${entry.pid} agent=${entry.agentKind}`);
+      .map((entry) => `pid=${entry.pid}`);
     return {
       active: profile.active ? '*' : '',
       profile: profile.name,
-      agent: profile.agentKind,
       status: holders.length > 0 ? holders.join(', ') : '-',
     };
   });
   const widths = {
     active: Math.max('ACTIVE'.length, ...rows.map((row) => row.active.length)),
     profile: Math.max('PROFILE'.length, ...rows.map((row) => row.profile.length)),
-    agent: Math.max('AGENT'.length, ...rows.map((row) => row.agent.length)),
   };
   console.log(
     formatProfileListRow(
       {
         active: 'ACTIVE',
         profile: 'PROFILE',
-        agent: 'AGENT',
         status: 'STATUS',
       },
       widths,
@@ -89,15 +84,12 @@ export async function runProfileList(opts: ProfileCommandOptions = {}): Promise<
 }
 
 function formatProfileListRow(
-  row: { active: string; profile: string; agent: string; status: string },
-  widths: { active: number; profile: number; agent: number },
+  row: { active: string; profile: string; status: string },
+  widths: { active: number; profile: number },
 ): string {
-  return [
-    row.active.padEnd(widths.active),
-    row.profile.padEnd(widths.profile),
-    row.agent.padEnd(widths.agent),
-    row.status,
-  ].join('  ');
+  return [row.active.padEnd(widths.active), row.profile.padEnd(widths.profile), row.status].join(
+    '  ',
+  );
 }
 
 export async function runProfileCreate(
@@ -107,25 +99,13 @@ export async function runProfileCreate(
   const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
   const configFile = resolveAppPaths({ rootDir }).configFile;
   await withConfigFileLock(configFile, async () => {
-    const root = await loadRootConfig(configFile);
-    const existing = root?.profiles[name];
-    if (existing) {
-      const requested = agentKindFromString(opts.agent);
-      if (requested && existing.agentKind !== requested) {
-        throw new Error(
-          `profile ${name} already exists with agentKind ${existing.agentKind}, ` +
-            `but profile create requested --agent ${requested}. ` +
-            `Profile names are labels; use the existing ${existing.agentKind} profile, ` +
-            `choose another name, or remove profile ${name} before creating a ${requested} profile.`,
-        );
-      }
+    if ((await loadRootConfig(configFile))?.profiles[name]) {
       throw new Error(`profile already exists: ${name}`);
     }
 
     await resolveProfileRuntime({
       config: configFile,
       profile: name,
-      agent: opts.agent,
       workspace: opts.workspace,
       appId: opts.appId,
       appSecret: opts.appSecret,
@@ -173,7 +153,7 @@ export async function runProfileRemove(
       const holder = profileLock.meta ? ` pid=${profileLock.meta.pid}` : '';
       throw new Error(`profile is locked/running: ${name}${holder}`);
     }
-    const lock = await acquireProfileRuntimeLock(profilePaths, profile.agentKind);
+    const lock = await acquireProfileRuntimeLock(profilePaths);
     try {
       const result = await removeProfile(root, name, rootDir, {
         purge: opts.purge,

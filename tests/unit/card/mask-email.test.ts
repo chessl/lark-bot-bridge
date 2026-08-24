@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { deepMaskEmails, maskEmails } from '../../../src/card/mask-email.js';
-import { renderCard } from '../../../src/card/run-renderer.js';
-import { reduce, initialState, type RunState } from '../../../src/card/run-state.js';
-import { renderText } from '../../../src/card/text-renderer.js';
 import type { AgentEvent } from '../../../src/agent/types.js';
+import { deepMaskEmails, maskEmails } from '../../../src/card/mask-email.js';
+import {
+  renderOmpReplyCard,
+  renderOmpReplyMarkdown,
+} from '../../../src/card/omp-reply-renderer.js';
+import { initialState, type RunState, reduce } from '../../../src/card/run-state.js';
 
 describe('maskEmails', () => {
   it('rewrites the @ of a plain email', () => {
@@ -54,7 +56,7 @@ describe('deepMaskEmails', () => {
   });
 });
 
-describe('renderers strip emails end-to-end', () => {
+describe('unified Reply renderers strip emails end-to-end', () => {
   const withEmail: AgentEvent[] = [
     { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'git commit -m "x"' } },
     {
@@ -69,11 +71,11 @@ describe('renderers strip emails end-to-end', () => {
   const state: RunState = withEmail.reduce(reduce, initialState);
   const rawEmail = /[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}/;
 
-  it('renderText emits no raw email', () => {
-    expect(renderText(state)).not.toMatch(rawEmail);
+  it('terminal Markdown emits no raw email', () => {
+    expect(renderOmpReplyMarkdown(state)).not.toMatch(rawEmail);
   });
 
-  it('renderCard emits no raw email anywhere in the payload', () => {
-    expect(JSON.stringify(renderCard(state))).not.toMatch(rawEmail);
+  it('CardKit emits no raw email anywhere in the payload', () => {
+    expect(JSON.stringify(renderOmpReplyCard(state))).not.toMatch(rawEmail);
   });
 });

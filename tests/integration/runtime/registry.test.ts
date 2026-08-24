@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  type ProcessEntry,
   readRegistry,
   register,
   unregister,
-  type ProcessEntry,
 } from '../../../src/runtime/registry';
 
 const roots: string[] = [];
@@ -29,8 +29,8 @@ describe('process registry', () => {
     const registryFile = join(root, 'registry', 'processes.json');
     const body = {
       entries: [
-        entry({ id: 'dead', pid: 999_999_999, profileName: 'claude', agentKind: 'claude' }),
-        entry({ id: 'self', pid: process.pid, profileName: 'codex', agentKind: 'codex' }),
+        entry({ id: 'dead', pid: 999_999_999, profileName: 'work' }),
+        entry({ id: 'self', pid: process.pid, profileName: 'personal' }),
       ],
     };
     await writeJson(registryFile, body);
@@ -42,13 +42,11 @@ describe('process registry', () => {
     expect(await readFile(registryFile, 'utf8')).toBe(before);
   });
 
-  it('write path prunes entries with stale profile/app locks and records profile plus agent identity', async () => {
+  it('write path prunes entries with stale profile/app locks and records profile identity', async () => {
     const root = await makeRoot();
     const registryFile = join(root, 'registry', 'processes.json');
     await writeJson(registryFile, {
-      entries: [
-        entry({ id: 'dead', pid: 999_999_999, profileName: 'claude', agentKind: 'claude' }),
-      ],
+      entries: [entry({ id: 'dead', pid: 999_999_999, profileName: 'work' })],
     });
 
     const registered = await register({
@@ -56,8 +54,7 @@ describe('process registry', () => {
       tenant: 'feishu',
       configPath: join(root, 'config.json'),
       version: '0.1.32',
-      profileName: 'codex-dev',
-      agentKind: 'codex',
+      profileName: 'personal',
       registryFile,
     });
 
@@ -69,8 +66,7 @@ describe('process registry', () => {
       id: registered.id,
       appId: 'cli_test',
       tenant: 'feishu',
-      profileName: 'codex-dev',
-      agentKind: 'codex',
+      profileName: 'personal',
       pid: process.pid,
     });
 
@@ -87,8 +83,7 @@ function entry(overrides: Partial<ProcessEntry>): ProcessEntry {
     configPath: '/tmp/config.json',
     startedAt: new Date().toISOString(),
     version: '0.1.32',
-    profileName: 'claude',
-    agentKind: 'claude',
+    profileName: 'work',
     ...overrides,
   };
 }

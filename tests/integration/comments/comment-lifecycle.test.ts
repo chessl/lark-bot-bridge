@@ -2,10 +2,10 @@ import { join } from 'node:path';
 import type { CommentEvent, LarkChannel } from '@larksuite/channel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
-  AgentAdapter,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
+  OmpRunEngine,
 } from '../../../src/agent/types.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { commentTokenDigest } from '../../../src/bot/comment-resource.js';
@@ -297,9 +297,9 @@ async function createHarness(options: { autoCompleteAgent?: boolean } = {}): Pro
   };
 }
 
-class BlockingAgentAdapter implements AgentAdapter {
-  readonly id = 'fake-agent';
-  readonly displayName = 'Fake Agent';
+class BlockingAgentAdapter implements OmpRunEngine {
+  readonly id = 'omp';
+  readonly displayName = 'Oh My Pi';
   readonly runOptions: AgentRunOptions[] = [];
   private releases: Array<(() => void) | undefined> = [];
   private wasStopped = false;
@@ -368,10 +368,8 @@ function activeCommentScopes(h: { activeRuns: ActiveRuns }, threadScopeId: strin
 
 function profile(defaultWorkspace: string): ProfileConfig {
   const config = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: { app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' } },
     access: { allowedUsers: ['ou-user', 'ou-bot'] },
-    permissions: { defaultAccess: 'read-only', maxAccess: 'workspace' },
   });
   config.workspaces.default = defaultWorkspace;
   return config;

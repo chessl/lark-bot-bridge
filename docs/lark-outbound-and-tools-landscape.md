@@ -128,12 +128,12 @@ Lark tools 则是可选侧路。若要做成可靠广域 suite，每个能力还
 
 | 维度 | 本仓库实现 |
 |---|---|
-| 普通消息出口 | `AgentEvent` 先由 [`reduce`](../src/card/run-state.ts#L43-L139) 归并成 `RunState`，再由 [`renderCard`](../src/card/run-renderer.ts#L22-L65) / `renderText` 投影；[`channel.ts`](../src/bot/channel.ts#L1093-L1249) 根据配置选择 CardKit 2.0 流式卡、流式 markdown 或最终单次 text，并通过同进程 `@larksuite/channel` 的 `channel.stream` / `channel.send` 发出。主回复不经过 lark-cli。 |
-| 项目内建 Lark tool schema | **0**。仓库没有把 `channel.rawClient` 包成 Agent 可见的 MCP/JSON-schema tools；会议和 Console 的直接 OpenAPI/CLI 调用属于 bridge 内部功能，不计入 Agent tool registry。 |
-| Agent 的 Lark 能力 | [`bridge-system-prompt.ts`](../src/agent/bridge-system-prompt.ts#L62-L128) 要求 Agent 通过通用 shell tool 启动外部 `lark-cli`；preflight 对用户描述其覆盖“200+ 飞书/Lark API commands”：[preflight.ts](../src/cli/preflight.ts#L66-L73)。因此模型实际看到的结构化 schema 仍只是 Bash/shell，而不是 200 多个 Lark tool schemas。 |
-| 取舍 | 能力宽度接近“外接全量”，但接口深度低于 A1/A2/A4：参数由模型拼命令行，结果经 stdout/stderr，且每次多一个进程；优势是直接复用 lark-cli 的 OAuth、身份策略、长尾覆盖和写操作门禁。 |
+| 普通消息出口 | OMP `AgentEvent` 先由 [`run-state.ts`](../src/card/run-state.ts) 归约，再由 [`omp-reply-renderer.ts`](../src/card/omp-reply-renderer.ts) 投影；[`OmpReplyController`](../src/bot/omp-reply-controller.ts) 负责同一 CardKit Reply 的精确提交、串行更新、fallback、journal 和重启恢复。 |
+| 项目内建 Lark tool schema | bridge 提供 run-scoped `lark_bridge` MCP endpoint，覆盖常用 bot reads、消息、Docx、CardKit、图片、用户 OAuth 和拉 bot 入群。 |
+| Agent 的 Lark 能力 | OMP 启动时获得只绑定 loopback 的临时 MCP 配置和一次性 bearer token。写操作通过原会话里的签名确认卡审批。 |
+| 取舍 | 高频能力由 bridge-owned MCP 提供窄 schema；没有外部 CLI fallback，也不复制全量 OpenAPI。长尾能力只在有真实产品需求时增加。 |
 
-所以本仓库在这张分布图里应标成：**内建 0 + 外接全量 CLI**。它与 A8 最接近，但集成更强——会自动安装、绑定 profile、注入环境和运行约定。若把常用能力迁到 bridge-owned MCP，本仓库会从“0 + 外接全量”变成“少量高频结构化 tools + CLI 长尾 fallback”，仍无需复制 14/39/59 个广域 suite。
+所以本仓库在这张分布图里应标成“少量高频结构化 tools”。它与广域 suite 的目标不同：接口更窄，但身份、确认和会话边界由 bridge 统一约束。
 
 ## 8. 证据局限
 

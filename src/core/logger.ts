@@ -32,10 +32,6 @@ const STDOUT_INFO_ALLOWLIST: Record<string, true> = {
   'run.started': true,
   'run.completed': true,
   'run.failed': true,
-  'cot.created': true,
-  'cot.completed': true,
-  'outbound.sent': true,
-  'outbound.markdown-stream-fallback': true,
   'card.final': true,
 };
 
@@ -155,11 +151,11 @@ const MAX_LOG_STRING_CHARS = 4096;
 const CREDENTIAL_JSON_FIELD_RE =
   /("(?:secret|app_secret|appSecret|token|access_token|tenant_access_token|app_access_token|authorization)"\s*:\s*")[^"]*(")/gi;
 const ESCAPED_CREDENTIAL_JSON_FIELD_RE =
-  /(\\\"(?:secret|app_secret|appSecret|token|access_token|tenant_access_token|app_access_token|authorization)\\\"\s*:\s*\\\")[^\\]*(\\\")/gi;
+  /(\\"(?:secret|app_secret|appSecret|token|access_token|tenant_access_token|app_access_token|authorization)\\"\s*:\s*\\")[^\\]*(\\")/gi;
 const RESOURCE_JSON_FIELD_RE =
   /("(?:fileKey|sourceFileKey|file_key|source_file_key|imageKey|image_key|mediaKey|media_key)"\s*:\s*")[^"]*(")/gi;
 const ESCAPED_RESOURCE_JSON_FIELD_RE =
-  /(\\\"(?:fileKey|sourceFileKey|file_key|source_file_key|imageKey|image_key|mediaKey|media_key)\\\"\s*:\s*\\\")[^\\]*(\\\")/gi;
+  /(\\"(?:fileKey|sourceFileKey|file_key|source_file_key|imageKey|image_key|mediaKey|media_key)\\"\s*:\s*\\")[^\\]*(\\")/gi;
 
 interface SanitizeOptions {
   redactIds: boolean;
@@ -320,20 +316,6 @@ function formatStdout(
     const scope = shortId(fields.scope);
     const duration = formatDurationMs(fields.durationMs);
     return `  ${mark} run ${result} scope=${scope} run=${shortId(fields.runId)}${duration ? ` duration=${duration}` : ''}`;
-  }
-  if (phase === 'cot' && event === 'created') {
-    return `  ◇ cot created message=${shortId(fields.messageId)} cot=${shortId(fields.cotId)}`;
-  }
-  if (phase === 'cot' && event === 'completed') {
-    return `  ◇ cot completed cot=${shortId(fields.cotId)} reason=${fields.reason ?? '-'}`;
-  }
-  if (phase === 'outbound' && event === 'markdown-stream-fallback') {
-    return `  ⚠ markdown stream fallback: ${fields.err ?? ''}`;
-  }
-  if (phase === 'outbound' && event === 'sent') {
-    const scope = shortId(fields.scope);
-    const reply = fields.replyInThread === true ? 'thread' : 'reply';
-    return `  ↗ sent ${fields.type ?? 'message'} scope=${scope} ${reply}=${shortId(fields.replyTo)} msg=${shortId(fields.messageId)}`;
   }
   if (phase === 'card' && event === 'final') {
     const c = ctx.chatId ? ctx.chatId.slice(-6) : '-';
@@ -510,14 +492,12 @@ export function newTraceId(): string {
 }
 
 /**
- * Scrub a log buffer of identifying / credential material before it leaves
- * the local machine — specifically, before /doctor feeds it to Claude (the
- * Anthropic API will see it) and before the analysis card lands in a
- * Feishu chat (the Lark server may cache card contents).
+ * Scrub a log buffer of identifying and credential material before `/doctor`
+ * submits it to OMP or posts the analysis card to Feishu.
  *
- * Conservative: keeps log structure intact so Claude can still correlate by
- * traceId / phase / event. Only the *values* of identifying fields shrink
- * to a last-6-char suffix, and known credential fields become [REDACTED].
+ * Conservative: keeps log structure intact so OMP can still correlate by
+ * traceId / phase / event. Only identifying values shrink to a last-6 suffix,
+ * and known credential fields become [REDACTED].
  *
  * Pattern-based on purpose — parsing each line as JSON would skip lines the
  * scrubber doesn't fully understand and is much slower for ~60KB of input.

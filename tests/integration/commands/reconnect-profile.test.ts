@@ -57,7 +57,6 @@ async function createHarness(): Promise<{
   const activeRuns = new ActiveRuns();
   const agent = new FakeAgentAdapter();
   const profileConfig = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: { app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' } },
     access: { admins: ['ou-admin'] },
   });

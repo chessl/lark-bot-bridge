@@ -95,7 +95,7 @@ export function ProfilesView({ onOpen }: { onOpen: (profile: string) => void }) 
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-medium">{p.name}</span>
-                <Badge variant="secondary">{p.agentKind}</Badge>
+                <Badge variant="secondary">OMP</Badge>
                 {p.running ? (
                   <Badge variant="success">在线</Badge>
                 ) : (

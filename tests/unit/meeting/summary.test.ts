@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => ({ start: vi.fn() }));
 /** A real ProfileConfig — capability resolution reads more than `agentKind`. */
 function profileConfig(meeting: MeetingConfig) {
   const pc = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: { app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' } },
   });
   pc.meeting = meeting;
@@ -29,7 +28,7 @@ const noopClient: VcRequestClient = {
   request: vi.fn(async () => ({ code: 0, data: {} }) as never),
 };
 
-/** A run that emits one text chunk then completes. */
+/** A run that emits one final assistant response then completes. */
 function fakeRun(text: string) {
   return {
     ok: true as const,
@@ -42,7 +41,7 @@ function fakeRun(text: string) {
       },
       events: {
         async *[Symbol.asyncIterator]() {
-          yield { type: 'text', delta: text };
+          yield { type: 'final_text', content: text };
           yield { type: 'done' };
         },
       },

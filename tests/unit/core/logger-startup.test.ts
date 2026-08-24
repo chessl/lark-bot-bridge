@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 describe('logger startup behavior', () => {
-  it('does not create the default claude profile directory before logger configuration', async () => {
+  it('does not create the default OMP profile directory before logger configuration', async () => {
     const root = await mkdtemp(join(tmpdir(), 'logger-startup-'));
     roots.push(root);
     process.env.LARK_CHANNEL_HOME = root;
@@ -23,7 +23,7 @@ describe('logger startup behavior', () => {
     log.warn('startup', 'before-configure', { detail: 'early warning' });
     await flushLogger();
 
-    await expect(stat(join(root, 'profiles', 'claude'))).rejects.toMatchObject({
+    await expect(stat(join(root, 'profiles', 'omp'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
   });

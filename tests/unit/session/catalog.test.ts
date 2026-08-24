@@ -1,200 +1,92 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SessionCatalog, sessionCatalogKey } from '../../../src/session/catalog.js';
+import { SessionCatalog, sessionCatalogKey } from '../../../src/session/catalog';
 
-const cleanups: Array<() => Promise<void>> = [];
+const roots: string[] = [];
 
-describe('agent-aware session catalog', () => {
-  afterEach(async () => {
-    await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
-  });
-
-  it('keys entries by scope, agent, cwd realpath, and policy fingerprint', () => {
-    expect(
-      sessionCatalogKey({
-        scopeId: 'chat-1',
-        agentId: 'claude',
-        cwdRealpath: '/repo',
-        policyFingerprint: 'fp-1',
-      }),
-    ).toBe('chat-1\x1fclaude\x1f/repo\x1ffp-1');
-  });
-
-  it('stores session- and thread-based agents in isolated active entries', async () => {
-    const catalog = new SessionCatalog(await path());
-
-    catalog.upsertActive({
-      scopeId: 'chat-1',
-      agentId: 'claude',
-      cwdRealpath: '/repo',
-      policyFingerprint: 'fp-1',
-      sessionId: 'sess-1',
-      now: 1000,
-    });
-    catalog.upsertActive({
-      scopeId: 'chat-1',
-      agentId: 'codex',
-      cwdRealpath: '/repo',
-      policyFingerprint: 'fp-1',
-      threadId: 'thread-1',
-      now: 2000,
-    });
-    catalog.upsertActive({
-      scopeId: 'chat-1',
-      agentId: 'omp',
-      cwdRealpath: '/repo',
-      policyFingerprint: 'fp-1',
-      sessionId: 'omp-session-1',
-      now: 3000,
-    });
-
-    expect(
-      catalog.activeFor({
-        scopeId: 'chat-1',
-        agentId: 'claude',
-        cwdRealpath: '/repo',
-        policyFingerprint: 'fp-1',
-      }),
-    ).toMatchObject({ sessionId: 'sess-1', agentId: 'claude' });
-    expect(
-      catalog.activeFor({
-        scopeId: 'chat-1',
-        agentId: 'codex',
-        cwdRealpath: '/repo',
-        policyFingerprint: 'fp-1',
-      }),
-    ).toMatchObject({ threadId: 'thread-1', agentId: 'codex' });
-    expect(
-      catalog.activeFor({
-        scopeId: 'chat-1',
-        agentId: 'omp',
-        cwdRealpath: '/repo',
-        policyFingerprint: 'fp-1',
-      }),
-    ).toMatchObject({ sessionId: 'omp-session-1', agentId: 'omp' });
-    await catalog.flush();
-  });
-
-  it('rejects mismatched Claude/Codex identity fields and does not auto-resume damaged entries', async () => {
-    const catalog = new SessionCatalog(await path());
-
-    expect(() =>
-      catalog.upsertActive({
-        scopeId: 'chat-1',
-        agentId: 'claude',
-        cwdRealpath: '/repo',
-        policyFingerprint: 'fp-1',
-        threadId: 'thread-wrong',
-        now: 1000,
-      }),
-    ).toThrow(/Claude.*sessionId/i);
-    expect(() =>
-      catalog.upsertActive({
-        scopeId: 'chat-1',
-        agentId: 'codex',
-        cwdRealpath: '/repo',
-        policyFingerprint: 'fp-1',
-        sessionId: 'sess-wrong',
-        now: 1000,
-      }),
-    ).toThrow(/Codex.*threadId/i);
-
-    await catalog.replaceForTest([
-      {
-        key: sessionCatalogKey({
-          scopeId: 'chat-1',
-          agentId: 'codex',
-          cwdRealpath: '/repo',
-          policyFingerprint: 'fp-1',
-        }),
-        scopeId: 'chat-1',
-        agentId: 'codex',
-        cwdRealpath: '/repo',
-        policyFingerprint: 'fp-1',
-        sessionId: 'sess-damaged',
-        status: 'active',
-        updatedAt: 1000,
-      },
-    ]);
-
-    expect(
-      catalog.activeFor({
-        scopeId: 'chat-1',
-        agentId: 'codex',
-        cwdRealpath: '/repo',
-        policyFingerprint: 'fp-1',
-      }),
-    ).toBeUndefined();
-    await catalog.flush();
-  });
-
-  it('archives only the current agent/cwd/fingerprint entry for a new conversation', async () => {
-    const catalog = new SessionCatalog(await path());
-    const base = {
-      scopeId: 'chat-1',
-      cwdRealpath: '/repo',
-      policyFingerprint: 'fp-1',
-    };
-    catalog.upsertActive({ ...base, agentId: 'claude', sessionId: 'sess-1', now: 1000 });
-    catalog.upsertActive({ ...base, agentId: 'codex', threadId: 'thread-1', now: 1000 });
-
-    expect(catalog.archiveActive({ ...base, agentId: 'claude', now: 2000 })).toBe(true);
-
-    expect(catalog.activeFor({ ...base, agentId: 'claude' })).toBeUndefined();
-    expect(catalog.activeFor({ ...base, agentId: 'codex' })).toMatchObject({
-      threadId: 'thread-1',
-    });
-    expect(catalog.entries().filter((entry) => entry.status === 'archived')).toHaveLength(1);
-    await catalog.flush();
-  });
-
-  it('garbage-collects old archived entries, per-scope overflow, and profile overflow', async () => {
-    const catalog = new SessionCatalog(await path());
-    await catalog.replaceForTest([
-      ...Array.from({ length: 25 }, (_, i) => entry(`chat-1`, `sess-${i}`, 50_000 + i, `fp-${i}`)),
-      ...Array.from({ length: 981 }, (_, i) =>
-        entry(`chat-${i + 2}`, `other-${i}`, 20_000 + i, `fp-other-${i}`),
-      ),
-      {
-        ...entry('chat-old', 'old', 1),
-        status: 'archived',
-      },
-    ]);
-
-    catalog.gc({
-      now: 100 * 24 * 60 * 60 * 1000,
-      maxArchivedAgeMs: 90 * 24 * 60 * 60 * 1000,
-      maxEntriesPerScope: 20,
-      maxEntriesPerProfile: 1000,
-    });
-
-    expect(catalog.entries().some((item) => item.sessionId === 'old')).toBe(false);
-    expect(catalog.entries().filter((item) => item.scopeId === 'chat-1')).toHaveLength(20);
-    expect(catalog.entries()).toHaveLength(1000);
-    await catalog.flush();
-  });
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 async function path(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'session-catalog-test-'));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
-  return join(dir, 'catalog.json');
+  const root = await mkdtemp(join(tmpdir(), 'bridge-session-catalog-'));
+  roots.push(root);
+  return join(root, 'catalog.json');
 }
 
-function entry(scopeId: string, sessionId: string, updatedAt: number, policyFingerprint = 'fp-1') {
-  const identity = {
-    scopeId,
-    agentId: 'claude' as const,
-    cwdRealpath: '/repo',
-    policyFingerprint,
-  };
-  return {
-    key: sessionCatalogKey(identity),
-    ...identity,
-    sessionId,
-    status: 'active' as const,
-    updatedAt,
-  };
-}
+const identity = {
+  scopeId: 'chat-1',
+  cwdRealpath: '/repo',
+  policyFingerprint: 'fp-1',
+};
+
+describe('OMP session catalog', () => {
+  it('stores one active session per scope, cwd, and policy identity', async () => {
+    const catalog = new SessionCatalog(await path());
+    expect(catalog.activeFor(identity)).toBeUndefined();
+    catalog.upsertActive({ ...identity, sessionId: 'omp-session-1', now: 1_000 });
+    expect(catalog.activeFor(identity)).toMatchObject({
+      sessionId: 'omp-session-1',
+      status: 'active',
+    });
+    expect(catalog.activeFor({ ...identity, policyFingerprint: 'fp-2' })).toBeUndefined();
+    await catalog.flush();
+  });
+
+  it('requires an OMP session id', async () => {
+    const catalog = new SessionCatalog(await path());
+    expect(() => catalog.upsertActive({ ...identity, sessionId: '' })).toThrow(/sessionId/);
+  });
+
+  it('archives only the matching active identity', async () => {
+    const catalog = new SessionCatalog(await path());
+    catalog.upsertActive({ ...identity, sessionId: 'omp-session-1', now: 1_000 });
+    expect(catalog.archiveActive({ ...identity, now: 2_000 })).toBe(true);
+    expect(catalog.activeFor(identity)).toBeUndefined();
+    expect(catalog.entries()[0]).toMatchObject({ status: 'archived', updatedAt: 2_000 });
+    await catalog.flush();
+  });
+
+  it('drops obsolete and malformed persisted entry shapes on load', async () => {
+    const file = await path();
+    await writeFile(
+      file,
+      JSON.stringify([
+        {
+          key: 'legacy-key',
+          ...identity,
+          status: 'active',
+          updatedAt: 1_000,
+          threadId: 'legacy-thread',
+        },
+        {
+          key: sessionCatalogKey(identity),
+          ...identity,
+          status: 'active',
+          updatedAt: 2_000,
+          sessionId: 'omp-session-2',
+        },
+      ]),
+    );
+    const catalog = new SessionCatalog(file);
+    await catalog.load();
+    expect(catalog.entries()).toHaveLength(1);
+    expect(catalog.activeFor(identity)?.sessionId).toBe('omp-session-2');
+  });
+
+  it('garbage-collects old archives and enforces size caps', async () => {
+    const file = await path();
+    const catalog = new SessionCatalog(file);
+    for (let index = 0; index < 4; index++) {
+      const item = { ...identity, policyFingerprint: `fp-${index}` };
+      catalog.upsertActive({ ...item, sessionId: `session-${index}`, now: index });
+      if (index === 0) catalog.archiveActive({ ...item, now: 0 });
+    }
+    catalog.gc({ now: 10_000, maxArchivedAgeMs: 100, maxEntriesPerScope: 2 });
+    expect(catalog.entries()).toHaveLength(2);
+    await catalog.flush();
+    expect(JSON.parse(await readFile(file, 'utf8'))).toHaveLength(2);
+  });
+});

@@ -31,7 +31,7 @@ describe('RunExecutor adapter startup', () => {
   it('preserves startup diagnostics and releases admission when start fails', async () => {
     const h = await createHarness({
       agent: new StartingAgent(
-        new SpawnFailed('codex binary check failed', new Error('missing'), 'agent-prepare-failed'),
+        new SpawnFailed('omp binary check failed', new Error('missing'), 'agent-prepare-failed'),
       ),
     });
 
@@ -94,9 +94,7 @@ function policy(cwd: string): RunPolicyAllow {
     prompt: 'hello',
     requestedCwd: cwd,
     cwdRealpath: cwd,
-    accessMode: 'read-only',
-    sandbox: 'read-only',
-    permissionMode: 'plan',
+    accessMode: 'full',
     access: { ok: true, reason: 'allowed-user' },
     attachments: [],
     policyFingerprint: 'fp',

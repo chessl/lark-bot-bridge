@@ -1,3 +1,4 @@
+import { log } from '../../core/logger';
 import type { AgentEvent } from '../types';
 
 const DEFAULT_MAX_REASSEMBLED_BYTES = 64 * 1024 * 1024;
@@ -78,7 +79,10 @@ export class OmpRpcFrameDecoder {
 
 export class OmpRpcTranslator {
   private sessionId: string | undefined;
-  private sawTextInMessage = false;
+  private assistantDraft = '';
+  private commandOutput = '';
+  private textStarted = false;
+  private commandTextStarted = false;
   private terminal = false;
 
   terminalEmitted(): boolean {
@@ -86,9 +90,22 @@ export class OmpRpcTranslator {
   }
 
   *translate(frame: unknown): Generator<AgentEvent> {
-    if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return;
+    if (this.terminal) {
+      log.info('agent', 'rpc-frame-ignored', {
+        reason: 'post-terminal',
+        type: frameType(frame),
+      });
+      return;
+    }
+    if (!frame || typeof frame !== 'object' || Array.isArray(frame)) {
+      log.warn('agent', 'rpc-frame-ignored', { reason: 'malformed' });
+      return;
+    }
     const rpcFrame = frame as Record<string, unknown>;
-    if (typeof rpcFrame.type !== 'string') return;
+    if (typeof rpcFrame.type !== 'string') {
+      log.warn('agent', 'rpc-frame-ignored', { reason: 'malformed' });
+      return;
+    }
 
     if (rpcFrame.type === 'response') {
       yield* this.translateResponse(rpcFrame);
@@ -96,7 +113,7 @@ export class OmpRpcTranslator {
     }
 
     if (rpcFrame.type === 'message_start') {
-      this.sawTextInMessage = false;
+      this.assistantDraft = '';
       return;
     }
 
@@ -107,12 +124,15 @@ export class OmpRpcTranslator {
           ? (rawUpdate as Record<string, unknown>)
           : undefined;
       const delta = stringField(update, 'delta');
-      if (update?.type === 'text_delta' && delta !== undefined) {
-        this.sawTextInMessage = true;
-        yield { type: 'text', delta };
-      } else if (update?.type === 'thinking_delta' && delta !== undefined) {
-        yield { type: 'thinking', delta };
+      if (update?.type === 'text_delta' && delta) {
+        this.assistantDraft += delta;
+        if (!this.textStarted) {
+          this.textStarted = true;
+          yield { type: 'text_started' };
+        }
       }
+      // thinking_delta is deliberately discarded. Only complete, structured
+      // reasoning content from message_end is eligible for user projection.
       return;
     }
 
@@ -122,16 +142,16 @@ export class OmpRpcTranslator {
         rawMessage && typeof rawMessage === 'object' && !Array.isArray(rawMessage)
           ? (rawMessage as Record<string, unknown>)
           : undefined;
-      if (!this.sawTextInMessage && message?.role === 'assistant') {
-        const text = assistantText(message.content);
-        if (text) {
-          this.sawTextInMessage = true;
-          yield { type: 'text', delta: text };
+      if (message?.role === 'assistant') {
+        const text = assistantText(message.content) || this.assistantDraft;
+        if (text) yield { type: 'final_text', content: text };
+        for (const content of explicitReasoning(message.content)) {
+          yield { type: 'reasoning', content };
         }
+        const usage = usageEvent(message.usage);
+        if (usage) yield usage;
       }
-      const usage = usageEvent(message?.usage);
-      if (usage) yield usage;
-      this.sawTextInMessage = false;
+      this.assistantDraft = '';
       return;
     }
 
@@ -145,6 +165,11 @@ export class OmpRpcTranslator {
           name,
           input: rpcFrame.args ?? rpcFrame.arguments ?? {},
         };
+      } else {
+        log.warn('agent', 'rpc-frame-ignored', {
+          reason: 'malformed',
+          type: rpcFrame.type,
+        });
       }
       return;
     }
@@ -158,29 +183,76 @@ export class OmpRpcTranslator {
           output: resultText(rpcFrame.result ?? rpcFrame.output),
           isError: rpcFrame.isError === true || rpcFrame.error === true,
         };
+      } else {
+        log.warn('agent', 'rpc-frame-ignored', {
+          reason: 'malformed',
+          type: rpcFrame.type,
+        });
       }
+      return;
+    }
+
+    if (rpcFrame.type === 'auto_retry_start') {
+      yield {
+        type: 'retry_start',
+        attempt: numberField(rpcFrame, 'attempt'),
+        maxAttempts: numberField(rpcFrame, 'maxAttempts'),
+        delayMs: numberField(rpcFrame, 'delayMs'),
+      };
+      return;
+    }
+
+    if (rpcFrame.type === 'auto_retry_end') {
+      yield { type: 'retry_end' };
+      return;
+    }
+
+    if (rpcFrame.type === 'retry_fallback_applied') {
+      yield { type: 'fallback_start' };
+      return;
+    }
+
+    if (rpcFrame.type === 'retry_fallback_succeeded') {
+      yield { type: 'fallback_end' };
+      return;
+    }
+
+    if (rpcFrame.type === 'auto_compaction_start') {
+      yield { type: 'compaction_start' };
+      return;
+    }
+
+    if (rpcFrame.type === 'auto_compaction_end') {
+      yield { type: 'compaction_end' };
       return;
     }
 
     if (rpcFrame.type === 'command_output') {
-      const text = resultText(rpcFrame.output ?? rpcFrame.content ?? rpcFrame.message);
-      if (text) {
-        yield { type: 'text', delta: text };
+      const output = resultText(rpcFrame.output ?? rpcFrame.content ?? rpcFrame.message);
+      this.commandOutput += output;
+      if (output && !this.commandTextStarted) {
+        this.commandTextStarted = true;
+        yield { type: 'command_text_started' };
       }
       return;
     }
 
-    if (rpcFrame.type === 'prompt_result' && rpcFrame.agentInvoked === false) {
-      yield* this.finish();
+    if (rpcFrame.type === 'prompt_result') {
+      if (rpcFrame.agentInvoked === false) yield* this.finish(false);
       return;
     }
 
     if (rpcFrame.type === 'agent_end') {
-      const usage = usageEvent(rpcFrame.usage);
-      if (usage) yield usage;
-      if (rpcFrame.isTerminal !== false) yield* this.finish();
+      if (rpcFrame.isTerminal !== false) yield* this.finish(true);
       return;
     }
+
+    if (rpcFrame.type === 'agent_start') return;
+
+    log.warn('agent', 'rpc-frame-ignored', {
+      reason: 'unknown',
+      type: rpcFrame.type,
+    });
   }
 
   *fail(
@@ -211,17 +283,24 @@ export class OmpRpcTranslator {
       const sessionId = stringField(data, 'sessionId');
       if (sessionId) this.sessionId = sessionId;
       const rawModel = data?.model;
-      const modelRecord =
+      const model =
         rawModel && typeof rawModel === 'object' && !Array.isArray(rawModel)
           ? (rawModel as Record<string, unknown>)
           : undefined;
-      const provider = stringField(modelRecord, 'provider');
-      const modelId = stringField(modelRecord, 'id');
-      const model = provider && modelId ? `${provider}/${modelId}` : modelId;
+      const rawContextUsage = data?.contextUsage;
+      const contextUsage =
+        rawContextUsage && typeof rawContextUsage === 'object' && !Array.isArray(rawContextUsage)
+          ? (rawContextUsage as Record<string, unknown>)
+          : undefined;
+      const modelId = stringField(model, 'id');
+      const effort = stringField(data, 'thinkingLevel');
+      const contextPercent = numberField(contextUsage, 'percent');
       yield {
         type: 'system',
         ...(this.sessionId ? { sessionId: this.sessionId } : {}),
-        ...(model ? { model } : {}),
+        ...(modelId ? { modelId } : {}),
+        ...(effort ? { effort } : {}),
+        ...(contextPercent !== undefined ? { contextPercent } : {}),
       };
       return;
     }
@@ -234,14 +313,17 @@ export class OmpRpcTranslator {
         !Array.isArray(rawData) &&
         (rawData as Record<string, unknown>).agentInvoked === false
       ) {
-        yield* this.finish();
+        yield* this.finish(false);
       }
     }
   }
 
-  private *finish(): Generator<AgentEvent> {
+  private *finish(agentInvoked: boolean): Generator<AgentEvent> {
     if (this.terminal) return;
     this.terminal = true;
+    const localOutput = agentInvoked ? '' : this.commandOutput;
+    this.commandOutput = '';
+    if (localOutput) yield { type: 'text', delta: localOutput, source: 'command' };
     yield {
       type: 'done',
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),
@@ -250,21 +332,24 @@ export class OmpRpcTranslator {
   }
 }
 
+function frameType(frame: unknown): string {
+  if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return 'malformed';
+  const type = (frame as Record<string, unknown>).type;
+  return typeof type === 'string' ? type : 'malformed';
+}
+
 function usageEvent(value: unknown): Extract<AgentEvent, { type: 'usage' }> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const usage = value as Record<string, unknown>;
-  const rawCost = usage.cost;
-  const cost =
-    rawCost && typeof rawCost === 'object' && !Array.isArray(rawCost)
-      ? (rawCost as Record<string, unknown>)
-      : undefined;
   const event: Extract<AgentEvent, { type: 'usage' }> = {
     type: 'usage',
     inputTokens: numberField(usage, 'inputTokens') ?? numberField(usage, 'input'),
     outputTokens: numberField(usage, 'outputTokens') ?? numberField(usage, 'output'),
-    cachedInputTokens: numberField(usage, 'cachedInputTokens') ?? numberField(usage, 'cacheRead'),
-    reasoningOutputTokens: numberField(usage, 'reasoningOutputTokens'),
-    costUsd: numberField(usage, 'costUsd') ?? numberField(cost, 'total'),
+    cacheReadTokens:
+      numberField(usage, 'cacheReadTokens') ??
+      numberField(usage, 'cachedInputTokens') ??
+      numberField(usage, 'cacheRead'),
+    cacheWriteTokens: numberField(usage, 'cacheWriteTokens') ?? numberField(usage, 'cacheWrite'),
   };
   return Object.values(event).some((entry) => typeof entry === 'number') ? event : undefined;
 }
@@ -280,6 +365,17 @@ function assistantText(value: unknown): string {
       return stringField(content, 'text') ?? '';
     })
     .join('');
+}
+
+function explicitReasoning(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((part) => {
+    if (!part || typeof part !== 'object' || Array.isArray(part)) return [];
+    const content = part as Record<string, unknown>;
+    if (content.type !== 'thinking') return [];
+    const reasoning = stringField(content, 'thinking');
+    return reasoning ? [reasoning] : [];
+  });
 }
 
 function resultText(value: unknown): string {

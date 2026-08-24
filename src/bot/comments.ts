@@ -229,6 +229,9 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
             answer = '';
             break;
           case 'system':
+          case 'prompt_sent':
+          case 'text_started':
+          case 'command_text_started':
             break;
           case 'error':
             errorMsg = e.message;
@@ -240,9 +243,8 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
             terminal = true;
             break;
         }
-        // Don't wait for the subprocess to actually close stdout — break as soon
-        // as we have the final result. Some claude versions hang briefly post-
-        // result on telemetry, which would leave the for-await stuck forever.
+        // Stop at the terminal event rather than waiting for OMP's process
+        // cleanup tail to close stdout.
         if (terminal) break;
       }
     } finally {
@@ -271,7 +273,7 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
     }
 
     let reply = stripMarkdown(answer.trim());
-    if (errorMsg) reply = `⚠️ Claude 报错：${errorMsg}`;
+    if (errorMsg) reply = `⚠️ OMP 报错：${errorMsg}`;
     if (!reply) reply = '（无回复内容）';
     if (reply.length > REPLY_MAX_CHARS) reply = `${reply.slice(0, REPLY_MAX_CHARS - 1)}…`;
 
@@ -400,7 +402,6 @@ function commentRunRejectedReply(rejectReason: {
     case 'access-denied':
     case 'folder-allowlist-unverified':
     case 'required-attachment-rejected':
-    case 'unsupported-agent-access':
       return undefined;
     default:
       return `工作目录不可用：${rejectReason.userVisible}`;

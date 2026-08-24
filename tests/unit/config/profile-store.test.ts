@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -6,12 +6,8 @@ import { createDefaultProfileConfig, type RootConfig } from '../../../src/config
 import { loadRootConfig, saveRootConfig } from '../../../src/config/profile-store';
 
 const roots: string[] = [];
-
-const app = {
-  id: 'cli_test',
-  secret: '${APP_SECRET}',
-  tenant: 'feishu' as const,
-};
+const app = { id: 'cli_test', secret: 'secret', tenant: 'feishu' as const };
+const omp = { binaryPath: '/usr/local/bin/omp', profile: 'work' };
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -23,216 +19,74 @@ async function tmpRoot(): Promise<string> {
   return root;
 }
 
-describe('profile store canonical serialization', () => {
+describe('OMP profile store', () => {
   it('saves only canonical root and profile fields', async () => {
     const root = await tmpRoot();
     const configPath = join(root, 'config.json');
-    const rootSecrets = {
-      providers: {
-        rootEnv: {
-          source: 'env' as const,
-          allowlist: ['APP_SECRET'],
-        },
-      },
-      defaults: { env: 'rootEnv' },
-    };
     const profile = {
       ...createDefaultProfileConfig({
-        agentKind: 'codex',
         accounts: { app },
-        secrets: { defaults: { env: 'profileEnv' } },
-        preferences: {
-          messageReply: 'markdown',
-          showToolCalls: false,
-        },
-        access: {
-          allowedUsers: ['ou_user'],
-          allowedChats: ['oc_chat'],
-          admins: ['ou_admin'],
-          requireMentionInGroup: false,
-        },
-        codex: {
-          binaryPath: '/usr/local/bin/codex',
-          codexHome: '/tmp/codex-home',
-          inheritCodexHome: false,
-        },
-        permissions: {
-          defaultAccess: 'workspace',
-          maxAccess: 'full',
-        },
+        omp,
+        preferences: { model: 'custom-model', maxConcurrentRuns: 4 },
+        access: { allowedUsers: ['ou_user'], requireMentionInGroup: false },
       }),
       workspaces: { default: '/repo' },
-      attachments: {
-        maxCount: 2,
-        maxBytes: 1024,
-        maxFileBytes: 512,
-        imageMaxBytes: 256,
-        cacheTtlMs: 60_000,
-        cacheMaxBytes: 2048,
-      },
-      larkCli: {
-        identityPreset: 'user-default' as const,
-        localUserImport: {
-          status: 'imported' as const,
-          attemptedAt: '2026-06-04T01:02:03.000Z',
-          importedAt: '2026-06-04T01:03:03.000Z',
-          reason: 'same-app-local-user',
-        },
-      },
       runtimeOnlyFutureField: true,
     };
 
     await saveRootConfig(
       {
         schemaVersion: 2,
-        activeProfile: 'codex',
-        preferences: { messageReply: 'text' },
-        secrets: rootSecrets,
-        profiles: { codex: profile },
+        activeProfile: 'work',
+        profiles: { work: profile },
         extra: true,
-      } as unknown as RootConfig & { extra?: true; preferences: any },
+      } as unknown as RootConfig & { extra: true },
       configPath,
     );
 
     const saved = JSON.parse(await readFile(configPath, 'utf8'));
-    expect(saved.schemaVersion).toBe(2);
-    expect(saved.activeProfile).toBe('codex');
-    expect(saved.secrets).toEqual(rootSecrets);
-    expect(saved).not.toHaveProperty('preferences');
     expect(saved).not.toHaveProperty('extra');
-
-    const savedProfile = saved.profiles.codex;
-    expect(savedProfile.accounts).toEqual(profile.accounts);
-    expect(savedProfile.secrets).toEqual(profile.secrets);
-    expect(savedProfile.preferences).toEqual(profile.preferences);
-    expect(savedProfile.access).toEqual(profile.access);
-    expect(savedProfile.workspaces).toEqual(profile.workspaces);
-    expect(savedProfile.codex).toEqual(profile.codex);
-    expect(savedProfile.attachments).toEqual(profile.attachments);
-    expect(savedProfile).not.toHaveProperty('larkCli');
-    expect(savedProfile.permissions).toEqual({
-      defaultAccess: 'workspace',
-      maxAccess: 'full',
-    });
-    expect(savedProfile).not.toHaveProperty('runtimeOnlyFutureField');
+    expect(saved.profiles.work.omp).toEqual(omp);
+    expect(saved.profiles.work.workspaces).toEqual({ default: '/repo' });
+    expect(saved.profiles.work).not.toHaveProperty('runtimeOnlyFutureField');
+    expect(saved.profiles.work).not.toHaveProperty('agentKind');
+    expect(saved.profiles.work).not.toHaveProperty('permissions');
   });
 
-  it('loads canonical permissions unchanged', async () => {
+  it('requires OMP configuration when loading', async () => {
     const root = await tmpRoot();
     const configPath = join(root, 'config.json');
-    const profile = createDefaultProfileConfig({
-      agentKind: 'codex',
-      accounts: { app },
-      codex: { binaryPath: '/usr/local/bin/codex' },
-      permissions: {
-        defaultAccess: 'workspace',
-        maxAccess: 'workspace',
-      },
-    });
-
-    await saveRootConfig(
-      {
-        schemaVersion: 2,
-        activeProfile: 'codex',
-        profiles: { codex: profile },
-      },
+    await writeFile(
       configPath,
+      JSON.stringify({
+        schemaVersion: 2,
+        activeProfile: 'work',
+        profiles: { work: { accounts: { app } } },
+      }),
     );
 
-    const loaded = await loadRootConfig(configPath);
-    expect(loaded?.profiles.codex?.permissions).toEqual({
-      defaultAccess: 'workspace',
-      maxAccess: 'workspace',
-    });
+    await expect(loadRootConfig(configPath)).rejects.toThrow(/omp profile requires/);
   });
 
-  it('persists deployment mode across save→load round-trip', async () => {
+  it('persists deployment, access, and meeting settings across save and load', async () => {
     const root = await tmpRoot();
     const configPath = join(root, 'config.json');
-    const profile = createDefaultProfileConfig({
-      agentKind: 'claude',
-      mode: 'team',
-      accounts: { app },
-    });
-
-    await saveRootConfig(
-      {
-        schemaVersion: 2,
-        activeProfile: 'claude',
-        profiles: { claude: profile },
-      },
-      configPath,
-    );
-
-    // On disk: mode is written (not stripped by the serializer).
-    const saved = JSON.parse(await readFile(configPath, 'utf8'));
-    expect(saved.profiles.claude.mode).toBe('team');
-
-    // Reloaded: mode survives, so team mode is not silently lost on restart.
-    const loaded = await loadRootConfig(configPath);
-    expect(loaded?.profiles.claude?.mode).toBe('team');
-  });
-
-  it('persists per-chat @-mention overrides across save→load round-trip', async () => {
-    const root = await tmpRoot();
-    const configPath = join(root, 'config.json');
-    const profile = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
+    const profile = createDefaultProfileConfig({ mode: 'team', accounts: { app }, omp });
     profile.access.chatRequireMention = { oc_open: false, oc_strict: true };
+    profile.meeting = { ...profile.meeting, enabled: true, respondIn: 'both' };
 
     await saveRootConfig(
-      {
-        schemaVersion: 2,
-        activeProfile: 'claude',
-        profiles: { claude: profile },
-      },
+      { schemaVersion: 2, activeProfile: 'work', profiles: { work: profile } },
       configPath,
     );
+    const loaded = await loadRootConfig(configPath);
 
-    const saved = JSON.parse(await readFile(configPath, 'utf8'));
-    expect(saved.profiles.claude.access.chatRequireMention).toEqual({
+    expect(loaded?.profiles.work?.mode).toBe('team');
+    expect(loaded?.profiles.work?.access.chatRequireMention).toEqual({
       oc_open: false,
       oc_strict: true,
     });
-
-    const loaded = await loadRootConfig(configPath);
-    expect(loaded?.profiles.claude?.access.chatRequireMention).toEqual({
-      oc_open: false,
-      oc_strict: true,
-    });
-  });
-
-  it('persists the in-meeting agent settings across save→load round-trip', async () => {
-    const root = await tmpRoot();
-    const configPath = join(root, 'config.json');
-    const profile = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
-    // Defaults keep the capability off until a profile opts in.
-    expect(profile.meeting.enabled).toBe(false);
-    profile.meeting = {
-      ...profile.meeting,
-      enabled: true,
-      respondIn: 'both',
-      trigger: '@小助手',
-      transcript: { keep: 50, stabilizeMs: 800 },
-    };
-
-    await saveRootConfig(
-      {
-        schemaVersion: 2,
-        activeProfile: 'claude',
-        profiles: { claude: profile },
-      },
-      configPath,
-    );
-
-    const saved = JSON.parse(await readFile(configPath, 'utf8'));
-    expect(saved.profiles.claude.meeting).toMatchObject({ enabled: true, trigger: '@小助手' });
-
-    const loaded = await loadRootConfig(configPath);
-    expect(loaded?.profiles.claude?.meeting).toMatchObject({
-      enabled: true,
-      respondIn: 'both',
-      trigger: '@小助手',
-      transcript: { keep: 50, stabilizeMs: 800 },
-    });
+    expect(loaded?.profiles.work?.meeting).toMatchObject({ enabled: true, respondIn: 'both' });
+    expect(loaded?.profiles.work?.omp).toEqual(omp);
   });
 });

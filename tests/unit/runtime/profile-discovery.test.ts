@@ -1,139 +1,82 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  type AgentKind,
-  createDefaultProfileConfig,
-  type RootConfig,
-} from '../../../src/config/profile-schema';
+import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
+import { saveRootConfig } from '../../../src/config/profile-store';
 import { listAllProfiles } from '../../../src/runtime/profile-discovery';
 
 const roots: string[] = [];
-
-async function makeRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'bridge-profile-discovery-'));
-  roots.push(root);
-  return root;
-}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe('listAllProfiles', () => {
-  it('lists profiles from root config with active profile first and others sorted', async () => {
-    const root = await makeRoot();
-    await writeRootConfig(root, {
-      activeProfile: 'codex-dev',
-      profiles: {
-        zeta: profile('claude', 'cli_zeta'),
-        claude: profile('claude', 'cli_claude'),
-        'codex-dev': profile('codex', 'cli_codex'),
-      },
-    });
-    await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
-    await mkdir(join(root, 'profiles', 'codex-dev'), { recursive: true });
-    await mkdir(join(root, 'profiles', 'zeta'), { recursive: true });
+async function root(): Promise<string> {
+  const value = await mkdtemp(join(tmpdir(), 'bridge-profile-discovery-'));
+  roots.push(value);
+  return value;
+}
 
-    const profiles = await listAllProfiles(root);
-
-    expect(profiles.map((item) => item.name)).toEqual(['codex-dev', 'claude', 'zeta']);
-    expect(profiles.map((item) => item.active)).toEqual([true, false, false]);
-    expect(profiles[0]).toMatchObject({
-      agentKind: 'codex',
-      profileDir: join(root, 'profiles', 'codex-dev'),
-    });
+function profile(appId: string) {
+  return createDefaultProfileConfig({
+    accounts: { app: { id: appId, secret: 'secret', tenant: 'feishu' } },
+    omp: { binaryPath: '/usr/local/bin/omp' },
   });
+}
 
-  it('fails when the active profile is missing', async () => {
-    const root = await makeRoot();
-    await writeRootConfig(root, {
-      activeProfile: 'missing',
+async function writeRootConfig(rootDir: string, rootConfig: Omit<RootConfig, 'schemaVersion'>) {
+  await saveRootConfig({ schemaVersion: 2, ...rootConfig }, join(rootDir, 'config.json'));
+}
+
+describe('profile discovery', () => {
+  it('returns the active profile first and no engine discriminator', async () => {
+    const rootDir = await root();
+    await writeRootConfig(rootDir, {
+      activeProfile: 'personal',
       profiles: {
-        claude: profile('claude', 'cli_claude'),
+        zeta: profile('cli_zeta'),
+        work: profile('cli_work'),
+        personal: profile('cli_personal'),
       },
     });
-    await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
-
-    await expect(listAllProfiles(root)).rejects.toThrow('active profile not found: missing');
-  });
-
-  it('fails when config profiles are missing state directories', async () => {
-    const root = await makeRoot();
-    await writeRootConfig(root, {
-      activeProfile: 'claude',
-      profiles: {
-        claude: profile('claude', 'cli_claude'),
-        'codex-dev': profile('codex', 'cli_codex'),
-      },
-    });
-    await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
-
-    await expect(listAllProfiles(root)).rejects.toThrow(
-      'profile state directory missing: codex-dev',
+    await Promise.all(
+      ['zeta', 'work', 'personal'].map((name) =>
+        mkdir(join(rootDir, 'profiles', name), { recursive: true }),
+      ),
     );
+
+    const profiles = await listAllProfiles(rootDir);
+    expect(profiles.map((item) => item.name)).toEqual(['personal', 'work', 'zeta']);
+    expect(profiles.map((item) => item.active)).toEqual([true, false, false]);
+    expect(profiles[0]).not.toHaveProperty('agentKind');
   });
 
-  it('fails when a state directory has no matching config profile', async () => {
-    const root = await makeRoot();
-    await writeRootConfig(root, {
-      activeProfile: 'claude',
-      profiles: {
-        claude: profile('claude', 'cli_claude'),
-      },
+  it('rejects a missing active profile', async () => {
+    const rootDir = await root();
+    await writeRootConfig(rootDir, {
+      activeProfile: 'missing',
+      profiles: { work: profile('cli_work') },
     });
-    await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
-    await mkdir(join(root, 'profiles', 'orphan'), { recursive: true });
+    await mkdir(join(rootDir, 'profiles', 'work'), { recursive: true });
+    await expect(listAllProfiles(rootDir)).rejects.toThrow('active profile not found: missing');
+  });
 
-    await expect(listAllProfiles(root)).rejects.toThrow(
+  it('rejects missing or orphan profile state directories', async () => {
+    const rootDir = await root();
+    await writeRootConfig(rootDir, {
+      activeProfile: 'work',
+      profiles: { work: profile('cli_work'), personal: profile('cli_personal') },
+    });
+    await mkdir(join(rootDir, 'profiles', 'work'), { recursive: true });
+    await expect(listAllProfiles(rootDir)).rejects.toThrow(
+      'profile state directory missing: personal',
+    );
+
+    await mkdir(join(rootDir, 'profiles', 'personal'), { recursive: true });
+    await mkdir(join(rootDir, 'profiles', 'orphan'), { recursive: true });
+    await expect(listAllProfiles(rootDir)).rejects.toThrow(
       'profile state directory without config: orphan',
     );
   });
-
-  it('ignores a log-only orphan profile directory left by early startup logging', async () => {
-    const root = await makeRoot();
-    await writeRootConfig(root, {
-      activeProfile: 'codex-dev',
-      profiles: {
-        'codex-dev': profile('codex', 'cli_codex'),
-      },
-    });
-    await mkdir(join(root, 'profiles', 'codex-dev'), { recursive: true });
-    await mkdir(join(root, 'profiles', 'claude', 'logs'), { recursive: true });
-    await writeFile(
-      join(root, 'profiles', 'claude', 'logs', 'bridge-20260526.jsonl'),
-      '{}\n',
-      'utf8',
-    );
-
-    await expect(listAllProfiles(root)).resolves.toMatchObject([
-      { name: 'codex-dev', active: true },
-    ]);
-  });
 });
-
-function profile(agentKind: AgentKind, appId: string) {
-  return createDefaultProfileConfig({
-    agentKind,
-    accounts: {
-      app: {
-        id: appId,
-        secret: '${APP_SECRET}',
-        tenant: 'feishu',
-      },
-    },
-    ...(agentKind === 'codex' ? { codex: { binaryPath: 'codex' } } : {}),
-  });
-}
-
-async function writeRootConfig(
-  root: string,
-  overrides: Pick<RootConfig, 'activeProfile' | 'profiles'>,
-): Promise<void> {
-  const config: RootConfig = {
-    schemaVersion: 2,
-    ...overrides,
-  };
-  await writeFile(join(root, 'config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');
-}

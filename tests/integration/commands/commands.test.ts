@@ -164,7 +164,7 @@ describe('Bridge command contracts', () => {
     expect(lastMarkdown(h.channel)).toContain(await realpath(file));
   });
 
-  it('keeps Claude resume history details out of group chats', async () => {
+  it('keeps resume details out of group chats', async () => {
     const h = await createHarness();
 
     await expect(h.run('/resume', { chatMode: 'group' })).resolves.toBe(true);
@@ -180,14 +180,13 @@ describe('Bridge command contracts', () => {
 
     expect(h.agent.runOptions).toHaveLength(0);
     const status = JSON.stringify(lastContent(h.channel));
-    expect(status).toContain('Fake Agent');
+    expect(status).toContain('Oh My Pi');
     expect(status).toContain('工作目录');
     expect(status).toContain('**session**');
     expect(status).toContain('(无)');
     expect(status).not.toContain('**conversation**');
-    expect(status).toContain('permission');
-    expect(status).toContain('plan');
-    expect(status).not.toContain('bypassPermissions');
+    expect(status).toContain('access');
+    expect(status).toContain('full');
     expect(status).not.toContain('workspace-write/workspace-write');
     expect(status).toContain('owner');
     expect(status).toContain(jsonStringFragment(await realpath(h.tmp.workspace)));
@@ -328,10 +327,8 @@ async function createHarness(): Promise<Harness> {
 
 function appConfig(defaultWorkspace: string): ProfileConfig {
   const config = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
     access: { admins: ['ou-admin'] },
-    permissions: { defaultAccess: 'read-only', maxAccess: 'workspace' },
     preferences: { maxConcurrentRuns: 2 },
   });
   config.workspaces.default = defaultWorkspace;

@@ -24,7 +24,7 @@ const program = new Command();
 
 program
   .name('lark-bot-bridge')
-  .description('Bridge Feishu/Lark messenger with local CLI coding agents')
+  .description('Bridge Feishu/Lark messenger with Oh My Pi')
   .version(pkg.version, '-v, --version');
 
 // === process-level commands (work directly on bridge processes) ===
@@ -38,7 +38,6 @@ program
     '--web-ui',
     'run the machine-wide supervisor + local web console (hosts all profiles); default is a single-profile headless run',
   )
-  .option('--agent <kind>', 'agent kind for a new profile (claude, codex, or omp)')
   .option('--workspace <path>', 'initial working directory for first-run profile bootstrap')
   .option('--app-id <id>', 'use an existing Lark/Feishu app instead of QR app creation')
   .option(
@@ -51,7 +50,6 @@ program
       config?: string;
       profile?: string;
       webUi?: boolean;
-      agent?: string;
       workspace?: string;
       appId?: string;
       appSecret?: string;
@@ -73,7 +71,6 @@ profile
 profile
   .command('create <name>')
   .description('Create a profile from QR registration or existing app credentials')
-  .option('--agent <kind>', 'agent kind (claude, codex, or omp)')
   .option('--workspace <path>', 'initial working directory for this profile')
   .option('--app-id <id>', 'use an existing Lark/Feishu app instead of QR app creation')
   .option(
@@ -85,7 +82,6 @@ profile
     async (
       name: string,
       opts: {
-        agent?: string;
         workspace?: string;
         appId?: string;
         appSecret?: string;
@@ -172,7 +168,6 @@ program
     '--web-ui',
     'run the supervisor + web console as the background service (hosts all profiles) instead of a single profile',
   )
-  .option('--agent <kind>', 'agent kind for first-run profile bootstrap (claude, codex, or omp)')
   .option('--workspace <path>', 'initial working directory for first-run profile bootstrap')
   .option('--app-id <id>', 'use an existing Lark/Feishu app instead of QR app creation')
   .option(
@@ -184,7 +179,6 @@ program
     async (opts: {
       profile?: string;
       webUi?: boolean;
-      agent?: string;
       workspace?: string;
       appId?: string;
       appSecret?: string;

@@ -114,7 +114,6 @@ describe('profile-aware service commands', () => {
             tenant: 'feishu',
           },
         },
-        agentKind: 'codex',
       },
     });
     mocks.checkRuntimeLock.mockResolvedValue({ locked: false });
@@ -137,7 +136,6 @@ describe('profile-aware service commands', () => {
         pid: 12345,
         appId: 'cli_codex',
         profileName: 'codex-dev',
-        agentKind: 'codex',
         botName: 'Codex Bot',
       }),
     ]);
@@ -154,7 +152,6 @@ describe('profile-aware service commands', () => {
       1,
       expect.objectContaining({
         profile: 'codex-dev',
-        agent: undefined,
         workspace: undefined,
         appId: undefined,
         appSecret: undefined,
@@ -165,7 +162,7 @@ describe('profile-aware service commands', () => {
     expect(mocks.materializeEnvSecretForService).toHaveBeenCalledWith({ profile: 'codex-dev' });
     expect(mocks.adapter.start).toHaveBeenCalled();
     expect(lines).toContain(
-      '✓ 已启动  bot: Codex Bot (cli_codex)  agent: Codex CLI (codex)  进程: p1',
+      '✓ 已启动  bot: Codex Bot (cli_codex)  engine: Oh My Pi (omp)  进程: p1',
     );
   });
 
@@ -183,7 +180,6 @@ describe('profile-aware service commands', () => {
         kind: 'profile',
         target: '/tmp/lark-channel-home/registry/locks/profile/codex-dev.lock',
         profile: 'codex-dev',
-        agentKind: 'codex',
         pid: 2468,
         startedAt: '2026-05-26T10:50:33.082Z',
       },
@@ -194,7 +190,6 @@ describe('profile-aware service commands', () => {
         pid: 12345,
         appId: 'cli_codex',
         profileName: 'codex-dev',
-        agentKind: 'codex',
         botName: 'Codex Bot',
       }),
     ]);
@@ -227,7 +222,6 @@ describe('profile-aware service commands', () => {
         kind: 'profile',
         target: '/tmp/lark-channel-home/registry/locks/profile/codex-dev.lock',
         profile: 'codex-dev',
-        agentKind: 'codex',
         pid: 2468,
         startedAt: '2026-05-26T10:50:33.082Z',
       },
@@ -238,7 +232,6 @@ describe('profile-aware service commands', () => {
         pid: 2469,
         appId: 'cli_codex',
         profileName: 'codex-dev',
-        agentKind: 'codex',
         botName: 'Codex Bot',
       }),
     ]);
@@ -257,7 +250,6 @@ describe('profile-aware service commands', () => {
       kind: 'profile' as const,
       target: '/tmp/lark-channel-home/registry/locks/profile/codex-dev.lock',
       profile: 'codex-dev',
-      agentKind: 'codex' as const,
       pid: 2468,
       startedAt: '2026-05-26T10:50:33.082Z',
     };
@@ -271,7 +263,6 @@ describe('profile-aware service commands', () => {
         pid: 12345,
         appId: 'cli_codex',
         profileName: 'codex-dev',
-        agentKind: 'codex',
         botName: 'Codex Bot',
       }),
     ]);
@@ -300,7 +291,6 @@ describe('profile-aware service commands', () => {
         kind: 'app',
         target: '/tmp/lark-channel-home/registry/locks/app/cli_codex.lock',
         profile: 'codex-dev',
-        agentKind: 'codex',
         appId: 'cli_codex',
         pid: 2468,
         startedAt: '2026-05-26T10:50:33.085Z',
@@ -332,7 +322,6 @@ describe('profile-aware service commands', () => {
             tenant: 'feishu',
           },
         },
-        agentKind: 'claude',
       },
     });
     mocks.readRegistry.mockReturnValueOnce([]).mockReturnValue([
@@ -341,13 +330,11 @@ describe('profile-aware service commands', () => {
         pid: 12346,
         appId: 'cli_claude',
         profileName: 'claude',
-        agentKind: 'claude',
         botName: 'Claude Bot',
       }),
     ]);
 
     await runServiceStart({
-      agent: 'claude',
       workspace: '/repo',
       appId: 'cli_claude',
       appSecret: 'manual-secret',
@@ -358,7 +345,6 @@ describe('profile-aware service commands', () => {
       1,
       expect.objectContaining({
         profile: undefined,
-        agent: 'claude',
         workspace: '/repo',
         appId: 'cli_claude',
         appSecret: 'manual-secret',
@@ -519,7 +505,6 @@ describe('profile-aware service commands', () => {
         pid: 5252,
         appId: 'cli_codex',
         profileName: 'codex-dev',
-        agentKind: 'codex',
         botName: 'Supervisor Bot',
       }),
     ]);
@@ -541,7 +526,6 @@ describe('profile-aware service commands', () => {
         pid: 6262,
         appId: 'cli_codex',
         profileName: 'codex-dev',
-        agentKind: 'codex',
         botName: 'Restarted Bot',
       }),
     ]);
@@ -710,7 +694,6 @@ function processEntry(overrides: Partial<ProcessEntry>): ProcessEntry {
     appId: 'cli_test',
     tenant: 'feishu',
     profileName: 'claude',
-    agentKind: 'claude',
     configPath: '/tmp/config.json',
     startedAt: new Date().toISOString(),
     version: '0.1.32',

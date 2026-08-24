@@ -1,222 +1,76 @@
 import { describe, expect, it } from 'vitest';
-import { claudeCapability, codexCapability, ompCapability } from '../../../src/agent/capability';
-import type { AccessMode } from '../../../src/config/permissions';
-import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema';
-import {
-  evaluateRunPolicy,
-  type RunPolicyInput,
-  type ScopeContext,
-} from '../../../src/policy/run-policy';
+import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
+import { evaluateRunPolicy, type RunPolicyInput } from '../../../src/policy/run-policy';
 
-describe('run policy', () => {
-  it('rejects when the upstream access decision denies the actor', () => {
-    const result = evaluateRunPolicy({
-      ...baseInput(),
-      access: { ok: false, reason: 'denied-user' },
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      rejectReason: {
-        code: 'access-denied',
-      },
-    });
-  });
-
-  it('allows any resolved working directory because cwd is not an authorization boundary', () => {
-    const result = evaluateRunPolicy({
-      ...baseInput(),
-      requestedCwd: '/outside/project',
-      cwdRealpath: '/outside/project',
-      profileConfig: profile(),
-    });
-
-    expect(result.ok).toBe(true);
-  });
-
-  it.each([
-    ['full', 'danger-full-access', 'bypassPermissions'],
-    ['workspace', 'workspace-write', 'acceptEdits'],
-    ['read-only', 'read-only', 'plan'],
-  ] as const)(
-    'maps %s access to Codex sandbox and Claude permission mode',
-    (accessMode, sandbox, permissionMode) => {
-      const result = evaluateRunPolicy(
-        baseInput({
-          profileConfig: profile({
-            permissions: {
-              defaultAccess: accessMode,
-              maxAccess: accessMode,
-            },
-          }),
-        }),
-      );
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) throw new Error('expected run policy to allow');
-      expect(result.accessMode).toBe(accessMode);
-      expect(result.sandbox).toBe(sandbox);
-      expect(result.permissionMode).toBe(permissionMode);
-    },
-  );
-
-  it('rejects restricted access for OMP because RPC has no enforceable sandbox', () => {
-    const result = evaluateRunPolicy(
-      baseInput({
-        capability: ompCapability(),
-        profileConfig: profile({
-          permissions: { defaultAccess: 'workspace', maxAccess: 'workspace' },
-        }),
-      }),
-    );
-
-    expect(result).toMatchObject({
-      ok: false,
-      rejectReason: { code: 'unsupported-agent-access' },
-    });
-  });
-
-  it('does not raise access above capability maxAccess', () => {
-    const result = evaluateRunPolicy({
-      ...baseInput({
-        profileConfig: profile({
-          agentKind: 'codex',
-          permissions: { defaultAccess: 'workspace', maxAccess: 'workspace' },
-        }),
-      }),
-      capability: codexCapability(
-        profile({
-          agentKind: 'codex',
-          permissions: { defaultAccess: 'read-only', maxAccess: 'read-only' },
-        }),
-      ),
-    });
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('expected run policy to allow');
-    expect(result.accessMode).toBe('read-only');
-    expect(result.sandbox).toBe('read-only');
-    expect(result.permissionMode).toBe('plan');
-  });
-
-  it('returns an expiry and a stable policy fingerprint for accepted runs', () => {
-    const input = baseInput({ now: 1000 });
-    const result = evaluateRunPolicy(input);
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('expected run policy to allow');
-    expect(result.expiresAt).toBeGreaterThan(1000);
-    expect(result.policyFingerprint).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    expect(evaluateRunPolicy(input)).toMatchObject({
-      ok: true,
-      policyFingerprint: result.policyFingerprint,
-    });
-  });
-
-  it('fingerprints the attachment policy shape instead of concrete run attachments', () => {
-    const noAttachment = evaluateRunPolicy(baseInput());
-    const withAcceptedImage = evaluateRunPolicy({
-      ...baseInput(),
-      attachments: [
-        {
-          kind: 'image',
-          requiredness: 'optional',
-          decision: 'accepted',
-          originalName: 'sensitive-name.png',
-          size: 123,
-          hash: 'hash-a',
-          path: '/profile/media/hash-a.png',
-        },
-      ],
-    });
-    const stricterPolicy = evaluateRunPolicy({
-      ...baseInput({
-        profileConfig: profile({
-          attachments: { maxFileBytes: 1 },
-        }),
-      }),
-    });
-
-    expect(noAttachment.ok).toBe(true);
-    expect(withAcceptedImage.ok).toBe(true);
-    expect(stricterPolicy.ok).toBe(true);
-    if (!noAttachment.ok || !withAcceptedImage.ok || !stricterPolicy.ok) {
-      throw new Error('expected run policy to allow');
-    }
-    expect(withAcceptedImage.policyFingerprint).toBe(noAttachment.policyFingerprint);
-    expect(stricterPolicy.policyFingerprint).not.toBe(noAttachment.policyFingerprint);
-  });
-
-  it('fails closed for unverified folder resource bindings', () => {
-    const result = evaluateRunPolicy({
-      ...baseInput(),
-      scope: scope({
-        resourceBindings: [{ kind: 'folder', id: 'fld_secret', verified: false }],
-      }),
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      rejectReason: {
-        code: 'folder-allowlist-unverified',
-      },
-    });
-  });
+const profileConfig = createDefaultProfileConfig({
+  accounts: { app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' } },
+  omp: { binaryPath: '/usr/local/bin/omp' },
 });
 
-function baseInput(overrides: Partial<RunPolicyInput> = {}): RunPolicyInput {
-  const profileConfig = overrides.profileConfig ?? profile();
+function input(overrides: Partial<RunPolicyInput> = {}): RunPolicyInput {
   return {
-    scope: scope(),
+    scope: { source: 'im', actorId: 'ou_user', chatId: 'oc_chat', chatType: 'p2p' },
     attachments: [],
     prompt: 'hello',
-    requestedCwd: '/repo/project',
-    cwdRealpath: '/repo/project',
+    requestedCwd: '/repo',
+    cwdRealpath: '/repo',
     access: { ok: true, reason: 'allowed-user' },
-    capability: claudeCapability(profileConfig),
     profileConfig,
-    now: 1000,
+    now: 1_000,
     ...overrides,
   };
 }
 
-function profile(
-  options: {
-    agentKind?: 'claude' | 'codex';
-    permissions?: {
-      defaultAccess: AccessMode;
-      maxAccess: AccessMode;
-    };
-    attachments?: Partial<ProfileConfig['attachments']>;
-  } = {},
-) {
-  const cfg = createDefaultProfileConfig({
-    agentKind: options.agentKind ?? 'claude',
-    accounts: {
-      app: {
-        id: 'cli_test',
-        secret: '${APP_SECRET}',
-        tenant: 'feishu',
-      },
-    },
-    ...(options.agentKind === 'codex' ? { codex: { binaryPath: '/usr/local/bin/codex' } } : {}),
-    permissions: options.permissions,
+describe('OMP run policy', () => {
+  it('allows an authorized run with full local access', () => {
+    const result = evaluateRunPolicy(input());
+    expect(result).toMatchObject({
+      ok: true,
+      accessMode: 'full',
+      prompt: 'hello',
+      cwdRealpath: '/repo',
+      expiresAt: 301_000,
+    });
+    expect(result.ok && result.policyFingerprint).toEqual(expect.any(String));
   });
-  return {
-    ...cfg,
-    attachments: {
-      ...cfg.attachments,
-      ...options.attachments,
-    },
-    workspaces: cfg.workspaces,
-  };
-}
 
-function scope(overrides: Partial<ScopeContext> = {}): ScopeContext {
-  return {
-    source: 'im',
-    chatId: 'oc_chat',
-    actorId: 'ou_user',
-    ...overrides,
-  };
-}
+  it('rejects denied access', () => {
+    expect(
+      evaluateRunPolicy(input({ access: { ok: false, reason: 'denied-user' } })),
+    ).toMatchObject({ ok: false, rejectReason: { code: 'access-denied' } });
+  });
+
+  it('rejects an unverified folder binding', () => {
+    expect(
+      evaluateRunPolicy(
+        input({
+          scope: {
+            source: 'comment',
+            actorId: 'ou_user',
+            resourceBindings: [{ kind: 'folder', id: 'fld_1', verified: false }],
+          },
+        }),
+      ),
+    ).toMatchObject({ ok: false, rejectReason: { code: 'folder-allowlist-unverified' } });
+  });
+
+  it('rejects a required attachment that was not accepted', () => {
+    expect(
+      evaluateRunPolicy(
+        input({
+          attachments: [{ kind: 'file', requiredness: 'required', decision: 'rejected' }],
+        }),
+      ),
+    ).toMatchObject({ ok: false, rejectReason: { code: 'required-attachment-rejected' } });
+  });
+
+  it('changes the fingerprint when the resource scope changes', () => {
+    const first = evaluateRunPolicy(input());
+    const second = evaluateRunPolicy(
+      input({ scope: { source: 'im', actorId: 'ou_user', chatId: 'oc_other', chatType: 'p2p' } }),
+    );
+    expect(first.ok && second.ok && first.policyFingerprint).not.toBe(
+      second.ok && second.policyFingerprint,
+    );
+  });
+});

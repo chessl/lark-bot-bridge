@@ -85,10 +85,9 @@ describe('checkMeetingPreflight', () => {
     await saveRootConfig(
       {
         schemaVersion: 2,
-        activeProfile: 'claude',
+        activeProfile: 'work',
         profiles: {
-          claude: createDefaultProfileConfig({
-            agentKind: 'claude',
+          work: createDefaultProfileConfig({
             accounts: { app: { id: 'cli_test', secret: 'app-secret', tenant: 'feishu' } },
           }),
         },
@@ -108,7 +107,7 @@ describe('checkMeetingPreflight', () => {
     const createClient: PreflightClientFactory = vi.fn(() => ({ request }));
 
     const result = await checkMeetingPreflight(
-      { profile: 'claude', rootDir, probeUserId: 'ou_owner' },
+      { profile: 'work', rootDir, probeUserId: 'ou_owner' },
       createClient,
     );
 
@@ -128,7 +127,7 @@ describe('checkMeetingPreflight', () => {
       }),
     });
     const result = await checkMeetingPreflight(
-      { profile: 'claude', rootDir, probeUserId: 'ou_owner' },
+      { profile: 'work', rootDir, probeUserId: 'ou_owner' },
       createClient,
     );
     expect(result.status).toBe('unknown');
@@ -142,7 +141,7 @@ describe('checkMeetingPreflight', () => {
       }),
     });
     const result = await checkMeetingPreflight(
-      { profile: 'claude', rootDir, probeUserId: 'ou_owner' },
+      { profile: 'work', rootDir, probeUserId: 'ou_owner' },
       createClient,
     );
     expect(result.status).toBe('not-in-beta');

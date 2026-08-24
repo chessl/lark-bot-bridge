@@ -7,23 +7,13 @@ import {
   saveAccessConfig,
   savePreferencesConfig,
 } from '../config/config-ops';
-import type {
-  AgentKind,
-  MeetingConfig,
-  ProfileAccess,
-  ProfileMode,
-} from '../config/profile-schema';
+import type { MeetingConfig, ProfileAccess, ProfileMode } from '../config/profile-schema';
 import { loadRootConfig, runtimeProfileConfig } from '../config/profile-store';
 import {
   type AppPreferences,
-  type CotMessagesMode,
-  getCotMessages,
   getMaxConcurrentRuns,
-  getMessageReplyMode,
   getRequireMentionInGroup,
   getRunIdleTimeoutMs,
-  getShowToolCalls,
-  type MessageReplyMode,
 } from '../config/schema';
 import { log } from '../core/logger';
 import {
@@ -37,6 +27,7 @@ import {
   logoutUser,
   searchUserChats,
   startDeviceLogin,
+  type UserChatsPage,
 } from '../lark-native/user-im';
 import { isMeetingNo } from '../meeting/api';
 import {
@@ -55,13 +46,9 @@ export class ApiError extends HttpError {}
 /** The settings payload the SPA reads and writes. */
 export interface ConfigView {
   profile: string;
-  agentKind: AgentKind;
   mode: ProfileMode;
   model: string;
   models: { value: string; label: string }[];
-  messageReply: MessageReplyMode;
-  showToolCalls: boolean;
-  cotMessages: CotMessagesMode;
   maxConcurrentRuns: number;
   runIdleTimeoutMinutes: number;
   requireMentionInGroup: boolean;
@@ -79,17 +66,12 @@ export interface ConfigView {
 }
 
 export function buildConfigView(state: MutableProfileState, live = false): ConfigView {
-  const agentKind = state.profileConfig.agentKind;
   const ms = getRunIdleTimeoutMs(state.cfg);
   return {
     profile: state.profile,
-    agentKind,
     mode: state.profileConfig.mode,
-    model: normalizeModelSelection(agentKind, state.cfg.preferences?.model),
-    models: supportedModels(agentKind),
-    messageReply: getMessageReplyMode(state.cfg),
-    showToolCalls: getShowToolCalls(state.cfg),
-    cotMessages: getCotMessages(state.cfg),
+    model: normalizeModelSelection(state.cfg.preferences?.model),
+    models: supportedModels(),
     maxConcurrentRuns: getMaxConcurrentRuns(state.cfg),
     runIdleTimeoutMinutes: ms ? Math.round(ms / 60_000) : 0,
     requireMentionInGroup: getRequireMentionInGroup(state.cfg),
@@ -127,7 +109,6 @@ export async function loadProfileState(
 export function buildStatus(rt: UiRuntime, channel: LarkChannel | undefined, version: string) {
   return {
     profile: rt.profile,
-    agentKind: rt.profileConfig.agentKind,
     mode: rt.profileConfig.mode,
     version,
     connected: Boolean(channel?.botIdentity?.name),
@@ -207,29 +188,17 @@ interface ParsedConfig {
  */
 function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfig {
   const fv = asRecord(body);
-  const agentKind = state.profileConfig.agentKind;
 
   const mode: ProfileMode =
     fv.mode === 'team' || fv.mode === 'personal' ? fv.mode : state.profileConfig.mode;
 
   const rawModel = typeof fv.model === 'string' ? fv.model : '';
-  const modelValid =
-    rawModel !== '' && supportedModels(agentKind).some((m) => m.value === rawModel);
+  const modelValid = rawModel !== '' && supportedModels().some((m) => m.value === rawModel);
   const modelSelection = modelValid
     ? rawModel
-    : normalizeModelSelection(agentKind, state.cfg.preferences?.model);
+    : normalizeModelSelection(state.cfg.preferences?.model);
   const model = modelSelection === DEFAULT_MODEL ? undefined : modelSelection;
 
-  const messageReply: MessageReplyMode =
-    fv.messageReply === 'markdown' || fv.messageReply === 'text' || fv.messageReply === 'card'
-      ? fv.messageReply
-      : getMessageReplyMode(state.cfg);
-  const showToolCalls =
-    typeof fv.showToolCalls === 'boolean' ? fv.showToolCalls : getShowToolCalls(state.cfg);
-  const cotMessages: CotMessagesMode =
-    fv.cotMessages === 'brief' || fv.cotMessages === 'detailed' || fv.cotMessages === 'off'
-      ? fv.cotMessages
-      : getCotMessages(state.cfg);
   const maxConcurrentRuns =
     fv.maxConcurrentRuns === undefined
       ? getMaxConcurrentRuns(state.cfg)
@@ -264,9 +233,6 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
     nextPreferences: {
       ...(state.cfg.preferences ?? {}),
       model,
-      messageReply,
-      showToolCalls,
-      cotMessages,
       maxConcurrentRuns,
       runIdleTimeoutMinutes,
     },
@@ -534,7 +500,7 @@ export async function userChatsView(
   opts: { query?: string; pageToken?: string } = {},
 ): Promise<{ chats: UserChatView[]; nextPageToken?: string; botKnown: boolean }> {
   const query = (opts.query ?? '').trim();
-  let page;
+  let page: UserChatsPage;
   try {
     page = query
       ? await searchUserChats({ profile, rootDir }, { query, pageToken: opts.pageToken })

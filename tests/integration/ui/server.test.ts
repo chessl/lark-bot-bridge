@@ -46,7 +46,6 @@ function stubSupervisor(): UiSupervisor {
     list: () =>
       [...online.keys()].map((p) => ({
         profile: p,
-        agentKind: 'claude' as const,
         online: true,
         pid: process.pid,
         startedAt: new Date().toISOString(),
@@ -83,25 +82,21 @@ beforeEach(async () => {
   rootDir = await mkdtemp(join(tmpdir(), 'bridge-ui-'));
   roots.push(rootDir);
   configPath = join(rootDir, 'config.json');
-  await mkdir(join(rootDir, 'profiles', 'claude'), { recursive: true });
+  await mkdir(join(rootDir, 'profiles', 'personal'), { recursive: true });
   await saveRootConfig(
-    createRootConfig(
-      'claude',
-      createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } }),
-    ),
+    createRootConfig('personal', createDefaultProfileConfig({ accounts: { app } })),
     configPath,
   );
   // second profile 'work' on disk (offline)
   const rc = (await loadRootConfig(configPath))!;
   await mkdir(join(rootDir, 'profiles', 'work'), { recursive: true });
   rc.profiles.work = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: { app: { ...app, id: 'cli_work' } },
   });
   await saveRootConfig(rc, configPath);
 
   online = new Map();
-  online.set('claude', await makeControls('claude')); // claude online, work offline
+  online.set('personal', await makeControls('personal')); // personal online, work offline
 
   handle = await startUiServer({ supervisor: stubSupervisor(), version: 'test', rootDir });
   base = `http://127.0.0.1:${handle.port}`;
@@ -135,7 +130,7 @@ describe('ui server (supervisor-backed)', () => {
     expect(status).toMatchObject({
       hosted: true,
       version: 'test',
-      activeProfile: 'claude',
+      activeProfile: 'personal',
       online: 1,
     });
 
@@ -154,10 +149,10 @@ describe('ui server (supervisor-backed)', () => {
     );
     expect(view.mode).toBe('team');
     expect(view.live).toBe(true);
-    expect(online.get('claude').profileConfig.mode).toBe('team'); // in-memory controls updated
+    expect(online.get('personal').profileConfig.mode).toBe('team'); // in-memory controls updated
 
     const saved = JSON.parse(await readFile(configPath, 'utf8'));
-    expect(saved.profiles.claude.mode).toBe('team');
+    expect(saved.profiles.personal.mode).toBe('team');
   });
 
   it('reads and writes an offline profile on disk (deferred, live=false)', async () => {
@@ -170,7 +165,7 @@ describe('ui server (supervisor-backed)', () => {
     expect(saved.live).toBe(false);
     const disk = JSON.parse(await readFile(configPath, 'utf8'));
     expect(disk.profiles.work.mode).toBe('team');
-    expect(disk.profiles.claude.mode).toBe('personal');
+    expect(disk.profiles.personal.mode).toBe('personal');
   });
 
   it('adds and removes access entries', async () => {
@@ -199,7 +194,9 @@ describe('ui server (supervisor-backed)', () => {
       }),
     );
     expect(set.chatRequireMention).toEqual({ oc_grp: false });
-    expect(online.get('claude').profileConfig.access.chatRequireMention).toEqual({ oc_grp: false });
+    expect(online.get('personal').profileConfig.access.chatRequireMention).toEqual({
+      oc_grp: false,
+    });
 
     // Clear it (follow global) with null.
     const cleared = await json(
@@ -231,22 +228,22 @@ describe('ui server (supervisor-backed)', () => {
   it('lists profiles with online flag from the supervisor', async () => {
     const { profiles } = await json(await get('/api/profiles', handle.token));
     const byName = Object.fromEntries(profiles.map((p: { name: string }) => [p.name, p]));
-    expect(byName.claude.running).toBe(true);
+    expect(byName.personal.running).toBe(true);
     expect(byName.work.running).toBe(false);
   });
 
   it('lists online channels from the supervisor', async () => {
     const { bots } = await json(await get('/api/bots', handle.token));
-    expect(bots.map((b: { profileName: string }) => b.profileName)).toEqual(['claude']);
+    expect(bots.map((b: { profileName: string }) => b.profileName)).toEqual(['personal']);
   });
 
   it('starts and stops a profile via the supervisor', async () => {
     expect((await post('/api/profiles/start', handle.token, { profile: 'work' })).status).toBe(200);
     expect(online.has('work')).toBe(true);
-    expect((await post('/api/profiles/stop', handle.token, { profile: 'claude' })).status).toBe(
+    expect((await post('/api/profiles/stop', handle.token, { profile: 'personal' })).status).toBe(
       200,
     );
-    expect(online.has('claude')).toBe(false);
+    expect(online.has('personal')).toBe(false);
   });
 
   it('returns 404 for an unknown QR registration session', async () => {

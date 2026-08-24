@@ -1,6 +1,6 @@
 # lark-bot-bridge
 
-A lightweight bot that bridges Feishu / Lark messenger with your local Claude Code, Codex CLI, or Oh My Pi (OMP). Run one command, scan a QR code to bind a PersonalAgent app, and talk to your local coding agent from chat.
+A lightweight bot that connects Feishu / Lark messenger to local Oh My Pi (OMP). OMP is the only Run engine. Run one command, scan a QR code to bind a PersonalAgent app, and talk to OMP from chat.
 
 [中文 README](./README.zh.md)
 
@@ -8,9 +8,8 @@ For a product walkthrough, see the [Feishu document](https://larkcommunity.feish
 
 ## What it does
 
-- Forwards Feishu / Lark messages to local Claude Code, Codex CLI, or OMP. Send a DM directly, or `@bot` in a group.
-- **Streaming card**: text replies and tool calls update on one Lark card in real time.
-- **COT process messages**: optionally send a process message with agent progress text and tool calls, then send the final answer separately.
+- Forwards Feishu / Lark messages to local OMP. Send a DM directly, or `@bot` in a group.
+- **One instant-message Reply**: each started OMP Run updates one CardKit Reply in place with safe progress, the final answer, termination, and measured runtime facts.
 - **Session continuity**: each chat, topic, or document comment thread keeps its own session.
 - **Queueing and batching**: messages sent in quick succession are handled together; messages sent during a run are queued for the next turn, while commands like `/new`, `/cd`, `/ws use`, and `/stop` can interrupt the current task.
 - **Multiple workspaces**: use `/cd` to switch the current project, and `/ws` to save and reuse common project directories.
@@ -20,10 +19,7 @@ For a product walkthrough, see the [Feishu document](https://larkcommunity.feish
 ## Prerequisites
 
 - Node.js **>= 20.12.0**
-- At least one local agent installed and logged in:
-  - Claude Code: `claude`, see https://docs.anthropic.com/en/docs/claude-code/quickstart
-  - Codex CLI: `codex`, see https://developers.openai.com/codex/cli
-  - Oh My Pi: `omp`
+- Oh My Pi installed and logged in: `omp`. No Claude Code, Codex, or generic adapter setup is supported.
 - A Feishu / Lark **PersonalAgent** app. The first-run QR wizard can create and bind one for you.
 
 ## Install
@@ -45,8 +41,7 @@ The first run opens a QR-code wizard:
 1. A QR code renders in your terminal.
 2. Scan it with the Feishu / Lark app.
 3. Pick or create a PersonalAgent app.
-4. If prompted, choose which agent to initialize.
-5. Config is written to `~/.lark-bot-bridge/config.json`.
+4. Config is written to `~/.lark-bot-bridge/config.json` with the resolved OMP binary.
 
 You do not need to choose a project directory up front. The bridge creates a profile-managed default working directory; after startup, send `/cd <path>` in Feishu / Lark to switch to a real project.
 
@@ -88,21 +83,21 @@ Platform mapping:
 
 Daemon logs are under `~/.lark-bot-bridge/profiles/<profile>/logs/daemon/`.
 
-### Multiple profiles: Claude, Codex, and OMP
+### Multiple OMP profiles
 
-By default, the bridge starts with the currently selected profile. Use `profile use <name>` to change it. Each profile keeps its own app credentials, sessions, working directories, and logs. Create multiple profiles only when you need to connect multiple PersonalAgent apps or run different local agents as separate bots:
+By default, the bridge starts the active profile. Use `profile use <name>` to change it. Each profile keeps its own PersonalAgent app credentials, OMP sessions, working directories, and logs. Create multiple profiles only when you need to connect multiple apps as separate OMP bots:
 
 ```bash
-lark-bot-bridge start --profile claude --agent claude
-lark-bot-bridge start --profile codex --agent codex
-lark-bot-bridge start --profile omp --agent omp
+lark-bot-bridge profile create work
+lark-bot-bridge profile create personal
+lark-bot-bridge start --profile work
 ```
 
-For example, to restart only the Codex bot:
+To restart only one profile:
 
 ```bash
-lark-bot-bridge restart --profile codex
-lark-bot-bridge status --profile codex
+lark-bot-bridge restart --profile work
+lark-bot-bridge status --profile work
 ```
 
 ## Commands
@@ -110,18 +105,17 @@ lark-bot-bridge status --profile codex
 ### Host CLI
 
 ```text
-lark-bot-bridge run [--profile <name>] [--agent claude|codex|omp] [--workspace <path>] [-c <config>]
+lark-bot-bridge run [--profile <name>] [--workspace <path>] [-c <config>]
 lark-bot-bridge ps
 lark-bot-bridge kill <id|#>
 lark-bot-bridge --help
 ```
 
-`profile use <name>` changes the profile used by later default starts. Use these profile management commands when running separate local-agent bots, connecting multiple PersonalAgent apps, or doing scripted deployment:
+`profile use <name>` changes the profile used by later default starts. Use these commands to connect separate PersonalAgent apps or for scripted deployment:
 
 ```bash
-lark-bot-bridge profile create claude --agent claude
-lark-bot-bridge profile create codex --agent codex
-lark-bot-bridge profile create omp --agent omp
+lark-bot-bridge profile create work
+lark-bot-bridge profile create personal
 lark-bot-bridge profile list
 lark-bot-bridge profile use <name>
 lark-bot-bridge profile remove <name>
@@ -132,7 +126,6 @@ lark-bot-bridge profile export <name> --include-secrets --yes
 
 `profile remove` archives local state by default, including the active profile. If other profiles remain, the bridge switches to the next one; if it was the last profile, the root config is cleared so the same name can be created again. `--purge --yes` permanently deletes local state. `profile export` redacts app secrets by default; `--include-secrets --yes` includes sensitive config.
 
-If a profile was created with the wrong agent kind, stop or unregister any matching background service first, then run `profile remove <name>` and recreate it with the intended `--agent`.
 
 ### Slash commands inside Feishu / Lark
 
@@ -144,15 +137,15 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/ws save <name>` | Save the current working directory as a named workspace |
 | `/ws use <name>` | Switch to a named workspace |
 | `/ws remove <name>` | Delete a named workspace |
-| `/resume` | Resume compatible history for the same agent, working directory, and permission mode |
-| `/status` | Show profile, agent, working directory, session, and run state |
-| `/config` | Adjust presentation preferences and access settings |
+| `/resume` | Resume the current OMP session for the same working directory and policy |
+| `/status` | Show profile, OMP engine, working directory, session, and run state |
+| `/config` | Adjust the OMP model, run limits, meeting behavior, and access settings |
 | `/invite user @name` | Allow a user to use the bot in DMs |
 | `/invite admin @name` | Add an access-control admin |
 | `/invite group` | Allow the current group to use the bot |
 | `/invite all group` | Allow all groups the bot has joined |
 | `/remove user @name`, `/remove admin @name`, `/remove group` | Remove access entries |
-| `/stop` | Stop the current run, including the card stop button |
+| `/stop` | Stop the current Run |
 | `/timeout [N\|off\|default]` | Set or clear the current session idle watchdog |
 | `/ps` | List local bridge processes |
 | `/exit <id\|#>` | Stop a bridge process |
@@ -162,19 +155,36 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 
 DMs do not require an @ mention. Groups and topic groups require `@bot` by default; `@all` is ignored. Cloud-doc comments in supported document types run when the bot is mentioned.
 
-## Reply Display and COT
+## Unified instant-message Reply
 
-`/config` controls three presentation settings:
+Every started OMP Run from an instant message has one production Reply path. The bridge replies to the last message in the accepted Message Batch before consuming OMP events, then updates that same CardKit bubble. Private chats and regular groups keep the native message reference. Topics and explicit threaded Invocations stay in their authoritative Topic or thread.
 
-- **Message reply mode**: `message card` streams the final reply; `plain text` sends once after the run finishes.
-- **Tool-call display**: controls whether tool blocks appear in the final card / markdown reply.
-- **COT process message**: `off` sends only the final reply; `brief` first sends a COT message with agent progress text and tool summaries; `detailed` also includes tool args and truncated output.
+While a Run is active, the Reply expands safe Reasoning and tool-status sections. After Run Termination, both sections collapse and the card keeps the Final Reply, termination state, model/effort/context facts, and available RunMetrics. Hidden thinking, tool inputs and outputs, commands, paths, queries, raw errors, provider details, and fallback reasons are never shown. The Reply keeps the latest 12 Reasoning entries and 20 tool rows.
 
-When COT is enabled, the bridge splits the process view and final answer into two messages. The COT message is for tracing what the agent did; the final answer is still generated from the agent's raw text, without heuristic bridge-side filtering. If an agent emits final-answer text as ordinary stream text, that text can also appear in the COT process message.
+Each card stays within CardKit's 30 KB and 200-element limits. When necessary, the bridge removes the oldest Reasoning entries first, then the oldest tool rows. If the Final Reply is still too large, it truncates on a valid UTF-8 boundary and appends `内容过长，已截断`. It never splits one Run into another Reply.
+
+Commands and Run Rejections use direct ordinary replies. Meeting, document-comment, and card-action Invocations keep their existing delivery behavior and do not enter the unified instant-message Reply path.
+
+### Delivery failure and restart recovery
+
+Run Termination and Reply delivery are separate outcomes. If the known bubble cannot be updated or closed, the bridge records a **Delivery Failure** in structured logs and does not send a replacement message. A successful OMP Run therefore does not prove that its terminal Reply reached Feishu.
+
+The profile-local delivery journal records active delivery identity and at most one exact unresolved request. Writes are atomic with file mode `0600`. After a bridge restart, the bridge exact-retries an unknown initial submission only inside Feishu's one-hour UUID deduplication window. It terminalizes a known message in the same bubble only inside the 14-day update window, marking the disconnected Run as interrupted. An unsubmitted entry is discarded. Expired, corrupt, or ambiguous state fails closed, so recovery never guesses and never creates a second bubble.
+
+### Client support
+
+| Client | Unified Reply support |
+|---|---|
+| China Feishu PC 7.32 or newer | Supported target |
+| China Feishu PC older than 7.32 | Not supported |
+| China Feishu iOS or Android | Not supported |
+| International Lark clients | Not supported |
+
+Meeting, document-comment, command-card, and card-action behavior is outside this unified Reply client contract.
 
 ## Native Lark tools and user identity
 
-Every agent run receives a run-scoped `lark_bridge` Streamable HTTP MCP endpoint bound to loopback and protected by a one-time bearer token. Bot reads, message reads, Docx blocks, and CardKit sends use the bridge's in-process Lark SDK client; approved write tools confirm in the originating Lark conversation.
+Every OMP run receives a run-scoped `lark_bridge` Streamable HTTP MCP endpoint bound to loopback and protected by a one-time bearer token. Bot reads, message reads, Docx blocks, and CardKit sends use the bridge's in-process Lark SDK client; approved write tools confirm in the originating Lark conversation.
 
 Personal-profile private chats may start Lark device OAuth through the native tools. Token metadata is profile-local, while access and refresh tokens stay in the OS keychain and refresh under a profile/app/user lock. Team profiles, groups, topics, document comments, and meeting runs never receive user identity.
 
@@ -187,38 +197,27 @@ This is a profile-field snippet. Do not replace the whole `config.json` with it;
 ```json
 {
   "workspaces": {
-    "default": "/Users/me/.lark-bot-bridge-workspaces/claude/default"
+    "default": "/Users/me/.lark-bot-bridge-workspaces/omp/default"
   }
 }
 ```
 
-The bridge checks that a selected directory exists, is a directory, and is not an overly broad location such as `/`, the home root, a system directory, or a temp root. The working directory is only the current directory for an agent run. It is not a filesystem sandbox; actual file access still depends on the local agent process and its permission mode.
+The bridge checks that a selected directory exists, is a directory, and is not an overly broad location such as `/`, the home root, a system directory, or a temp root. OMP RPC runs with `yolo` approval mode, so the working directory is a current directory, not a filesystem sandbox.
 
-## Permission modes
+## OMP profile configuration
 
-The recommended user-facing profile config is `permissions.defaultAccess` and `permissions.maxAccess`. New profiles default to `full` for both values so the bridge can keep local tools, authorization flows, file writes, and other agent features fully usable. To tighten a profile, set one or both values to `workspace` or `read-only`; stricter modes can limit local tool execution, login/authorization flows, file writes, and similar capabilities.
-
-This is a profile-field snippet. Do not replace the whole `config.json` with it; edit the matching profile's `permissions` field.
+Every profile has one OMP runtime configuration. `binaryPath` is resolved during bootstrap; `profile` is optional and selects an OMP profile:
 
 ```json
 {
-  "permissions": {
-    "defaultAccess": "full",
-    "maxAccess": "full"
+  "omp": {
+    "binaryPath": "/usr/local/bin/omp",
+    "profile": "work"
   }
 }
 ```
 
-Mode mapping:
-
-| Bridge access | Claude permission mode | Codex mode | OMP RPC mode |
-|---|---|---|---|
-| `full` | `bypassPermissions` | `danger-full-access` | `yolo` |
-| `workspace` | `acceptEdits` | `workspace-write` | unsupported |
-| `read-only` | `plan` | `read-only` | unsupported |
-
-
-OMP profiles currently require `defaultAccess: "full"` because OMP RPC does not expose an enforceable workspace sandbox. The bridge rejects restricted OMP runs rather than silently weakening the configured policy.
+Set `LARK_CHANNEL_OMP_BIN` before profile creation to bootstrap from a non-default OMP binary. There is no agent selector or alternate runtime.
 
 ## Data directories
 
@@ -226,12 +225,13 @@ OMP profiles currently require `defaultAccess: "full"` because OMP RPC does not 
 |---|---|
 | `~/.lark-bot-bridge/config.json` | Root config with profiles and active profile |
 | `~/.lark-bot-bridge/profiles/<profile>/sessions.json` | Session state |
-| `~/.lark-bot-bridge/profiles/<profile>/sessions.json.catalog.json` | Agent-aware session catalog |
+| `~/.lark-bot-bridge/profiles/<profile>/sessions.json.catalog.json` | OMP session catalog |
 | `~/.lark-bot-bridge/profiles/<profile>/workspaces.json` | Current and named workspace bindings |
 | `~/.lark-bot-bridge/profiles/<profile>/secrets.enc` | Profile-local encrypted secrets |
 | `~/.lark-bot-bridge/profiles/<profile>/user-auth.json` | User OAuth metadata; tokens remain in the OS keychain |
 | `~/.lark-bot-bridge/profiles/<profile>/media/` | Attachment cache |
 | `~/.lark-bot-bridge/profiles/<profile>/logs/` | Structured run logs |
+| `~/.lark-bot-bridge/profiles/<profile>/active-deliveries.json` | Owner-only journal for exact Reply delivery and restart recovery |
 | `~/.lark-bot-bridge/registry/processes.json` | Local process registry |
 | `~/.lark-bot-bridge/registry/locks/` | Profile and app locks |
 
@@ -279,8 +279,10 @@ If you'd rather not do it inside Feishu, `/invite` and `/config` write the match
 {
   "schemaVersion": 2,
   "profiles": {
-    "claude": {
-      "agentKind": "claude",
+    "work": {
+      "omp": {
+        "binaryPath": "/usr/local/bin/omp"
+      },
       "access": {
         "allowedUsers": ["ou_xxxxxxxxxxxxx"],
         "allowedChats": ["oc_xxxxxxxxxxxxx"],
@@ -306,9 +308,9 @@ Cloud-doc comments do not need a separate workspace binding or document allowlis
 
 ## FAQ
 
-**The bot stays silent or the local CLI never replies.** Usually the local `claude`, `codex`, or `omp` CLI is not logged in, or the current session points to a working directory that no longer exists. Send `/status` to inspect; `/new` often fixes it by starting a fresh session.
+**The bot stays silent or OMP never replies.** Usually `omp` is not logged in, or the current session points to a working directory that no longer exists. Send `/status` to inspect; `/new` often fixes it by starting a fresh session.
 
-**The agent subprocess looks frozen (card stuck on the last frame).** The bridge supports an idle watchdog: if the agent emits nothing for N minutes, the process is killed and the card is annotated with the auto-termination reason. Disabled by default. Enable with `/config` globally, or `/timeout 10` for the current session; `/timeout off` disables it for the session; `/timeout default` clears the session override.
+**The Reply is stuck on an old frame.** Check the structured profile log for `Delivery Failure` or recovery events. The bridge never sends a second bubble after an uncertain or known submission. On restart it updates a recoverable existing bubble as interrupted; it discards unsubmitted state and fails closed on expired or corrupt journals.
 
 **The agent says it cannot see an image I sent.** Upgrade to the latest version. Releases before 0.1.0 had a filename-dedup bug.
 

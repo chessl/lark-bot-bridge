@@ -1,4 +1,4 @@
-import type { AgentAdapter } from '../../src/agent/types';
+import type { OmpRunEngine } from '../../src/agent/types';
 import { ActiveRuns } from '../../src/bot/active-runs';
 import { ProcessPool } from '../../src/bot/process-pool';
 import { ScopedRuns } from '../../src/bot/run-flow';
@@ -6,7 +6,7 @@ import type { ProfileConfig } from '../../src/config/profile-schema';
 import type { WorkspaceStore } from '../../src/workspace/store';
 
 export function createTestScopedRuns(input: {
-  agent: AgentAdapter;
+  agent: OmpRunEngine;
   workspaces: WorkspaceStore;
   profileConfig: () => ProfileConfig;
   activeRuns?: ActiveRuns;

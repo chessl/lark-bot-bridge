@@ -21,7 +21,7 @@ export interface UnitInputs {
   /** Service id (profile name, or the reserved supervisor id) — drives the
    * unit name and log paths. */
   profile: string;
-  /** CLI args after the entry path, e.g. `['run', '--profile', 'claude']` or
+  /** CLI args after the entry path, e.g. `['run', '--profile', 'omp']` or
    * `['run', '--web-ui']`. */
   runArgs: string[];
   /** Root directory for config/profile state. */

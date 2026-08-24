@@ -1,7 +1,10 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { OmpAdapter } from '../../../src/agent/omp/adapter';
+import { OmpDeliveryJournal } from '../../../src/bot/omp-delivery-journal';
+import type { Controls } from '../../../src/commands';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import {
   createRootConfig,
@@ -13,6 +16,9 @@ import { Supervisor } from '../../../src/runtime/supervisor';
 const roots: string[] = [];
 const started: string[] = [];
 const disconnected: string[] = [];
+const lifecycle: string[] = [];
+const deliveryJournals: OmpDeliveryJournal[] = [];
+const bridgeControls: Controls[] = [];
 let root: string;
 let sup: Supervisor;
 
@@ -24,9 +30,17 @@ function app(id: string) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const stubStartChannel: any = async (deps: any) => {
   started.push(deps.appPaths.profile);
+  const generation = started.length;
+  deliveryJournals.push(deps.deliveryJournal);
+  bridgeControls.push(deps.controls);
+  lifecycle.push(`start:${generation}:${deps.deferDeliveryRecovery ? 'deferred' : 'active'}`);
   return {
     channel: { botIdentity: { name: `bot-${deps.appPaths.profile}` } },
+    activateDeliveryRecovery: async () => {
+      lifecycle.push(`activate:${generation}`);
+    },
     disconnect: async () => {
+      lifecycle.push(`disconnect:${generation}`);
       disconnected.push(deps.appPaths.profile);
     },
   };
@@ -35,17 +49,17 @@ const stubStartChannel: any = async (deps: any) => {
 beforeEach(async () => {
   started.length = 0;
   disconnected.length = 0;
+  lifecycle.length = 0;
+  deliveryJournals.length = 0;
+  bridgeControls.length = 0;
   root = await mkdtemp(join(tmpdir(), 'bridge-sup-'));
   roots.push(root);
   const configPath = join(root, 'config.json');
 
-  // claude (cli_a), work (cli_b), dup (cli_b — same app as work).
-  await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
+  // personal (cli_a), work (cli_b), dup (cli_b — same app as work).
+  await mkdir(join(root, 'profiles', 'personal'), { recursive: true });
   await saveRootConfig(
-    createRootConfig(
-      'claude',
-      createDefaultProfileConfig({ agentKind: 'claude', accounts: { app: app('cli_a') } }),
-    ),
+    createRootConfig('personal', createDefaultProfileConfig({ accounts: { app: app('cli_a') } })),
     configPath,
   );
   const rc = (await loadRootConfig(configPath))!;
@@ -55,7 +69,6 @@ beforeEach(async () => {
   ] as const) {
     await mkdir(join(root, 'profiles', name), { recursive: true });
     rc.profiles[name] = createDefaultProfileConfig({
-      agentKind: 'claude',
       accounts: { app: app(id) },
     });
   }
@@ -71,42 +84,80 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await sup.shutdown();
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
 });
 
 describe('Supervisor', () => {
   it('starts a profile in-process and lists it online', async () => {
-    await sup.startProfile('claude');
-    expect(sup.isOnline('claude')).toBe(true);
-    expect(started).toContain('claude');
+    await sup.startProfile('personal');
+    expect(sup.isOnline('personal')).toBe(true);
+    expect(started).toContain('personal');
     const list = sup.list();
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({
-      profile: 'claude',
+      profile: 'personal',
       online: true,
       pid: process.pid,
-      botName: 'bot-claude',
+      botName: 'bot-personal',
     });
   });
 
   it('hosts multiple profiles at once', async () => {
-    await sup.startProfile('claude');
+    await sup.startProfile('personal');
     await sup.startProfile('work');
     expect(
       sup
         .list()
         .map((s) => s.profile)
         .sort(),
-    ).toEqual(['claude', 'work']);
+    ).toEqual(['personal', 'work']);
   });
 
   it('stops one profile without affecting others or the process', async () => {
-    await sup.startProfile('claude');
+    await sup.startProfile('personal');
     await sup.startProfile('work');
-    await sup.stopProfile('claude');
-    expect(sup.isOnline('claude')).toBe(false);
-    expect(disconnected).toContain('claude');
+    await sup.stopProfile('personal');
+    expect(sup.isOnline('personal')).toBe(false);
+    expect(disconnected).toContain('personal');
     expect(sup.isOnline('work')).toBe(true); // supervisor + other profile still up
+  });
+
+  it('hands one loaded journal from the old scanner to the deferred replacement', async () => {
+    vi.spyOn(OmpAdapter.prototype, 'checkAvailability').mockResolvedValue({
+      ok: true,
+      version: 'test',
+    });
+    const seeded = new OmpDeliveryJournal({
+      path: join(root, 'profiles', 'personal', 'active-deliveries.json'),
+    });
+    await seeded.load();
+    await seeded.put({
+      runId: 'run_before_restart',
+      target: {
+        chatId: 'oc_restart',
+        messageId: 'om_trigger',
+        replyInThread: false,
+      },
+      messageId: 'om_existing',
+      transport: 'inline',
+      deliveryState: 'message_known',
+      nextSequence: 1,
+      time: { openedAtMs: 1, messageKnownAtMs: 2 },
+    });
+    await sup.startProfile('personal');
+
+    await bridgeControls[0]?.restart();
+
+    expect(deliveryJournals).toHaveLength(2);
+    expect(deliveryJournals[1]).toBe(deliveryJournals[0]);
+    expect(
+      deliveryJournals[0]?.entries().find((entry) => entry.runId === 'run_before_restart'),
+    ).toBeDefined();
+    expect(
+      deliveryJournals[1]?.entries().find((entry) => entry.runId === 'run_before_restart'),
+    ).toBeDefined();
+    expect(lifecycle).toEqual(['start:1:active', 'start:2:deferred', 'disconnect:1', 'activate:2']);
   });
 
   it('refuses to bring up two profiles sharing one app id', async () => {
@@ -116,8 +167,8 @@ describe('Supervisor', () => {
   });
 
   it('startProfile is idempotent', async () => {
-    await sup.startProfile('claude');
-    await sup.startProfile('claude');
-    expect(started.filter((p) => p === 'claude')).toHaveLength(1);
+    await sup.startProfile('personal');
+    await sup.startProfile('personal');
+    expect(started.filter((p) => p === 'personal')).toHaveLength(1);
   });
 });

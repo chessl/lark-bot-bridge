@@ -1,20 +1,17 @@
 import pkg from '../../package.json';
-import type { AgentAdapter } from '../agent/types';
+import { OmpAdapter } from '../agent/omp/adapter';
+import type { OmpRunEngine } from '../agent/types';
 import { type BridgeChannel, startChannel as realStartChannel } from '../bot/channel';
+import { OmpDeliveryJournal } from '../bot/omp-delivery-journal';
 import type { Controls } from '../commands';
 import type { AppPaths } from '../config/app-paths';
-import type { AgentKind, ProfileConfig } from '../config/profile-schema';
+import type { ProfileConfig } from '../config/profile-schema';
 import { type AppConfig, isComplete } from '../config/schema';
 import { log } from '../core/logger';
 import { refreshOwnerControls } from '../policy/owner';
 import { SessionCatalog } from '../session/catalog';
 import { SessionStore } from '../session/store';
 import { WorkspaceStore } from '../workspace/store';
-import {
-  assertReconnectAgentKindUnchanged,
-  createRuntimeAgent,
-  releaseRuntimeLocks,
-} from './agent-runtime';
 import {
   type AcquiredRuntimeLock,
   acquireAppRuntimeLock,
@@ -38,7 +35,6 @@ export interface SupervisorOptions {
 
 export interface ManagedStatus {
   profile: string;
-  agentKind: AgentKind;
   online: boolean;
   pid: number;
   startedAt?: string;
@@ -58,6 +54,7 @@ class ManagedProfile {
   entry!: ProcessEntry;
   startedAt = '';
   private restarting = false;
+  private readonly deliveryJournal: OmpDeliveryJournal;
 
   constructor(
     readonly profile: string,
@@ -65,13 +62,17 @@ class ManagedProfile {
     private configPath: string,
     private cfg: AppConfig,
     private profileConfig: ProfileConfig,
-    private agent: AgentAdapter,
+    private agent: OmpRunEngine,
     private sessions: SessionStore,
     private sessionCatalog: SessionCatalog,
     private workspaces: WorkspaceStore,
     private startChannelFn: StartChannelFn,
     private onExitCommand: (profile: string) => void,
-  ) {}
+  ) {
+    this.deliveryJournal = new OmpDeliveryJournal({
+      path: this.appPaths.activeDeliveriesFile,
+    });
+  }
 
   get appId(): string {
     return this.cfg.accounts.app.id;
@@ -88,21 +89,19 @@ class ManagedProfile {
     // this.locks and gets released by the catch — otherwise it would leak and
     // a retry in the same process would fail to re-lock.
     this.locks = [];
-    this.locks.push(await acquireProfileRuntimeLock(this.appPaths, this.profileConfig.agentKind));
-    this.locks.push(
-      await acquireAppRuntimeLock(this.appPaths, this.appId, this.profileConfig.agentKind),
-    );
+    this.locks.push(await acquireProfileRuntimeLock(this.appPaths));
+    this.locks.push(await acquireAppRuntimeLock(this.appPaths, this.appId));
     try {
       this.entry = await register({
         appId: this.appId,
         tenant: this.cfg.accounts.app.tenant,
         profileName: this.appPaths.profile,
-        agentKind: this.profileConfig.agentKind,
         configPath: this.configPath,
         version: pkg.version,
         registryFile: this.appPaths.userRegistryFile,
       });
       this.controls = this.makeControls(this.appPaths, this.cfg, this.profileConfig);
+      await this.deliveryJournal.load();
       this.bridge = await this.startChannelFn({
         cfg: this.cfg,
         agent: this.agent,
@@ -110,6 +109,7 @@ class ManagedProfile {
         sessionCatalog: this.sessionCatalog,
         workspaces: this.workspaces,
         controls: this.controls,
+        deliveryJournal: this.deliveryJournal,
         appPaths: this.appPaths,
       });
       const botName = this.bridge.channel.botIdentity?.name;
@@ -148,7 +148,6 @@ class ManagedProfile {
   status(pid: number): ManagedStatus {
     return {
       profile: this.profile,
-      agentKind: this.profileConfig.agentKind,
       online: true,
       pid,
       startedAt: this.startedAt,
@@ -200,21 +199,18 @@ class ManagedProfile {
       });
       const next = nextRuntime.cfg;
       if (!isComplete(next)) throw new Error('config incomplete after change');
-      assertReconnectAgentKindUnchanged(
-        this.profileConfig.agentKind,
-        nextRuntime.profileConfig.agentKind,
-      );
-      const nextAgent = createRuntimeAgent(nextRuntime.profileConfig, nextRuntime.appPaths);
+      const nextAgent = new OmpAdapter({
+        binary: nextRuntime.profileConfig.omp.binaryPath,
+        ...(nextRuntime.profileConfig.omp.profile
+          ? { profile: nextRuntime.profileConfig.omp.profile }
+          : {}),
+      });
       const availability = await nextAgent.checkAvailability();
       if (!availability.ok) throw availability.error;
 
       const appChanged = next.accounts.app.id !== this.cfg.accounts.app.id;
       if (appChanged) {
-        nextAppLock = await acquireAppRuntimeLock(
-          nextRuntime.appPaths,
-          next.accounts.app.id,
-          nextRuntime.profileConfig.agentKind,
-        );
+        nextAppLock = await acquireAppRuntimeLock(nextRuntime.appPaths, next.accounts.app.id);
       }
       const nextControls = this.makeControls(nextRuntime.appPaths, next, nextRuntime.profileConfig);
       const nextBridge = await this.startChannelFn({
@@ -224,7 +220,9 @@ class ManagedProfile {
         sessionCatalog: this.sessionCatalog,
         workspaces: this.workspaces,
         controls: nextControls,
+        deliveryJournal: this.deliveryJournal,
         appPaths: nextRuntime.appPaths,
+        deferDeliveryRecovery: true,
       });
       try {
         await this.bridge.disconnect();
@@ -234,6 +232,7 @@ class ManagedProfile {
           err: String(err),
         });
       }
+      await nextBridge.activateDeliveryRecovery?.();
       this.bridge = nextBridge;
       await updateEntry(
         this.entry.id,
@@ -311,7 +310,10 @@ export class Supervisor {
       }
     }
 
-    const agent = createRuntimeAgent(profileConfig, appPaths);
+    const agent = new OmpAdapter({
+      binary: profileConfig.omp.binaryPath,
+      ...(profileConfig.omp.profile ? { profile: profileConfig.omp.profile } : {}),
+    });
     if (this.opts.runAgentPreflight !== false) {
       const availability = await agent.checkAvailability();
       if (!availability.ok) throw availability.error;
@@ -371,4 +373,8 @@ export class Supervisor {
   unregisterAllSync(): void {
     for (const m of this.managed.values()) m.unregisterSelfSync();
   }
+}
+
+async function releaseRuntimeLocks(locks: AcquiredRuntimeLock[]): Promise<void> {
+  for (const lock of locks) await lock.release().catch(() => undefined);
 }

@@ -128,7 +128,7 @@ describe('cloud-doc comment delivery', () => {
   it.each([
     {
       events: [{ type: 'error', message: 'boom', terminationReason: 'failed' }],
-      reply: '⚠️ Claude 报错：boom',
+      reply: '⚠️ OMP 报错：boom',
     },
     {
       events: [{ type: 'done', terminationReason: 'normal' }],
@@ -168,7 +168,7 @@ async function createCommentHarness(options: {
   createdTopLevelReplies: string[];
   reactionActions(): string[];
 }> {
-  const tmp = await createTmpProfile('claude-comments-test-');
+  const tmp = await createTmpProfile('omp-comments-test-');
 
   const requests: RequestRecord[] = [];
   const inThreadReplies: string[] = [];
@@ -233,7 +233,6 @@ async function createCommentHarness(options: {
   workspaces.setCwd('doc:doc-token', tmp.workspace);
   workspaces.setCwd('doc:wiki-token', tmp.workspace);
   const profileConfig = createDefaultProfileConfig({
-    agentKind: 'claude',
     accounts: {
       app: {
         id: 'cli_test',
@@ -242,7 +241,6 @@ async function createCommentHarness(options: {
       },
     },
     access: { allowedUsers: ['ou-user'] },
-    permissions: { defaultAccess: 'read-only', maxAccess: 'workspace' },
   });
   profileConfig.workspaces.default = tmp.workspace;
   const activeRuns = new ActiveRuns();
@@ -254,7 +252,7 @@ async function createCommentHarness(options: {
     createRunId: () => `comment-run-${agent.runOptions.length + 1}`,
     sessionCatalog,
     workspaces,
-    profile: 'claude',
+    profile: 'work',
     profileConfig: () => profileConfig,
   });
   cleanups.push(async () => {
@@ -273,7 +271,7 @@ async function createCommentHarness(options: {
       sessions,
       scopedRuns,
       controls: {
-        profile: 'claude',
+        profile: 'work',
         profileConfig,
         botOwnerId: 'ou-user',
         ownerRefreshState: 'ok',

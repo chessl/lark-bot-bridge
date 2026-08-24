@@ -2,148 +2,74 @@ import { describe, expect, it } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import {
   accessPolicyDigest,
+  attachmentPolicyConfigDigest,
   attachmentPolicyShapeDigest,
+  digestCanonical,
   policyFingerprint,
   resourceScopeDigest,
-  type FingerprintInputV2,
 } from '../../../src/policy/fingerprint';
-import { canonicalizeJcs } from '../../../src/session/jcs';
 
 describe('policy fingerprint', () => {
-  it('canonicalizes JSON with sorted object keys while preserving array order', () => {
-    expect(
-      canonicalizeJcs({
-        z: 1,
-        a: {
-          d: [3, { z: false, a: true }],
-          c: null,
-        },
-        b: 'text',
-      }),
-    ).toBe('{"a":{"c":null,"d":[3,{"a":true,"z":false}]},"b":"text","z":1}');
-  });
-
-  it('produces sha256 first-16-byte base64url fingerprints', () => {
-    const fp = policyFingerprint(baseInput());
-
-    expect(fp).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    expect(fp).not.toContain('=');
-    expect(fp).toBe(policyFingerprint(baseInput()));
-  });
-
-  it('changes when policy-defining fields change', () => {
-    const base = baseInput();
-
+  it('is deterministic and changes with any policy input', () => {
+    const base = {
+      cwdRealpath: '/repo',
+      accessPolicyDigest: digestCanonical('access'),
+      resourceScopeDigest: digestCanonical('scope'),
+      attachmentPolicyShapeDigest: digestCanonical('attachments'),
+    };
+    expect(policyFingerprint(base)).toBe(policyFingerprint({ ...base }));
     for (const changed of [
-      { cwdRealpath: '/repo/other' },
-      { sandbox: 'workspace-write' as const },
-      { accessPolicyDigest: digestOf('access-other') },
-      { resourceScopeDigest: digestOf('scope-other') },
-      { attachmentPolicyShapeDigest: digestOf('attachments-other') },
-      { codexHome: '/state/other-codex-home' },
-      { inheritCodexHome: true },
+      { cwdRealpath: '/other' },
+      { accessPolicyDigest: digestCanonical('other-access') },
+      { resourceScopeDigest: digestCanonical('other-scope') },
+      { attachmentPolicyShapeDigest: digestCanonical('other-attachments') },
     ]) {
       expect(policyFingerprint({ ...base, ...changed })).not.toBe(policyFingerprint(base));
     }
   });
 
-  it('ignores runtime owner, timestamp, model, and concrete attachment names or sizes', () => {
-    const base = baseInput();
-
-    expect(
-      policyFingerprint({
-        ...base,
-        owner: 'ou_owner_a',
-        timestamp: 1,
-        model: 'model-a',
-      } as FingerprintInputV2 & Record<string, unknown>),
-    ).toBe(
-      policyFingerprint({
-        ...base,
-        owner: 'ou_owner_b',
-        timestamp: 2,
-        model: 'model-b',
-      } as FingerprintInputV2 & Record<string, unknown>),
-    );
-
-    expect(
-      attachmentPolicyShapeDigest([
-        {
-          kind: 'image',
-          requiredness: 'required',
-          decision: 'accepted',
-          originalName: 'secret-a.png',
-          size: 1,
-        },
-      ]),
-    ).toBe(
-      attachmentPolicyShapeDigest([
-        {
-          kind: 'image',
-          requiredness: 'required',
-          decision: 'accepted',
-          originalName: 'secret-b.png',
-          size: 999,
-        },
-      ]),
-    );
-  });
-
-  it('sorts access and resource allowlists so ordering does not change digests', () => {
+  it('normalizes set-like access and resource fields', () => {
     const profile = createDefaultProfileConfig({
-      agentKind: 'claude',
-      accounts: {
-        app: {
-          id: 'cli_test',
-          secret: '${APP_SECRET}',
-          tenant: 'feishu',
-        },
-      },
-      access: {
-        allowedUsers: ['ou_b', 'ou_a'],
-        allowedChats: ['oc_b', 'oc_a'],
-        admins: ['ou_admin_b', 'ou_admin_a'],
-      },
+      accounts: { app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' } },
+      omp: { binaryPath: '/usr/local/bin/omp' },
+      access: { allowedUsers: ['b', 'a'], allowedChats: ['y', 'x'], admins: ['d', 'c'] },
     });
-
     expect(accessPolicyDigest(profile.access)).toBe(
       accessPolicyDigest({
         ...profile.access,
-        allowedUsers: ['ou_a', 'ou_b'],
-        allowedChats: ['oc_a', 'oc_b'],
-        admins: ['ou_admin_a', 'ou_admin_b'],
+        allowedUsers: ['a', 'b'],
+        allowedChats: ['x', 'y'],
+        admins: ['c', 'd'],
       }),
     );
+    expect(resourceScopeDigest({ source: 'comment', resourceBindings: ['b', 'a'] })).toBe(
+      resourceScopeDigest({ source: 'comment', resourceBindings: ['a', 'b'] }),
+    );
+  });
+
+  it('fingerprints attachment decisions without local file details', () => {
     expect(
-      resourceScopeDigest({
-        source: 'comment',
-        chatId: 'oc_1',
-        threadId: 'omt_1',
-        resourceBindings: ['doc_b', 'doc_a'],
-      }),
+      attachmentPolicyShapeDigest([
+        { kind: 'file', requiredness: 'required', decision: 'accepted', path: '/tmp/a' },
+      ]),
     ).toBe(
-      resourceScopeDigest({
-        source: 'comment',
-        chatId: 'oc_1',
-        threadId: 'omt_1',
-        resourceBindings: ['doc_a', 'doc_b'],
-      }),
+      attachmentPolicyShapeDigest([
+        { kind: 'file', requiredness: 'required', decision: 'accepted', path: '/tmp/b' },
+      ]),
+    );
+  });
+
+  it('includes executable attachment limits but excludes cache details', () => {
+    const profile = createDefaultProfileConfig({
+      accounts: { app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' } },
+      omp: { binaryPath: '/usr/local/bin/omp' },
+    });
+    const baseline = attachmentPolicyConfigDigest(profile.attachments);
+    expect(
+      attachmentPolicyConfigDigest({ ...profile.attachments, cacheTtlMs: 1, cacheMaxBytes: 2 }),
+    ).toBe(baseline);
+    expect(attachmentPolicyConfigDigest({ ...profile.attachments, maxCount: 1 })).not.toBe(
+      baseline,
     );
   });
 });
-
-function baseInput(): FingerprintInputV2 {
-  return {
-    cwdRealpath: '/repo/project',
-    sandbox: 'read-only',
-    accessPolicyDigest: digestOf('access'),
-    resourceScopeDigest: digestOf('scope'),
-    attachmentPolicyShapeDigest: digestOf('attachments'),
-    codexHome: '/state/codex-home',
-    inheritCodexHome: false,
-  };
-}
-
-function digestOf(value: string): string {
-  return resourceScopeDigest({ source: 'im', chatId: value });
-}
