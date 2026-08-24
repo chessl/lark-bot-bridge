@@ -4,7 +4,12 @@ import type * as LarkChannelModule from '@larksuite/channel';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { AgentEvent } from '../../../src/agent/types.js';
-import type { ImReplyPlan, ImReplyPolicy, ImReplyTarget } from '../../../src/bot/im-invocation.js';
+import type {
+  ImReplyPlan,
+  ImReplyPolicy,
+  ImReplyTarget,
+  VerifiedBotId,
+} from '../../../src/bot/im-invocation.js';
 import { OmpReplyController } from '../../../src/bot/omp-reply-controller.js';
 import {
   createRunState,
@@ -628,7 +633,7 @@ describe('P2P OMP Reply', () => {
     );
   });
 
-  it('degrades a rejected sender Mention inside the known Reply', async () => {
+  it('projects sender and peer ownership together, then degrades both inside the known Reply', async () => {
     const target = {
       chatId: 'oc_sender_owner',
       messageId: 'om_sender_owner',
@@ -648,13 +653,19 @@ describe('P2P OMP Reply', () => {
     await controller.open(createRunState());
     const state: RunState = {
       ...finalizeIfRunning(createRunState()),
-      finalText: 'answer',
+      finalText: 'before @Hermes after',
     };
 
     await controller.finish({
       ...replyPolicy,
       reason: 'run-completed',
       state,
+      peerActivation: {
+        alias: 'Hermes',
+        openId: 'ou_peer' as VerifiedBotId,
+        start: 7,
+        end: 14,
+      },
     });
 
     expect(channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
@@ -666,12 +677,17 @@ describe('P2P OMP Reply', () => {
       cardElements(rendered).find(
         (element) => 'element_id' in element && element.element_id === 'answer',
       ),
-    ).toMatchObject({ content: '<at id="ou_sender"></at>\n\nanswer' });
+    ).toMatchObject({
+      content:
+        '<at id="ou_sender"></at>\n\nbefore <at id="ou_peer">@Hermes</at> after',
+    });
     expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledOnce();
     const patch = JSON.stringify(channel.rawClient.im.v1.message.patch.mock.calls[0]?.[0]);
     expect(patch).toContain('om_reply_1');
     expect(patch).toContain('Mention 不可用');
     expect(patch).toContain('\\\\@请求者');
+    expect(patch).toContain('\\\\@Hermes');
+    expect(patch).toContain('Peer 未通知');
     expect(patch).not.toContain('<at');
     expect(channel.sent).toEqual([]);
   });

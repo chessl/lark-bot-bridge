@@ -252,6 +252,32 @@ describe('ordinary IM Invocation creation', () => {
     expect(Object.isFrozen(invocation.sourceMessages)).toBe(true);
   });
 
+  it('freezes trusted aliases for one-hop Prompt policy without exposing peer IDs', () => {
+    const trustedPeerBots = [
+      { alias: 'Hermes', openId: 'ou_hermes' },
+      { alias: 'Atlas', openId: 'ou_atlas' },
+    ];
+    const plan = ordinaryPlan(
+      imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
+      CHAT_SCOPE,
+      trustedPeerBots,
+    );
+    trustedPeerBots[0] = { alias: 'Changed', openId: 'ou_changed' };
+    const invocation = createImInvocation([plan]);
+
+    expect(invocation.promptPolicy).toMatchObject({
+      trustedPeerAliases: ['Hermes', 'Atlas'],
+      oneHop: true,
+    });
+    expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_hermes');
+    expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_atlas');
+    expect(invocation.trustedPeers).toEqual([
+      { alias: 'Hermes', openId: 'ou_hermes' },
+      { alias: 'Atlas', openId: 'ou_atlas' },
+    ]);
+    expect(Object.isFrozen(invocation.trustedPeers)).toBe(true);
+  });
+
   it('freezes a verified P2P human as the terminal sender owner', () => {
     const invocation = createImInvocation([
       ordinaryPlan(
@@ -368,6 +394,147 @@ describe('IM Reply planning', () => {
     });
   });
 
+  it.each([
+    {
+      name: 'NFKC compatibility characters',
+      answer: '请交给 ＠Ｈｅｒｍｅｓ 继续，@Atlas 保持文本',
+      expectedAlias: 'Hermes',
+      expectedToken: '＠Ｈｅｒｍｅｓ',
+    },
+    {
+      name: 'fenced and inline code, escapes, email, unknown and reserved aliases',
+      answer:
+        '```ts\n@Hermes\n```\n`@Hermes` \\@Hermes dev@Hermes.example @HermesX @Unknown @here\n最后 @Atlas',
+      expectedAlias: 'Atlas',
+      expectedToken: '@Atlas',
+    },
+    {
+      name: 'longest legal token',
+      answer: '@Hermes-bot handles this; @Hermes is later',
+      expectedAlias: 'Hermes-bot',
+      expectedToken: '@Hermes-bot',
+    },
+    {
+      name: 'first of repeated and multiple aliases',
+      answer: '先 @Atlas，再 @Atlas，最后 @Hermes；文本不得改写',
+      expectedAlias: 'Atlas',
+      expectedToken: '@Atlas',
+    },
+  ])('activates only the first eligible peer for $name', ({ answer, expectedAlias, expectedToken }) => {
+    const invocation = createImInvocation([
+      ordinaryPlan(
+        imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
+        CHAT_SCOPE,
+        [
+          { alias: 'Hermes', openId: 'ou_hermes' },
+          { alias: 'Hermes-bot', openId: 'ou_hermes_bot' },
+          { alias: 'Atlas', openId: 'ou_atlas' },
+          { alias: 'here', openId: 'ou_reserved' },
+        ],
+      ),
+    ]);
+    const state = {
+      ...finalizeIfRunning(createRunState()),
+      finalText: answer,
+    } satisfies RunState;
+
+    const reply = finalizeImReply(invocation, state);
+
+    expect(reply.peerActivation).toMatchObject({ alias: expectedAlias });
+    const activation = reply.peerActivation;
+    if (!activation) throw new Error('expected peer activation');
+    expect(reply.state.finalText?.slice(activation.start, activation.end)).toBe(expectedToken);
+    expect(reply.state.finalText).toBe(answer);
+  });
+
+  it('does not let Agent-authored Mention markup forge the active peer', () => {
+    const invocation = createImInvocation([
+      ordinaryPlan(
+        imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
+        CHAT_SCOPE,
+        [
+          { alias: 'Hermes', openId: 'ou_hermes' },
+          { alias: 'Atlas', openId: 'ou_atlas' },
+        ],
+      ),
+    ]);
+    const reply = finalizeImReply(invocation, {
+      ...finalizeIfRunning(createRunState()),
+      finalText: '<at id="ou_fake">@Hermes</at> then @Atlas',
+    });
+
+    expect(reply.peerActivation?.alias).toBe('Atlas');
+    expect(reply.state.finalText).not.toContain('<at');
+  });
+
+  it.each([
+    {
+      name: 'empty successful answer',
+      invocation: 'ordinary',
+      state: { ...finalizeIfRunning(createRunState()), finalText: ' \n ' } satisfies RunState,
+    },
+    {
+      name: 'failed answer',
+      invocation: 'ordinary',
+      state: {
+        ...createRunState(),
+        terminal: 'error',
+        finalText: '@Hermes',
+      } satisfies RunState,
+    },
+    {
+      name: 'unverified ordinary answer',
+      invocation: 'ordinary-unknown',
+      state: {
+        ...finalizeIfRunning(createRunState()),
+        finalText: '@Hermes',
+      } satisfies RunState,
+    },
+    {
+      name: 'peer answer',
+      invocation: 'peer',
+      state: {
+        ...finalizeIfRunning(createRunState()),
+        finalText: '@Hermes',
+      } satisfies RunState,
+    },
+  ])('keeps $name zero-hop', ({ invocation: invocationKind, state }) => {
+    const trustedPeerBots = [{ alias: 'Hermes', openId: 'ou_hermes' }];
+    const invocation =
+      invocationKind !== 'peer'
+        ? createImInvocation([
+            ordinaryPlan(
+              invocationKind === 'ordinary'
+                ? imMessage({ senderType: 'user', rawSenderId: 'ou_sender' })
+                : imMessage(),
+              CHAT_SCOPE,
+              trustedPeerBots,
+            ),
+          ])
+        : (() => {
+            const plan = planImMessage({
+              message: imMessage({
+                senderId: 'ou_hermes',
+                senderType: 'bot',
+                rawSenderId: 'ou_hermes',
+                mentions: [{ key: '@_user_1', openId: 'ou_bot', isBot: true }],
+                rawMentions: [{ id: { open_id: 'ou_bot' } }],
+              }),
+              scope: CHAT_SCOPE,
+              authorized: true,
+              duplicate: false,
+              mentionRequired: false,
+              recognizedCommand: false,
+              currentBotOpenId: 'ou_bot',
+              trustedPeerBots,
+            });
+            if (plan.lane !== 'peer') throw new Error(`expected peer plan, got ${plan.lane}`);
+            return createImInvocation([plan]);
+          })();
+
+    expect(finalizeImReply(invocation, state).peerActivation).toBeUndefined();
+  });
+
   it('rejects a non-terminal Run state', () => {
     const invocation = createImInvocation([
       ordinaryPlan(
@@ -385,6 +552,7 @@ describe('IM Reply planning', () => {
 function ordinaryPlan(
   message: NormalizedMessage,
   scope: ImConversationScope,
+  trustedPeerBots: ReadonlyArray<{ alias: string; openId: string }> = [],
 ): ImOrdinaryMessagePlan {
   const plan = planImMessage({
     message,
@@ -393,6 +561,7 @@ function ordinaryPlan(
     duplicate: false,
     mentionRequired: false,
     recognizedCommand: false,
+    trustedPeerBots,
   });
   if (plan.lane !== 'ordinary') throw new Error(`expected ordinary plan, got ${plan.lane}`);
   return plan;

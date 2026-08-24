@@ -25,6 +25,7 @@ import type {
   DeliveryFailureReason,
   DeliveryState,
   DurablePendingOperation,
+  DurableMentionFallback,
   OmpDeliveryJournal,
   ReplyTransport,
 } from './omp-delivery-journal';
@@ -194,10 +195,9 @@ export class OmpReplyController {
     this.#projectionTimer = undefined;
     this.#latestProjection = undefined;
     const staticTerminal = makeProjection(renderOmpReplyCard(plan));
-    const degradedTerminal =
-      plan.senderOwnership.kind === 'mention'
-        ? makeProjection(renderOmpReplyCard(plan, { streamingMode: false, mentionMode: 'plain' }))
-        : undefined;
+    const degradedTerminal = hasReplyMention(plan)
+      ? makeProjection(renderOmpReplyCard(plan, { streamingMode: false, mentionMode: 'plain' }))
+      : undefined;
     logReplyMention('planned', plan, transport, mentionReason(plan));
 
     await this.enqueue(async () => {
@@ -207,6 +207,7 @@ export class OmpReplyController {
         const update = await this.commitManagedProjection(
           makeProjection(renderManagedCard(plan)),
           true,
+          degradedTerminal,
         );
         if (update === 'mention_rejected') {
           await this.patchKnownTerminal(degradedTerminal ?? staticTerminal, plan, true);
@@ -227,8 +228,11 @@ export class OmpReplyController {
           JSON.stringify(renderOmpReplyMarkdownPost(plan)),
           true,
           plan.target,
+          degradedTerminal
+            ? JSON.stringify(renderOmpReplyMarkdownPost(plan, 'plain'))
+            : undefined,
         );
-        if (markdown === 'mention_rejected' && plan.senderOwnership.kind === 'mention') {
+        if (markdown === 'mention_rejected' && hasReplyMention(plan)) {
           logReplyMention('degraded', plan, transport, 'mention-rejected');
           const degraded = await this.commitReply(
             'markdown',
@@ -273,6 +277,7 @@ export class OmpReplyController {
     content: string,
     terminal: boolean,
     target: ImReplyTarget,
+    mentionFallbackContent?: string,
   ): Promise<Exclude<OperationResult, 'unknown'>> {
     const uuid = randomUUID();
     const request = {
@@ -291,6 +296,9 @@ export class OmpReplyController {
       uuid,
       sequence: 0,
       request,
+      ...(mentionFallbackContent
+        ? { mentionFallback: replyMentionFallback(target, mentionFallbackContent) }
+        : {}),
       attempts: 0,
       exhausted: false,
     };
@@ -300,6 +308,7 @@ export class OmpReplyController {
   private async commitManagedProjection(
     projection: Projection,
     terminal = false,
+    mentionFallback?: Projection,
   ): Promise<Exclude<OperationResult, 'unknown'>> {
     if (projection.serialized === this.#lastSuccessfulProjection) return 'success';
     const cardId = this.requireManagedCard();
@@ -320,6 +329,9 @@ export class OmpReplyController {
       sequence,
       projection,
       request,
+      ...(mentionFallback && this.#messageId
+        ? { mentionFallback: patchMentionFallback(this.#messageId, mentionFallback) }
+        : {}),
       attempts: 0,
       exhausted: false,
     };
@@ -360,7 +372,7 @@ export class OmpReplyController {
     fallback?: Projection,
   ): Promise<void> {
     if (!this.#messageId) throw this.deliveryFailure('known-message-missing-message-id');
-    const patch = await this.commitStaticPatch(projection, true);
+    const patch = await this.commitStaticPatch(projection, true, fallback);
     if (patch === 'success') {
       if (degraded) logReplyMention('degraded', plan, this.requireOpen(), 'mention-rejected');
       return;
@@ -376,6 +388,7 @@ export class OmpReplyController {
   private async commitStaticPatch(
     projection: Projection,
     terminal: boolean,
+    mentionFallback?: Projection,
   ): Promise<Exclude<OperationResult, 'unknown'>> {
     if (projection.serialized === this.#lastSuccessfulProjection) {
       if (terminal) {
@@ -396,6 +409,9 @@ export class OmpReplyController {
         path: { message_id: messageId },
         data: { content: projection.serialized },
       } satisfies PatchRequest,
+      ...(mentionFallback
+        ? { mentionFallback: patchMentionFallback(messageId, mentionFallback) }
+        : {}),
       attempts: 0,
       exhausted: false,
     };
@@ -427,8 +443,14 @@ export class OmpReplyController {
         if (operation.kind === 'update' || operation.kind === 'close') {
           this.#sequence = operation.sequence;
         }
-        this.#deliveryState = this.#messageKnown ? 'message_known' : 'not_sent';
-        this.#pending = undefined;
+        const mentionFallback =
+          operation.kind === 'close' ? undefined : operation.mentionFallback;
+        if (result === 'mention_rejected' && mentionFallback) {
+          this.#pending = pendingMentionFallback(mentionFallback);
+        } else {
+          this.#deliveryState = this.#messageKnown ? 'message_known' : 'not_sent';
+          this.#pending = undefined;
+        }
         await this.persist();
         return result;
       }
@@ -530,6 +552,64 @@ export class OmpReplyController {
   }
 }
 
+function replyMentionFallback(
+  target: ImReplyTarget,
+  content: string,
+): DurableMentionFallback {
+  const uuid = randomUUID();
+  return {
+    kind: 'reply',
+    transport: 'markdown',
+    terminal: true,
+    uuid,
+    sequence: 0,
+    request: {
+      path: { message_id: target.messageId },
+      data: {
+        msg_type: 'post',
+        content,
+        reply_in_thread: target.replyInThread,
+        uuid,
+      },
+    },
+  };
+}
+
+function patchMentionFallback(
+  messageId: string,
+  projection: Projection,
+): DurableMentionFallback {
+  return {
+    kind: 'patch',
+    terminal: true,
+    uuid: randomUUID(),
+    sequence: 0,
+    request: {
+      path: { message_id: messageId },
+      data: { content: projection.serialized },
+    },
+  };
+}
+
+function pendingMentionFallback(fallback: DurableMentionFallback): PendingOperation {
+  if (fallback.kind === 'reply') {
+    return { ...fallback, attempts: 0, exhausted: false };
+  }
+  let card: object = {};
+  try {
+    const parsed: unknown = JSON.parse(fallback.request.data.content);
+    if (typeof parsed === 'object' && parsed !== null) card = parsed;
+  } catch {
+    // The request remains authoritative; projection is only live completion bookkeeping.
+  }
+  return {
+    ...fallback,
+    projection: { card, serialized: fallback.request.data.content },
+    attempts: 0,
+    exhausted: false,
+  };
+}
+
 function durableOperation(operation: PendingOperation): DurablePendingOperation {
   if (operation.kind === 'reply') {
     return {
@@ -539,6 +619,7 @@ function durableOperation(operation: PendingOperation): DurablePendingOperation 
       uuid: operation.uuid,
       sequence: 0,
       request: operation.request,
+      ...(operation.mentionFallback ? { mentionFallback: operation.mentionFallback } : {}),
     };
   }
   if (operation.kind === 'update') {
@@ -548,6 +629,7 @@ function durableOperation(operation: PendingOperation): DurablePendingOperation 
       uuid: operation.uuid,
       sequence: operation.sequence,
       request: operation.request,
+      ...(operation.mentionFallback ? { mentionFallback: operation.mentionFallback } : {}),
     };
   }
   if (operation.kind === 'close') {
@@ -565,6 +647,7 @@ function durableOperation(operation: PendingOperation): DurablePendingOperation 
     uuid: operation.uuid,
     sequence: 0,
     request: operation.request,
+    ...(operation.mentionFallback ? { mentionFallback: operation.mentionFallback } : {}),
   };
 }
 
@@ -654,11 +737,45 @@ async function retryUnknownOperation(
 ): Promise<void> {
   const pending = entry.pending;
   if (!pending) return;
+  const mentionFallback = pending.kind === 'close' ? undefined : pending.mentionFallback;
   journal.claim(entry.runId);
   try {
     const attempt = await attemptDurableOperation(channel, pending, true);
     if (attempt.result === 'unknown') return;
     if (attempt.result === 'rejected' || attempt.result === 'mention_rejected') {
+      if (attempt.result === 'mention_rejected' && mentionFallback) {
+        const fallbackEntry =
+          mentionFallback.kind === 'reply' && entry.time.messageKnownAtMs === undefined
+            ? { ...entry, deliveryState: 'not_sent' as const, pending: undefined }
+            : clearPending(entry, now, attempt.messageId);
+        const plan = interruptedReplyPlan(entry.replyPolicy);
+        logReplyMention(
+          'degraded',
+          plan,
+          mentionFallback.kind === 'reply' ? 'markdown' : (entry.transport ?? 'inline'),
+          'mention-rejected',
+        );
+        const fallbackResult = await submitRecoveryOperation(
+          channel,
+          journal,
+          fallbackEntry,
+          mentionFallback,
+        );
+        if (fallbackResult === 'unknown') return;
+        if (fallbackResult === 'success') {
+          logReplyRecovery('terminal-request-replayed', entry);
+          await journal.remove(entry.runId);
+          return;
+        }
+        await failRecovery(
+          journal,
+          fallbackEntry,
+          mentionFallback.kind === 'reply'
+            ? 'terminal-markdown-rejected'
+            : 'static-terminal-patch-rejected',
+        );
+        return;
+      }
       if (pending.kind === 'reply' && entry.time.messageKnownAtMs === undefined) {
         const plan = interruptedReplyPlan(entry.replyPolicy);
         logReplyMention('planned', plan, 'markdown', mentionReason(plan));
@@ -1157,9 +1274,11 @@ function validateFinalPlan(plan: ImReplyPlan, progressPolicy: ImReplyPolicy): vo
     throw new Error('Final IM Reply policy differs from the frozen Progress Reply policy');
   }
 }
+
 type ReplyMentionEvent = 'planned' | 'rendered' | 'degraded';
 type ReplyMentionReason =
   | 'verified-human-sender'
+  | 'trusted-peer-alias'
   | 'mention-rejected'
   | ImSenderOwnershipReason;
 type ReplyRecoveryReason = 'interrupted-after-restart' | 'terminal-request-replayed';
@@ -1173,9 +1292,14 @@ function interruptedReplyPlan(replyPolicy: ImReplyPolicy): ImReplyPlan {
 }
 
 function mentionReason(plan: ImReplyPlan): ReplyMentionReason {
+  if (plan.peerActivation) return 'trusted-peer-alias';
   return plan.senderOwnership.kind === 'mention'
     ? 'verified-human-sender'
     : plan.senderOwnership.reason;
+}
+
+function hasReplyMention(plan: ImReplyPlan): boolean {
+  return plan.senderOwnership.kind === 'mention' || plan.peerActivation !== undefined;
 }
 
 function logReplyMention(

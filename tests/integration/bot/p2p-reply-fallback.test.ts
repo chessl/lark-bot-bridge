@@ -87,6 +87,7 @@ type FixtureOptions = {
   update?: (input: unknown, attempt: number) => Promise<unknown>;
   close?: (input: unknown, attempt: number) => Promise<unknown>;
   patch?: (messageId: string, card: object, attempt: number) => Promise<unknown>;
+  trustedPeerBots?: Array<{ alias: string; openId: string }>;
 };
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -162,6 +163,54 @@ describe('P2P OMP Reply safe fallback', () => {
     expect(h.channel.successfulReplyIds).toEqual(['om_markdown']);
     expect(h.channel.patches).toHaveLength(0);
     expect(h.channel.operations).toContain('omp:consume');
+  });
+
+  it('keeps sender and one peer semantics across managed, inline, and Markdown transports', async () => {
+    for (const transport of ['managed', 'inline', 'markdown'] as const) {
+      const h = await createHarness({
+        events: terminalEvents(`before @Hermes after ${transport}`),
+        trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
+        ...(transport === 'managed'
+          ? {}
+          : {
+              createCard: async () => {
+                throw new Error('managed unavailable');
+              },
+            }),
+        ...(transport === 'markdown'
+          ? {
+              reply: async (_input: unknown, attempt: number) =>
+                attempt === 1
+                  ? { code: 230001, msg: 'inline rejected' }
+                  : successReply(`om_${transport}`),
+            }
+          : {}),
+      });
+      await startTestBridge(h);
+
+      await h.channel.handlers.message?.(verifiedMessage(`om_${transport}`));
+      await waitFor(() =>
+        transport === 'managed'
+          ? h.channel.rawClient.cardkit.v1.card.update.mock.calls.length > 0
+          : transport === 'inline'
+            ? h.channel.patches.length > 0
+            : h.channel.successfulReplyIds.length > 0,
+      );
+
+      const outbound =
+        transport === 'managed'
+          ? updateCardData(h.channel.rawClient.cardkit.v1.card.update.mock.calls.at(-1)?.[0]) ?? ''
+          : transport === 'inline'
+            ? JSON.stringify(h.channel.patches.at(-1)?.card)
+            : replyContent(replyInputs(h.channel).at(-1));
+      expect(outbound).toContain('ou_sender');
+      expect(outbound).toContain('ou_peer');
+      expect(outbound.match(/ou_peer/g)).toHaveLength(1);
+      expect(replyInputs(h.channel).every((input) => requestMessageId(input) === `om_${transport}`)).toBe(
+        true,
+      );
+      expect(h.channel.successfulReplyIds).toHaveLength(1);
+    }
   });
 
   it('exact-retries an unknown managed submission and never changes transport', async () => {
@@ -335,6 +384,10 @@ async function createHarness(options: FixtureOptions = {}): Promise<{
   const profileConfig = {
     ...baseProfileConfig,
     workspaces: { ...baseProfileConfig.workspaces, default: workspace },
+    collaboration: {
+      ...baseProfileConfig.collaboration,
+      trustedPeerBots: options.trustedPeerBots ?? [],
+    },
   };
   const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
@@ -509,6 +562,19 @@ function message(messageId: string): NormalizedMessage {
     mentionedBot: false,
     createTime: 1760000001000,
   } as unknown as NormalizedMessage;
+}
+
+function verifiedMessage(messageId: string): NormalizedMessage {
+  return {
+    ...message(messageId),
+    senderId: 'ou_sender',
+    raw: {
+      sender: {
+        sender_id: { open_id: 'ou_sender' },
+        sender_type: 'user',
+      },
+    },
+  };
 }
 
 function successReply(messageId: string): object {

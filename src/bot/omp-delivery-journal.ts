@@ -90,6 +90,23 @@ const PatchRequestSchema = z.object({
   path: z.object({ message_id: z.string().min(1) }),
   data: z.object({ content: z.string() }),
 });
+const MentionFallbackSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('reply'),
+    transport: z.literal('markdown'),
+    terminal: z.literal(true),
+    uuid: z.string().min(1),
+    sequence: z.literal(0),
+    request: ReplyRequestSchema,
+  }),
+  z.object({
+    kind: z.literal('patch'),
+    terminal: z.literal(true),
+    uuid: z.string().min(1),
+    sequence: z.literal(0),
+    request: PatchRequestSchema,
+  }),
+]);
 const PendingOperationSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('reply'),
@@ -98,6 +115,7 @@ const PendingOperationSchema = z.discriminatedUnion('kind', [
     uuid: z.string().min(1),
     sequence: z.literal(0),
     request: ReplyRequestSchema,
+    mentionFallback: MentionFallbackSchema.optional(),
   }),
   z.object({
     kind: z.literal('update'),
@@ -105,6 +123,7 @@ const PendingOperationSchema = z.discriminatedUnion('kind', [
     uuid: z.string().min(1),
     sequence: z.number().int().nonnegative(),
     request: UpdateRequestSchema,
+    mentionFallback: MentionFallbackSchema.optional(),
   }),
   z.object({
     kind: z.literal('close'),
@@ -119,6 +138,7 @@ const PendingOperationSchema = z.discriminatedUnion('kind', [
     uuid: z.string().min(1),
     sequence: z.literal(0),
     request: PatchRequestSchema,
+    mentionFallback: MentionFallbackSchema.optional(),
   }),
 ]);
 const ActiveDeliverySchema = z.object({
@@ -140,6 +160,7 @@ const JournalFileSchema = z.object({ version: z.literal(2), entries: z.array(z.u
 export type DeliveryState = z.infer<typeof DeliveryStateSchema>;
 export type ReplyTransport = z.infer<typeof ReplyTransportSchema>;
 export type DurablePendingOperation = z.infer<typeof PendingOperationSchema>;
+export type DurableMentionFallback = z.infer<typeof MentionFallbackSchema>;
 export type ActiveDelivery = z.infer<typeof ActiveDeliverySchema>;
 
 export type DeliveryFailureReason =
@@ -329,6 +350,23 @@ function isConsistentActiveDelivery(entry: ActiveDelivery): boolean {
     return false;
   }
   if (!pending) return true;
+  const mentionFallback = pending.kind === 'close' ? undefined : pending.mentionFallback;
+  if (
+    mentionFallback?.kind === 'reply' &&
+    (mentionFallback.uuid !== mentionFallback.request.data.uuid ||
+      mentionFallback.request.path.message_id !== entry.replyPolicy.target.messageId ||
+      mentionFallback.request.data.reply_in_thread !== entry.replyPolicy.target.replyInThread)
+  ) {
+    return false;
+  }
+  if (
+    mentionFallback?.kind === 'patch' &&
+    (!entry.messageId ||
+      entry.time.messageKnownAtMs === undefined ||
+      mentionFallback.request.path.message_id !== entry.messageId)
+  ) {
+    return false;
+  }
 
   if (pending.kind === 'reply') {
     return (

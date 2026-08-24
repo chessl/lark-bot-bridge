@@ -1381,7 +1381,11 @@ function buildPrompt(
             .map((alias) => `@${alias}`)
             .join('、') || '无'}。只返回答案正文;transport 不会激活任何 alias,本次保持 zero-hop。`,
         ]
-      : [];
+      : [
+          `可信 peer 协作策略：oneHop=${String(policy.oneHop)}，maxActivePeers=1，aliases=[${
+            policy.trustedPeerAliases.map((alias) => `@${alias}`).join('、') || '无'
+          }]。只返回答案正文；transport 只会在成功的最终答案中激活第一个合格 alias。`,
+        ];
 
   return buildAgentPrompt({
     context: {

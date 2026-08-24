@@ -1,4 +1,4 @@
-import type { ImReplyPlan } from '../bot/im-invocation';
+import { sanitizeImAnswer, type ImReplyPlan } from '../bot/im-invocation';
 import { deepMaskEmails, maskEmails } from './mask-email';
 import type { RunState, ToolEntry, ToolStatus } from './run-state';
 
@@ -247,16 +247,39 @@ export function renderOmpReplyMarkdownPost(
   input: ReplyInput,
   mentionMode?: ReplyMentionMode,
 ): object {
-  if (isImReplyPlan(input) && input.senderOwnership.kind === 'mention' && mentionMode !== 'plain') {
-    return {
-      zh_cn: {
-        title: '',
-        content: [
-          [{ tag: 'at', user_id: input.senderOwnership.openId }],
-          [{ tag: 'md', text: renderOmpReplyMarkdown(input, 'omit') }],
-        ],
-      },
-    };
+  if (isImReplyPlan(input) && mentionMode !== 'plain') {
+    const owner =
+      input.senderOwnership.kind === 'mention'
+        ? [[{ tag: 'at', user_id: input.senderOwnership.openId }]]
+        : [];
+    const markdown = renderOmpReplyMarkdown(input, 'omit');
+    const activation = input.peerActivation;
+    if (activation) {
+      const body = sanitizeImAnswer(ompReplyPresentation(input.state).finalReply);
+      const before = maskEmails(`**回复**\n\n${body.slice(0, activation.start)}`);
+      const matched = maskEmails(body.slice(activation.start, activation.end));
+      if (
+        markdown.startsWith(before) &&
+        markdown.slice(before.length, before.length + matched.length) === matched
+      ) {
+        const peerRow = [
+          ...(before ? [{ tag: 'md', text: before }] : []),
+          { tag: 'at', user_id: activation.openId },
+          ...(markdown.length > before.length + matched.length
+            ? [{ tag: 'md', text: markdown.slice(before.length + matched.length) }]
+            : []),
+        ];
+        return { zh_cn: { title: '', content: [...owner, peerRow] } };
+      }
+    }
+    if (owner.length > 0) {
+      return {
+        zh_cn: {
+          title: '',
+          content: [...owner, [{ tag: 'md', text: markdown }]],
+        },
+      };
+    }
   }
   return markdownPost(renderOmpReplyMarkdown(input, mentionMode));
 }
@@ -417,19 +440,38 @@ function withSenderOwnership(
   body: string,
   mentionMode: ReplyMentionMode = 'mention',
 ): string {
-  const safeBody = isImReplyPlan(input) ? stripAtMentions(body) : body;
+  const safeBody = isImReplyPlan(input) ? sanitizeImAnswer(body) : body;
+  const ownedBody = withPeerActivation(input, safeBody, mentionMode);
   if (
     !isImReplyPlan(input) ||
     input.senderOwnership.kind === 'none' ||
     mentionMode === 'omit'
   ) {
-    return safeBody;
+    return ownedBody;
   }
   const owner =
     mentionMode === 'plain'
       ? '\\@请求者\n<font color="grey">Mention 不可用，已改为文本归属</font>'
       : `<at id="${escapeAttribute(input.senderOwnership.openId)}"></at>`;
-  return `${owner}\n\n${safeBody}`;
+  return `${owner}\n\n${ownedBody}`;
+}
+
+function withPeerActivation(
+  input: ReplyInput,
+  body: string,
+  mentionMode: ReplyMentionMode,
+): string {
+  if (!isImReplyPlan(input) || !input.peerActivation || mentionMode === 'omit') return body;
+  const { alias, openId, start, end } = input.peerActivation;
+  if (start < 0 || end <= start || end > body.length) return body;
+  const mention =
+    mentionMode === 'plain'
+      ? `\\@${escapeMarkdown(alias)}`
+      : `<at id="${escapeAttribute(openId)}">@${alias}</at>`;
+  const rendered = `${body.slice(0, start)}${mention}${body.slice(end)}`;
+  return mentionMode === 'plain'
+    ? `${rendered}\n\n<font color="grey">Peer 未通知：Mention 不可用</font>`
+    : rendered;
 }
 
 function escapeAttribute(value: string): string {
@@ -470,11 +512,6 @@ export function ompReplyPresentation(state: RunState): OmpReplyPresentation {
 }
 
 function escapeMarkdown(value: string): string {
-  return stripAtMentions(value).replace(/([\\`*_{}[\]()#+.!\-|>])/g, '\\$1');
+  return sanitizeImAnswer(value).replace(/([\\`*_{}[\]()#+.!\-|>])/g, '\\$1');
 }
 
-function stripAtMentions(value: string): string {
-  return value
-    .replace(/<at\b[^>]*>(.*?)<\/at>/gis, '\\@$1')
-    .replace(/<\/?at\b[^>]*>/gi, '');
-}

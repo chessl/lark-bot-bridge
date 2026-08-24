@@ -166,6 +166,49 @@ describe('OMP Reply restart recovery', () => {
     expect(restarted.entries()).toEqual([]);
   });
 
+  it('replays the frozen plain fallback after an exact terminal Mention rejection', async () => {
+    const tmp = await temporaryProfile();
+    const path = join(tmp.profile, 'mention-fallback.json');
+    const mentionFallback = {
+      kind: 'patch',
+      terminal: true,
+      uuid: 'uuid_plain_fallback',
+      sequence: 0,
+      request: {
+        path: { message_id: 'om_known_peer' },
+        data: { content: '{"plain":"\\\\@Hermes","status":"Peer 未通知"}' },
+      },
+    } as const;
+    const pending = {
+      ...updateOperation(7),
+      mentionFallback,
+    } satisfies DurablePendingOperation;
+    await seed(path, [
+      {
+        ...knownDelivery('run_peer_fallback'),
+        cardId: 'card_gap',
+        messageId: 'om_known_peer',
+        transport: 'managed',
+        deliveryState: 'unknown',
+        nextSequence: 8,
+        pending,
+      },
+    ]);
+    const fake = fakeChannel({
+      update: async () => ({ code: 230001, msg: 'mention rejected' }),
+    });
+    const restarted = trackedJournal(path);
+
+    await activateOmpReplyRecovery({ channel: fake.channel, journal: restarted, now: () => NOW });
+
+    expect(fake.update).toHaveBeenCalledOnce();
+    expect(fake.update.mock.calls[0]?.[0]).toEqual(pending.request);
+    expect(fake.patch).toHaveBeenCalledOnce();
+    expect(fake.patch.mock.calls[0]?.[0]).toEqual(mentionFallback.request);
+    expect(fake.reply).not.toHaveBeenCalled();
+    expect(restarted.entries()).toEqual([]);
+  });
+
   it('terminalizes message-known managed and inline entries in their existing bubbles', async () => {
     const tmp = await temporaryProfile();
     const path = join(tmp.profile, 'active-deliveries.json');
@@ -510,7 +553,13 @@ function closeOperation(sequence: number): DurablePendingOperation {
   };
 }
 
-function fakeChannel(options: { reply?: (input: unknown) => Promise<unknown> } = {}): {
+function fakeChannel(
+  options: {
+    reply?: (input: unknown) => Promise<unknown>;
+    update?: (input: unknown) => Promise<unknown>;
+    patch?: (input: unknown) => Promise<unknown>;
+  } = {},
+): {
   channel: LarkChannel;
   reply: Mock;
   update: Mock;
@@ -520,9 +569,9 @@ function fakeChannel(options: { reply?: (input: unknown) => Promise<unknown> } =
   const reply = vi.fn(
     options.reply ?? (async () => ({ code: 0, data: { message_id: 'om_reply' } })),
   );
-  const update = vi.fn(async () => ({ code: 0 }));
+  const update = vi.fn(options.update ?? (async () => ({ code: 0 })));
   const close = vi.fn(async () => ({ code: 0 }));
-  const patch = vi.fn(async () => ({ code: 0 }));
+  const patch = vi.fn(options.patch ?? (async () => ({ code: 0 })));
   const channel = {
     rawClient: {
       im: { v1: { message: { reply, patch } } },

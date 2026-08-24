@@ -123,6 +123,7 @@ export type ImOrdinaryMessagePlan = Readonly<{
   reason: 'ordinary-message';
   scope: ImConversationScope;
   source: ImSourceMessage;
+  trustedPeers: readonly ImTrustedPeer[];
 }>;
 
 export type ImPeerMessagePlan = Readonly<{
@@ -169,6 +170,8 @@ export type ImPromptPolicy =
       reason: Extract<ImPromptReason, 'ordinary-message-batch'>;
       messages: readonly [ImPromptMessage, ...ImPromptMessage[]];
       botIdentity?: Readonly<{ openId: string; name?: string }>;
+      trustedPeerAliases: readonly string[];
+      oneHop: true;
     }>
   | Readonly<{
       kind: 'peer';
@@ -185,6 +188,13 @@ export type ImReplyPolicy = Readonly<{
   senderOwnership: ImSenderOwnership;
 }>;
 
+export type ImPeerActivation = Readonly<{
+  alias: string;
+  openId: VerifiedBotId;
+  start: number;
+  end: number;
+}>;
+
 export type ImInvocation = ImOrdinaryInvocation | ImPeerInvocation;
 
 export type ImOrdinaryInvocation = Readonly<{
@@ -195,6 +205,7 @@ export type ImOrdinaryInvocation = Readonly<{
   replyTarget: ImReplyTarget;
   promptPolicy: Extract<ImPromptPolicy, { kind: 'ordinary' }>;
   replyPolicy: ImReplyPolicy & Readonly<{ invocationKind: 'ordinary' }>;
+  trustedPeers: readonly ImTrustedPeer[];
 }>;
 
 export type ImPeerInvocation = Readonly<{
@@ -213,6 +224,7 @@ export type ImReplyPlan = ImReplyPolicy &
   Readonly<{
     reason: ImReplyReason;
     state: RunState;
+    peerActivation?: ImPeerActivation;
   }>;
 
 export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
@@ -225,6 +237,7 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
     return Object.freeze({ lane: 'drop', reason: 'duplicate-message', allowAccessHint: false });
   }
   const scope = snapshotScope(input.scope);
+  const trustedPeers = snapshotTrustedPeers(input.trustedPeerBots ?? []);
   if (source.sender.kind === 'unknown') {
     if (isBotCandidate(input.message)) {
       return Object.freeze({ lane: 'drop', reason: 'unknown-sender', allowAccessHint: false });
@@ -237,6 +250,7 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
       reason: 'ordinary-message',
       scope,
       source,
+      trustedPeers,
     });
   }
   if (source.sender.kind === 'human') {
@@ -256,6 +270,7 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
       reason: 'ordinary-message',
       scope,
       source,
+      trustedPeers,
     });
   }
 
@@ -278,7 +293,6 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
     });
   }
 
-  const trustedPeers = snapshotTrustedPeers(input.trustedPeerBots ?? []);
   const peerSenderId = source.sender.id;
   const peer = trustedPeers.find((candidate) => candidate.openId === peerSenderId);
   if (!peer) {
@@ -365,10 +379,13 @@ export function createImInvocation(
     scope: first.scope,
     sourceMessages: Object.freeze(sourceMessages),
     replyTarget: target,
+    trustedPeers: first.trustedPeers,
     promptPolicy: Object.freeze({
       kind: 'ordinary',
       reason: 'ordinary-message-batch',
       messages: Object.freeze(promptMessages),
+      trustedPeerAliases: Object.freeze(first.trustedPeers.map(({ alias }) => alias)),
+      oneHop: true,
       ...(botIdentity
         ? {
             botIdentity: Object.freeze({
@@ -404,11 +421,217 @@ export function finalizeImReply(invocation: ImInvocation, state: RunState): ImRe
       throw new Error(`unknown IM termination: ${exhaustive}`);
     }
   }
+  const answer =
+    invocation.kind === 'ordinary' &&
+    invocation.replyPolicy.senderOwnership.kind === 'mention' &&
+    state.terminal === 'done'
+      ? sanitizeImAnswer(state.finalText?.trim() ?? '')
+      : '';
+  const peerActivation =
+    answer.length > 0 ? firstTrustedPeerActivation(answer, invocation.trustedPeers) : undefined;
+  const finalState = peerActivation ? Object.freeze({ ...state, finalText: answer }) : state;
   return Object.freeze({
     ...invocation.replyPolicy,
     reason,
-    state,
+    state: finalState,
+    ...(peerActivation ? { peerActivation } : {}),
   });
+}
+
+export function sanitizeImAnswer(answer: string): string {
+  return answer
+    .replace(
+      /<at\b[^>]*>(.*?)<\/at>/gis,
+      (_match, label: string) => `\\@${label.replaceAll('@', '\\@')}`,
+    )
+    .replace(/<\/?at\b[^>]*>/gi, '');
+}
+
+const LEGAL_ALIAS = /^[\p{L}\p{N}_-]+$/u;
+const LEGAL_ALIAS_SOURCE = /^[\p{L}\p{N}\p{M}_-]+$/u;
+const EMAIL_LOCAL = /^[\p{L}\p{N}._%+\-]$/u;
+const RESERVED_ALIASES: Record<string, true> = { all: true, everyone: true, here: true };
+
+function firstTrustedPeerActivation(
+  answer: string,
+  trustedPeers: readonly ImTrustedPeer[],
+): ImPeerActivation | undefined {
+  const peersByAlias = new Map<string, ImTrustedPeer>();
+  for (const peer of trustedPeers) {
+    const alias = normalizeAlias(peer.alias);
+    if (LEGAL_ALIAS.test(alias) && !RESERVED_ALIASES[alias] && !peersByAlias.has(alias)) {
+      peersByAlias.set(alias, peer);
+    }
+  }
+  if (peersByAlias.size === 0) return undefined;
+
+  const excluded = markdownCodeRanges(answer);
+  let excludedIndex = 0;
+  for (let start = 0; start < answer.length; ) {
+    const range = excluded[excludedIndex];
+    if (range && start >= range[1]) {
+      excludedIndex++;
+      continue;
+    }
+    if (range && start >= range[0]) {
+      start = range[1];
+      continue;
+    }
+
+    const marker = codePointAt(answer, start);
+    if (marker.value.normalize('NFKC') !== '@') {
+      start = marker.end;
+      continue;
+    }
+    if (isEscapedAt(answer, start) || isEmailLikeAt(answer, start)) {
+      start = marker.end;
+      continue;
+    }
+
+    let end = marker.end;
+    while (end < answer.length) {
+      const tokenPart = codePointAt(answer, end);
+      if (!LEGAL_ALIAS_SOURCE.test(tokenPart.value.normalize('NFKC'))) break;
+      end = tokenPart.end;
+    }
+    const alias = normalizeAlias(answer.slice(marker.end, end));
+    const peer = LEGAL_ALIAS.test(alias) ? peersByAlias.get(alias) : undefined;
+    if (peer) {
+      return Object.freeze({ alias: peer.alias, openId: peer.openId, start, end });
+    }
+    start = end > marker.end ? end : marker.end;
+  }
+  return undefined;
+}
+
+function normalizeAlias(alias: string): string {
+  return alias.normalize('NFKC').toLowerCase();
+}
+
+function markdownCodeRanges(markdown: string): Array<readonly [number, number]> {
+  const fenced: Array<readonly [number, number]> = [];
+  let open: { start: number; marker: '`' | '~'; length: number } | undefined;
+  for (let lineStart = 0; lineStart < markdown.length; ) {
+    const newline = markdown.indexOf('\n', lineStart);
+    const lineEnd = newline < 0 ? markdown.length : newline;
+    const nextLine = newline < 0 ? markdown.length : newline + 1;
+    const line = markdown.slice(lineStart, lineEnd).replace(/\r$/, '');
+    if (!open) {
+      const match = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+      const marker = match?.[1];
+      if (marker) {
+        open = {
+          start: lineStart,
+          marker: marker[0] === '`' ? '`' : '~',
+          length: marker.length,
+        };
+      }
+    } else {
+      const close = new RegExp(`^ {0,3}\\${open.marker}{${open.length},}[ \\t]*$`);
+      if (close.test(line)) {
+        fenced.push([open.start, nextLine]);
+        open = undefined;
+      }
+    }
+    lineStart = nextLine;
+  }
+  if (open) fenced.push([open.start, markdown.length]);
+
+  const ranges = [...fenced];
+  for (let start = 0; start < markdown.length; ) {
+    const fence = rangeContaining(fenced, start);
+    if (fence) {
+      start = fence[1];
+      continue;
+    }
+    if (markdown[start] !== '`' || isEscapedAt(markdown, start)) {
+      start = codePointAt(markdown, start).end;
+      continue;
+    }
+    const length = delimiterLength(markdown, start, '`');
+    let close = start + length;
+    while (close < markdown.length) {
+      const closeFence = rangeContaining(fenced, close);
+      if (closeFence) {
+        close = closeFence[1];
+        continue;
+      }
+      if (
+        markdown[close] === '`' &&
+        !isEscapedAt(markdown, close) &&
+        delimiterLength(markdown, close, '`') === length
+      ) {
+        ranges.push([start, close + length]);
+        start = close + length;
+        close = -1;
+        break;
+      }
+      close = codePointAt(markdown, close).end;
+    }
+    if (close !== -1) start += length;
+  }
+  return ranges.sort((left, right) => left[0] - right[0]);
+}
+
+function rangeContaining(
+  ranges: readonly (readonly [number, number])[],
+  index: number,
+): readonly [number, number] | undefined {
+  let lower = 0;
+  let upper = ranges.length - 1;
+  while (lower <= upper) {
+    const middle = Math.floor((lower + upper) / 2);
+    const range = ranges[middle];
+    if (!range) return undefined;
+    if (index < range[0]) {
+      upper = middle - 1;
+    } else if (index >= range[1]) {
+      lower = middle + 1;
+    } else {
+      return range;
+    }
+  }
+  return undefined;
+}
+
+function delimiterLength(value: string, start: number, delimiter: string): number {
+  let end = start;
+  while (value[end] === delimiter) end++;
+  return end - start;
+}
+
+function isEscapedAt(value: string, start: number): boolean {
+  let slashes = 0;
+  let end = start;
+  while (end > 0) {
+    const previous = previousCodePoint(value, end);
+    if (previous.value.normalize('NFKC') !== '\\') break;
+    slashes++;
+    end = previous.start;
+  }
+  return slashes % 2 === 1;
+}
+
+function isEmailLikeAt(value: string, start: number): boolean {
+  if (start === 0) return false;
+  return EMAIL_LOCAL.test(previousCodePoint(value, start).value.normalize('NFKC'));
+}
+
+function codePointAt(value: string, start: number): { value: string; end: number } {
+  const point = value.codePointAt(start);
+  if (point === undefined) return { value: '', end: start };
+  const character = String.fromCodePoint(point);
+  return { value: character, end: start + character.length };
+}
+
+function previousCodePoint(
+  value: string,
+  end: number,
+): { value: string; start: number } {
+  let start = end - 1;
+  const trailing = value.charCodeAt(start);
+  if (start > 0 && trailing >= 0xdc00 && trailing <= 0xdfff) start--;
+  return { value: value.slice(start, end), start };
 }
 
 function snapshotSource(message: NormalizedMessage): ImSourceMessage {
