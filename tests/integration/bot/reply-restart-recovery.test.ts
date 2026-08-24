@@ -12,6 +12,7 @@ import {
   activateOmpReplyRecovery,
   OmpReplyController,
 } from '../../../src/bot/omp-reply-controller.js';
+import type { ImReplyPolicy } from '../../../src/bot/im-invocation.js';
 import { initialState } from '../../../src/card/run-state.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
 
@@ -22,6 +23,18 @@ const TARGET = {
   threadId: 'omt_topic',
   replyInThread: true,
 } as const;
+const REPLY_POLICY: ImReplyPolicy = {
+  invocationKind: 'ordinary',
+  scope: {
+    kind: 'topic',
+    id: 'oc_restart:omt_topic',
+    chatId: 'oc_restart',
+    threadId: 'omt_topic',
+    mode: 'topic',
+  },
+  target: TARGET,
+  senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+};
 const cleanups: Array<() => Promise<void>> = [];
 const journals: OmpDeliveryJournal[] = [];
 
@@ -57,7 +70,7 @@ describe('OMP Reply restart recovery', () => {
     });
     const reply = new OmpReplyController({
       channel: fake.channel,
-      target: TARGET,
+      replyPolicy: REPLY_POLICY,
       journal,
       runId: 'run_atomic',
       now: () => NOW,
@@ -67,7 +80,7 @@ describe('OMP Reply restart recovery', () => {
 
     expect(reserved).toMatchObject({
       runId: 'run_atomic',
-      target: TARGET,
+      replyPolicy: REPLY_POLICY,
       cardId: 'card_recovery',
       transport: 'managed',
       deliveryState: 'unknown',
@@ -89,14 +102,14 @@ describe('OMP Reply restart recovery', () => {
       'nextSequence',
       'pending',
       'runId',
-      'target',
+      'replyPolicy',
       'time',
       'transport',
     ]);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
 
-  it('deletes no-message, delivered, and not-sent entries without network calls', async () => {
+  it('recovers no-message and not-sent entries as one terminal Reply each', async () => {
     const tmp = await temporaryProfile();
     const path = join(tmp.profile, 'active-deliveries.json');
     await seed(path, [
@@ -110,7 +123,10 @@ describe('OMP Reply restart recovery', () => {
     await activateOmpReplyRecovery({ channel: fake.channel, journal: restarted, now: () => NOW });
 
     expect(restarted.entries()).toEqual([]);
-    expect(fake.reply).not.toHaveBeenCalled();
+    expect(fake.reply).toHaveBeenCalledTimes(2);
+    for (const call of fake.reply.mock.calls) {
+      expect(JSON.stringify(call[0])).toContain('"tag":"at","user_id":"ou_sender"');
+    }
     expect(fake.update).not.toHaveBeenCalled();
     expect(fake.close).not.toHaveBeenCalled();
     expect(fake.patch).not.toHaveBeenCalled();
@@ -180,12 +196,13 @@ describe('OMP Reply restart recovery', () => {
     const managedPayload = updatePayload(fake.update.mock.calls[0]?.[0]);
     const inlinePayload = JSON.stringify(fake.patch.mock.calls[0]?.[0]);
     for (const payload of [managedPayload, inlinePayload]) {
+      expect(payload.match(/ou_sender/g)).toHaveLength(1);
       expect(payload).not.toContain('调用工具 0 次');
       expect(payload).not.toContain('工具 0');
     }
   });
 
-  it('recovers reservations in the final-update and close crash windows', async () => {
+  it('exact-retries reservations in the final-update and close crash windows', async () => {
     const tmp = await temporaryProfile();
     const updatePath = join(tmp.profile, 'update-gap.json');
     const finalUpdate = updateOperation(7);
@@ -208,12 +225,10 @@ describe('OMP Reply restart recovery', () => {
       journal: updateRestart,
       now: () => NOW,
     });
-
+    expect(updateFake.update).toHaveBeenCalledOnce();
     expect(updateFake.update.mock.calls[0]?.[0]).toEqual(finalUpdate.request);
-    expect(updateFake.update).toHaveBeenCalledTimes(2);
-    expect(updateFake.update.mock.calls[1]?.[0]).toMatchObject({ data: { sequence: 8 } });
-    expect(updatePayload(updateFake.update.mock.calls[1]?.[0])).toContain('运行已中断');
-    expect(updateFake.close.mock.calls[0]?.[0]).toMatchObject({ data: { sequence: 9 } });
+    expect(updateFake.close).toHaveBeenCalledOnce();
+    expect(updateFake.close.mock.calls[0]?.[0]).toMatchObject({ data: { sequence: 8 } });
     expect(updateRestart.entries()).toEqual([]);
 
     const closePath = join(tmp.profile, 'close-gap.json');
@@ -238,11 +253,9 @@ describe('OMP Reply restart recovery', () => {
       now: () => NOW,
     });
 
+    expect(closeFake.close).toHaveBeenCalledOnce();
     expect(closeFake.close.mock.calls[0]?.[0]).toEqual(finalClose.request);
-    expect(closeFake.update).toHaveBeenCalledOnce();
-    expect(closeFake.update.mock.calls[0]?.[0]).toMatchObject({ data: { sequence: 9 } });
-    expect(updatePayload(closeFake.update.mock.calls[0]?.[0])).toContain('运行已中断');
-    expect(closeFake.close.mock.calls[1]?.[0]).toMatchObject({ data: { sequence: 10 } });
+    expect(closeFake.update).not.toHaveBeenCalled();
     expect(closeRestart.entries()).toEqual([]);
   });
 
@@ -333,7 +346,7 @@ describe('OMP Reply restart recovery', () => {
     await writeFile(
       mismatchPath,
       JSON.stringify({
-        version: 1,
+        version: 2,
         entries: [
           {
             ...knownDelivery('run_identity_mismatch'),
@@ -391,6 +404,13 @@ describe('OMP Reply restart recovery', () => {
     expect(fake.update).not.toHaveBeenCalled();
     expect(fake.close).not.toHaveBeenCalled();
     expect(fake.patch).not.toHaveBeenCalled();
+
+    const oldPath = join(tmp.profile, 'old-journal.json');
+    await writeFile(oldPath, JSON.stringify({ version: 1, entries: [] }), { mode: 0o600 });
+    const oldFailures: DeliveryFailure[] = [];
+    const old = trackedJournal(oldPath, oldFailures);
+    await activateOmpReplyRecovery({ channel: fake.channel, journal: old, now: () => NOW });
+    expect(oldFailures).toEqual([{ reason: 'incompatible-journal-version' }]);
   });
 });
 
@@ -419,7 +439,7 @@ async function seed(path: string, entries: readonly ActiveDelivery[]): Promise<v
 function delivery(runId: string, deliveryState: ActiveDelivery['deliveryState']): ActiveDelivery {
   return {
     runId,
-    target: TARGET,
+    replyPolicy: REPLY_POLICY,
     deliveryState,
     nextSequence: 1,
     time: { openedAtMs: NOW - 1_000 },

@@ -1,3 +1,4 @@
+import type { ImReplyPlan } from '../bot/im-invocation';
 import { deepMaskEmails, maskEmails } from './mask-email';
 import type { RunState, ToolEntry, ToolStatus } from './run-state';
 
@@ -5,10 +6,15 @@ const MAX_CARD_BYTES = 30 * 1024;
 const MAX_CARD_ELEMENTS = 200;
 const TRUNCATION_MARKER = '内容过长，已截断';
 
+export type ReplyMentionMode = 'mention' | 'plain' | 'omit';
+
 type RenderOptions = Readonly<{
   streamingMode: boolean;
   toolCount?: number | null;
+  mentionMode?: ReplyMentionMode;
 }>;
+
+type ReplyInput = RunState | ImReplyPlan;
 
 type OmpReplyPresentation = Readonly<{
   finalReply: string;
@@ -16,33 +22,35 @@ type OmpReplyPresentation = Readonly<{
   summary: string;
 }>;
 
-export function renderOmpReplyCard(state: RunState, options?: RenderOptions): object {
+export function renderOmpReplyCard(input: ReplyInput, options?: RenderOptions): object {
+  const state = replyState(input);
   let reasoning = state.reasoningEntries ?? [];
   let tools = state.tools;
   const finalText = ompReplyPresentation(state).finalReply;
-  let card = buildOmpReplyCard(state, reasoning, tools, finalText, options);
+  let card = buildOmpReplyCard(input, reasoning, tools, finalText, options);
 
   while (!withinCardBudget(card) && reasoning.length > 0) {
     reasoning = reasoning.slice(1);
-    card = buildOmpReplyCard(state, reasoning, tools, finalText, options);
+    card = buildOmpReplyCard(input, reasoning, tools, finalText, options);
   }
   while (!withinCardBudget(card) && tools.length > 0) {
     tools = tools.slice(1);
-    card = buildOmpReplyCard(state, reasoning, tools, finalText, options);
+    card = buildOmpReplyCard(input, reasoning, tools, finalText, options);
   }
   if (!withinCardBudget(card) && state.terminal === 'done') {
-    card = truncateFinalReply(state, reasoning, tools, finalText, options);
+    card = truncateFinalReply(input, reasoning, tools, finalText, options);
   }
   return card;
 }
 
 function buildOmpReplyCard(
-  state: RunState,
+  input: ReplyInput,
   reasoning: readonly string[],
   tools: readonly ToolEntry[],
   finalText: string,
   options: RenderOptions | undefined,
 ): object {
+  const state = replyState(input);
   const running = state.terminal === 'running';
   const presentation = ompReplyPresentation(state);
   const activity = state.activityStack?.at(-1)?.label;
@@ -97,7 +105,7 @@ function buildOmpReplyCard(
           element_id: 'answer',
           content: running
             ? "**正在完成请求**\n<font color='grey'>回复会在确认后原位出现。</font>"
-            : finalText,
+            : withSenderOwnership(input, finalText, options?.mentionMode),
           text_size: 'body',
         },
         ...metricsElements(state),
@@ -121,7 +129,7 @@ function buildOmpReplyCard(
 }
 
 function truncateFinalReply(
-  state: RunState,
+  input: ReplyInput,
   reasoning: readonly string[],
   tools: readonly ToolEntry[],
   finalText: string,
@@ -129,13 +137,13 @@ function truncateFinalReply(
 ): object {
   let lower = 0;
   let upper = finalText.length;
-  let best = buildOmpReplyCard(state, reasoning, tools, TRUNCATION_MARKER, options);
+  let best = buildOmpReplyCard(input, reasoning, tools, TRUNCATION_MARKER, options);
 
   while (lower < upper) {
     let middle = codePointBoundary(finalText, Math.floor((lower + upper + 1) / 2));
     if (middle <= lower) middle = upper;
     const candidate = buildOmpReplyCard(
-      state,
+      input,
       reasoning,
       tools,
       `${finalText.slice(0, middle)}${TRUNCATION_MARKER}`,
@@ -202,23 +210,28 @@ function previousCodePointBoundary(value: string, index: number): number {
     : previous;
 }
 
-export function renderOmpReplyMarkdown(state: RunState): string {
+export function renderOmpReplyMarkdown(
+  input: ReplyInput,
+  mentionMode?: ReplyMentionMode,
+): string {
+  const state = replyState(input);
   if (state.terminal === 'running') {
     throw new Error('cannot render a running OMP Reply as terminal Markdown');
   }
   const finalText = ompReplyPresentation(state).finalReply;
-  const full = buildOmpReplyMarkdown(state, finalText);
+  const full = buildOmpReplyMarkdown(input, finalText, mentionMode);
   if (withinMarkdownBudget(full) || state.terminal !== 'done') return full;
 
   let lower = 0;
   let upper = finalText.length;
-  let best = buildOmpReplyMarkdown(state, TRUNCATION_MARKER);
+  let best = buildOmpReplyMarkdown(input, TRUNCATION_MARKER, mentionMode);
   while (lower < upper) {
     let middle = codePointBoundary(finalText, Math.floor((lower + upper + 1) / 2));
     if (middle <= lower) middle = upper;
     const candidate = buildOmpReplyMarkdown(
-      state,
+      input,
       `${finalText.slice(0, middle)}${TRUNCATION_MARKER}`,
+      mentionMode,
     );
     if (withinMarkdownBudget(candidate)) {
       lower = middle;
@@ -230,8 +243,22 @@ export function renderOmpReplyMarkdown(state: RunState): string {
   return best;
 }
 
-export function renderOmpReplyMarkdownPost(state: RunState): object {
-  return markdownPost(renderOmpReplyMarkdown(state));
+export function renderOmpReplyMarkdownPost(
+  input: ReplyInput,
+  mentionMode?: ReplyMentionMode,
+): object {
+  if (isImReplyPlan(input) && input.senderOwnership.kind === 'mention' && mentionMode !== 'plain') {
+    return {
+      zh_cn: {
+        title: '',
+        content: [
+          [{ tag: 'at', user_id: input.senderOwnership.openId }],
+          [{ tag: 'md', text: renderOmpReplyMarkdown(input, 'omit') }],
+        ],
+      },
+    };
+  }
+  return markdownPost(renderOmpReplyMarkdown(input, mentionMode));
 }
 
 function withinMarkdownBudget(markdown: string): boolean {
@@ -247,11 +274,16 @@ function markdownPost(markdown: string): object {
   };
 }
 
-function buildOmpReplyMarkdown(state: RunState, finalText: string): string {
+function buildOmpReplyMarkdown(
+  input: ReplyInput,
+  finalText: string,
+  mentionMode?: ReplyMentionMode,
+): string {
+  const state = replyState(input);
   const presentation = ompReplyPresentation(state);
   const metrics = metricParts(state).join(' · ');
   return maskEmails(
-    `**回复**\n\n${finalText}\n\n_状态: ${presentation.statusLabel}_${metrics ? `\n\n_${metrics}_` : ''}`,
+    `**回复**\n\n${withSenderOwnership(input, finalText, mentionMode)}\n\n_状态: ${presentation.statusLabel}_${metrics ? `\n\n_${metrics}_` : ''}`,
   );
 }
 
@@ -370,8 +402,40 @@ const TOOL_STATUS_PRESENTATION: Record<ToolStatus, Readonly<{ icon: string; labe
 
 function toolRow(tool: ToolEntry): string {
   const status = TOOL_STATUS_PRESENTATION[tool.status];
-  return `- ${status.icon} **${escapeMarkdown(tool.name)}** · ${tool.action} · ${status.label}`;
+  return `- ${status.icon} **${escapeMarkdown(tool.name)}** · ${escapeMarkdown(tool.action)} · ${status.label}`;
 }
+function replyState(input: ReplyInput): RunState {
+  return isImReplyPlan(input) ? input.state : input;
+}
+
+function isImReplyPlan(input: ReplyInput): input is ImReplyPlan {
+  return 'senderOwnership' in input;
+}
+
+function withSenderOwnership(
+  input: ReplyInput,
+  body: string,
+  mentionMode: ReplyMentionMode = 'mention',
+): string {
+  const safeBody = isImReplyPlan(input) ? stripAtMentions(body) : body;
+  if (
+    !isImReplyPlan(input) ||
+    input.senderOwnership.kind === 'none' ||
+    mentionMode === 'omit'
+  ) {
+    return safeBody;
+  }
+  const owner =
+    mentionMode === 'plain'
+      ? '\\@请求者\n<font color="grey">Mention 不可用，已改为文本归属</font>'
+      : `<at id="${escapeAttribute(input.senderOwnership.openId)}"></at>`;
+  return `${owner}\n\n${safeBody}`;
+}
+
+function escapeAttribute(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+}
+
 
 export function ompReplyPresentation(state: RunState): OmpReplyPresentation {
   const statusLabel =
@@ -406,5 +470,11 @@ export function ompReplyPresentation(state: RunState): OmpReplyPresentation {
 }
 
 function escapeMarkdown(value: string): string {
-  return value.replace(/([\\`*_{}[\]()#+.!\-|>])/g, '\\$1');
+  return stripAtMentions(value).replace(/([\\`*_{}[\]()#+.!\-|>])/g, '\\$1');
+}
+
+function stripAtMentions(value: string): string {
+  return value
+    .replace(/<at\b[^>]*>(.*?)<\/at>/gis, '\\@$1')
+    .replace(/<\/?at\b[^>]*>/gi, '');
 }

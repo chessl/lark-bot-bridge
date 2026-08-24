@@ -68,7 +68,7 @@ describe('OMP profile runtime resolver', () => {
       omp: { binaryPath: '/usr/local/bin/omp' },
     });
     await saveRootConfig(
-      { schemaVersion: 2, activeProfile: 'work', profiles: { work: profile } },
+      { schemaVersion: 3, activeProfile: 'work', profiles: { work: profile } },
       configPath,
     );
 
@@ -115,7 +115,7 @@ describe('OMP profile runtime resolver', () => {
       omp: { binaryPath: '/usr/local/bin/omp' },
     });
     await saveRootConfig(
-      { schemaVersion: 2, activeProfile: 'work', profiles: { work: profile } },
+      { schemaVersion: 3, activeProfile: 'work', profiles: { work: profile } },
       configPath,
     );
     await expect(materializeEnvSecretForService({ config: configPath })).resolves.toBe(false);

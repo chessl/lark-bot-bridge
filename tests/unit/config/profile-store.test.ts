@@ -35,7 +35,7 @@ describe('OMP profile store', () => {
 
     await saveRootConfig(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         activeProfile: 'work',
         profiles: { work: profile },
       },
@@ -53,9 +53,17 @@ describe('OMP profile store', () => {
     await writeFile(
       configPath,
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         activeProfile: 'work',
-        profiles: { work: { accounts: { app } } },
+        profiles: {
+          work: {
+            app,
+            collaboration: {
+              trustedPeerBots: [],
+              personalSubstitution: { enabled: false, targetOpenIds: [] },
+            },
+          },
+        },
       }),
     );
 
@@ -70,7 +78,7 @@ describe('OMP profile store', () => {
     profile.meeting = { ...profile.meeting, enabled: true, respondIn: 'both' };
 
     await saveRootConfig(
-      { schemaVersion: 2, activeProfile: 'work', profiles: { work: profile } },
+      { schemaVersion: 3, activeProfile: 'work', profiles: { work: profile } },
       configPath,
     );
     const loaded = await loadRootConfig(configPath);
@@ -82,5 +90,16 @@ describe('OMP profile store', () => {
     });
     expect(loaded?.profiles.work?.meeting).toMatchObject({ enabled: true, respondIn: 'both' });
     expect(loaded?.profiles.work?.omp).toEqual(omp);
+  });
+
+  it('rejects the old Root Config format explicitly', async () => {
+    const root = await tmpRoot();
+    const configPath = join(root, 'config.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({ schemaVersion: 2, activeProfile: 'work', profiles: {} }),
+    );
+
+    await expect(loadRootConfig(configPath)).rejects.toThrow(/incompatible Root Config format/);
   });
 });

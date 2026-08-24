@@ -4,7 +4,7 @@ import type * as LarkChannelModule from '@larksuite/channel';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { AgentEvent } from '../../../src/agent/types.js';
-import type { ImReplyPlan } from '../../../src/bot/im-invocation.js';
+import type { ImReplyPlan, ImReplyPolicy, ImReplyTarget } from '../../../src/bot/im-invocation.js';
 import { OmpReplyController } from '../../../src/bot/omp-reply-controller.js';
 import {
   createRunState,
@@ -58,6 +58,7 @@ interface FakeLarkChannel {
         message: {
           get: Mock<(...args: unknown[]) => Promise<unknown>>;
           reply: Mock<(input: unknown) => Promise<unknown>>;
+          patch: Mock<(input: unknown) => Promise<unknown>>;
         };
         messageReaction: {
           create: Mock<(...args: unknown[]) => Promise<unknown>>;
@@ -569,11 +570,11 @@ describe('P2P OMP Reply', () => {
 
     await new OmpReplyController({
       channel: exactChannel as unknown as LarkChannel,
-      target,
+      replyPolicy: testReplyPolicy(target),
     }).open(exactState);
     await new OmpReplyController({
       channel: overChannel as unknown as LarkChannel,
-      target,
+      replyPolicy: testReplyPolicy(target),
     }).open(overState);
 
     const exact = exactChannel.createdCards[0];
@@ -601,7 +602,7 @@ describe('P2P OMP Reply', () => {
     } as const;
     const controller = new OmpReplyController({
       channel: channel as unknown as LarkChannel,
-      target: progressTarget,
+      replyPolicy: testReplyPolicy(progressTarget),
     });
     await controller.open(createRunState());
     const plan: ImReplyPlan = {
@@ -618,13 +619,71 @@ describe('P2P OMP Reply', () => {
         messageId: 'om_final_target',
         replyInThread: false,
       },
+      senderOwnership: { kind: 'none', reason: 'verified-bot-sender' },
       state: finalizeIfRunning(createRunState()),
     };
 
     await expect(controller.finish(plan)).rejects.toThrow(
-      'Final IM Reply target differs from the Progress Reply target',
+      'Final IM Reply policy differs from the frozen Progress Reply policy',
     );
   });
+
+  it('degrades a rejected sender Mention inside the known Reply', async () => {
+    const target = {
+      chatId: 'oc_sender_owner',
+      messageId: 'om_sender_owner',
+      replyInThread: false,
+    } as const;
+    const replyPolicy: ImReplyPolicy = {
+      ...testReplyPolicy(target),
+      senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+    };
+    const channel = createFakeLarkChannel({
+      update: async () => ({ code: 230001, msg: 'mention rejected' }),
+    });
+    const controller = new OmpReplyController({
+      channel: channel as unknown as LarkChannel,
+      replyPolicy,
+    });
+    await controller.open(createRunState());
+    const state: RunState = {
+      ...finalizeIfRunning(createRunState()),
+      finalText: 'answer',
+    };
+
+    await controller.finish({
+      ...replyPolicy,
+      reason: 'run-completed',
+      state,
+    });
+
+    expect(channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+    expect(channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce();
+    expect(JSON.stringify(channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0])).toContain(
+      '<at id=\\\"ou_sender\\\"></at>',
+    );
+    expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledOnce();
+    const patch = JSON.stringify(channel.rawClient.im.v1.message.patch.mock.calls[0]?.[0]);
+    expect(patch).toContain('om_reply_1');
+    expect(patch).toContain('Mention 不可用');
+    expect(patch).toContain('\\\\@请求者');
+    expect(patch).not.toContain('<at');
+    expect(channel.sent).toEqual([]);
+  });
+
+function testReplyPolicy(target: ImReplyTarget): ImReplyPolicy {
+  return {
+    invocationKind: 'ordinary',
+    scope: {
+      kind: 'chat',
+      id: target.chatId,
+      chatId: target.chatId,
+      mode: 'group',
+    },
+    target,
+    senderOwnership: { kind: 'none', reason: 'verified-bot-sender' },
+  };
+}
 
   it('captures an exact 30 KB terminal card with metrics, marker, and one IM Reply', async () => {
     const h = await createHarness({
@@ -1320,6 +1379,7 @@ function createFakeLarkChannel(
     reply?: (input: unknown) => Promise<unknown>;
     update?: (input: unknown) => Promise<unknown>;
     close?: (input: unknown) => Promise<unknown>;
+    patch?: (input: unknown) => Promise<unknown>;
   } = {},
 ): FakeLarkChannel {
   const handlers: MessageHandlerMap = {};
@@ -1348,6 +1408,10 @@ function createFakeLarkChannel(
     operations.push(`card:close:${sequence}`);
     return options.close ? options.close(input) : { code: 0 };
   });
+  const patch = vi.fn(async (input: unknown) => {
+    operations.push('im:patch');
+    return options.patch ? options.patch(input) : { code: 0 };
+  });
 
   return {
     handlers,
@@ -1371,6 +1435,7 @@ function createFakeLarkChannel(
           message: {
             get: vi.fn(async () => ({ data: { items: [] } })),
             reply: replyMock,
+            patch,
           },
           messageReaction: {
             create: vi.fn(async (input: unknown) => {

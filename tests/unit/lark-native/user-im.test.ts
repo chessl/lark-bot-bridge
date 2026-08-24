@@ -45,7 +45,7 @@ describe('native user identity', () => {
     roots.push(rootDir);
     await saveRootConfig(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         activeProfile: 'default',
         profiles: {
           default: createDefaultProfileConfig({

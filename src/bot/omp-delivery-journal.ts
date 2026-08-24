@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { log } from '../core/logger';
 import { writeFileAtomic } from '../platform/atomic-write';
+import type { ImReplyPolicy } from './im-invocation';
 
 const ReplyTargetSchema = z.discriminatedUnion('replyInThread', [
   z.object({
@@ -16,6 +17,42 @@ const ReplyTargetSchema = z.discriminatedUnion('replyInThread', [
     replyInThread: z.literal(true),
   }),
 ]);
+const ConversationScopeSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('chat'),
+    id: z.string().min(1),
+    chatId: z.string().min(1),
+    mode: z.enum(['p2p', 'group', 'topic']),
+  }),
+  z.object({
+    kind: z.literal('topic'),
+    id: z.string().min(1),
+    chatId: z.string().min(1),
+    threadId: z.string().min(1),
+    mode: z.literal('topic'),
+  }),
+]);
+const SenderOwnershipSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('mention'), openId: z.string().min(1) }),
+  z.object({
+    kind: z.literal('none'),
+    reason: z.enum([
+      'missing-raw-sender',
+      'missing-sender-id',
+      'contradictory-sender-id',
+      'contradictory-sender-type',
+      'unknown-sender-type',
+      'direct-message',
+      'verified-bot-sender',
+    ]),
+  }),
+]);
+const ReplyPolicySchema = z.object({
+  invocationKind: z.literal('ordinary'),
+  scope: ConversationScopeSchema,
+  target: ReplyTargetSchema,
+  senderOwnership: SenderOwnershipSchema,
+}) satisfies z.ZodType<ImReplyPolicy>;
 const DeliveryStateSchema = z.enum([
   'no_message',
   'unknown',
@@ -86,7 +123,7 @@ const PendingOperationSchema = z.discriminatedUnion('kind', [
 ]);
 const ActiveDeliverySchema = z.object({
   runId: z.string().min(1),
-  target: ReplyTargetSchema,
+  replyPolicy: ReplyPolicySchema,
   cardId: z.string().min(1).optional(),
   messageId: z.string().min(1).optional(),
   transport: ReplyTransportSchema.optional(),
@@ -98,7 +135,7 @@ const ActiveDeliverySchema = z.object({
   }),
   pending: PendingOperationSchema.optional(),
 });
-const JournalFileSchema = z.object({ version: z.literal(1), entries: z.array(z.unknown()) });
+const JournalFileSchema = z.object({ version: z.literal(2), entries: z.array(z.unknown()) });
 
 export type DeliveryState = z.infer<typeof DeliveryStateSchema>;
 export type ReplyTransport = z.infer<typeof ReplyTransportSchema>;
@@ -107,6 +144,7 @@ export type ActiveDelivery = z.infer<typeof ActiveDeliverySchema>;
 
 export type DeliveryFailureReason =
   | 'journal-read-failed'
+  | 'incompatible-journal-version'
   | 'corrupt-journal-json'
   | 'corrupt-journal-shape'
   | 'corrupt-journal-entry'
@@ -174,6 +212,15 @@ export class OmpDeliveryJournal {
       raw = JSON.parse(text);
     } catch {
       this.recordFailure(undefined, 'corrupt-journal-json');
+      return;
+    }
+    if (
+      typeof raw === 'object' &&
+      raw !== null &&
+      'version' in raw &&
+      raw.version !== 2
+    ) {
+      this.recordFailure(undefined, 'incompatible-journal-version');
       return;
     }
     const file = JournalFileSchema.safeParse(raw);
@@ -249,7 +296,7 @@ export class OmpDeliveryJournal {
   private enqueue(change: () => void): Promise<void> {
     const result = this.#writer.then(async () => {
       change();
-      const file = { version: 1, entries: [...this.#entries.values()] } satisfies z.input<
+      const file = { version: 2, entries: [...this.#entries.values()] } satisfies z.input<
         typeof JournalFileSchema
       >;
       await writeFileAtomic(this.#path, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 });
@@ -287,8 +334,8 @@ function isConsistentActiveDelivery(entry: ActiveDelivery): boolean {
       entry.transport === pending.transport &&
       entry.messageId === undefined &&
       pending.uuid === pending.request.data.uuid &&
-      pending.request.path.message_id === entry.target.messageId &&
-      pending.request.data.reply_in_thread === entry.target.replyInThread
+      pending.request.path.message_id === entry.replyPolicy.target.messageId &&
+      pending.request.data.reply_in_thread === entry.replyPolicy.target.replyInThread
     );
   }
   if (pending.kind === 'patch') {

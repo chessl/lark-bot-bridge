@@ -113,6 +113,6 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
     });
     await mkdir(join(root, 'profiles', name), { recursive: true });
   }
-  const config: RootConfig = { schemaVersion: 2, activeProfile, profiles };
+  const config: RootConfig = { schemaVersion: 3, activeProfile, profiles };
   await writeFile(join(root, 'config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 }

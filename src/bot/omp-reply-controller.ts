@@ -4,6 +4,7 @@ import {
   ompReplyPresentation,
   renderOmpReplyCard,
   renderOmpReplyMarkdownPost,
+  type ReplyMentionMode,
 } from '../card/omp-reply-renderer';
 import {
   initialState as emptyRunState,
@@ -11,7 +12,14 @@ import {
   type RunState,
   type Terminal,
 } from '../card/run-state';
-import type { ImReplyPlan, ImReplyReason, ImReplyTarget } from './im-invocation';
+import { log } from '../core/logger';
+import type {
+  ImReplyPlan,
+  ImReplyPolicy,
+  ImReplyReason,
+  ImReplyTarget,
+  ImSenderOwnershipReason,
+} from './im-invocation';
 import type {
   ActiveDelivery,
   DeliveryFailureReason,
@@ -66,7 +74,7 @@ const CARD_ALREADY_BOUND = 200780;
 /** Owns the one CardKit bubble used by an OMP instant-message Run. */
 export class OmpReplyController {
   readonly #channel: LarkChannel;
-  readonly #target: ImReplyTarget;
+  readonly #replyPolicy: ImReplyPolicy;
   readonly #journal: OmpDeliveryJournal | undefined;
   readonly #runId: string | undefined;
   readonly #now: () => number;
@@ -89,7 +97,7 @@ export class OmpReplyController {
 
   constructor(input: {
     channel: LarkChannel;
-    target: ImReplyTarget;
+    replyPolicy: ImReplyPolicy;
     journal?: OmpDeliveryJournal;
     runId?: string;
     now?: () => number;
@@ -98,7 +106,7 @@ export class OmpReplyController {
       throw new Error('OMP Reply journal and runId must be provided together');
     }
     this.#channel = input.channel;
-    this.#target = input.target;
+    this.#replyPolicy = input.replyPolicy;
     this.#journal = input.journal;
     this.#runId = input.runId;
     this.#now = input.now ?? Date.now;
@@ -130,7 +138,7 @@ export class OmpReplyController {
           'interactive',
           JSON.stringify({ type: 'card', data: { card_id: cardId } }),
           false,
-          this.#target,
+          this.#replyPolicy.target,
         );
         if (result === 'success') return;
       }
@@ -141,7 +149,7 @@ export class OmpReplyController {
         'interactive',
         JSON.stringify(inlineCard),
         false,
-        this.#target,
+        this.#replyPolicy.target,
       );
       if (inline === 'success') return;
 
@@ -175,7 +183,7 @@ export class OmpReplyController {
   }
 
   async finish(plan: ImReplyPlan): Promise<void> {
-    validateFinalPlan(plan, this.#target);
+    validateFinalPlan(plan, this.#replyPolicy);
     const finalState = plan.state;
     if (finalState.terminal === 'running') throw new Error('cannot finish a running OMP Reply');
     if (this.#terminalRequested || this.#finished) throw new Error('OMP Reply is already finished');
@@ -185,34 +193,58 @@ export class OmpReplyController {
     clearTimeout(this.#projectionTimer);
     this.#projectionTimer = undefined;
     this.#latestProjection = undefined;
-    const staticTerminal = makeProjection(renderOmpReplyCard(finalState));
+    const staticTerminal = makeProjection(renderOmpReplyCard(plan));
+    const degradedTerminal =
+      plan.senderOwnership.kind === 'mention'
+        ? makeProjection(renderOmpReplyCard(plan, { streamingMode: false, mentionMode: 'plain' }))
+        : undefined;
+    logReplyMention('planned', plan, transport, mentionReason(plan));
 
     await this.enqueue(async () => {
       if (this.#pending) throw this.pendingError();
 
       if (transport === 'managed') {
         const update = await this.commitManagedProjection(
-          makeProjection(renderManagedCard(finalState)),
+          makeProjection(renderManagedCard(plan)),
           true,
         );
         if (update === 'rejected') {
-          await this.patchKnownTerminal(staticTerminal);
+          await this.patchKnownTerminal(
+            degradedTerminal ?? staticTerminal,
+            plan,
+            Boolean(degradedTerminal),
+          );
         } else {
           const close = await this.commitClose(finalState);
-          if (close === 'rejected') await this.patchKnownTerminal(staticTerminal);
+          if (close === 'rejected') {
+            await this.patchKnownTerminal(staticTerminal, plan, false);
+          }
         }
       } else if (transport === 'inline') {
-        await this.patchKnownTerminal(staticTerminal);
+        await this.patchKnownTerminal(staticTerminal, plan, false, degradedTerminal);
       } else {
         const markdown = await this.commitReply(
           'markdown',
           'post',
-          JSON.stringify(renderOmpReplyMarkdownPost(finalState)),
+          JSON.stringify(renderOmpReplyMarkdownPost(plan)),
           true,
           plan.target,
         );
-        if (markdown === 'rejected') throw this.deliveryFailure('terminal-markdown-rejected');
+        if (markdown === 'rejected' && plan.senderOwnership.kind === 'mention') {
+          logReplyMention('degraded', plan, transport, 'mention-rejected');
+          const degraded = await this.commitReply(
+            'markdown',
+            'post',
+            JSON.stringify(renderOmpReplyMarkdownPost(plan, 'plain')),
+            true,
+            plan.target,
+          );
+          if (degraded === 'rejected') throw this.deliveryFailure('terminal-markdown-rejected');
+        } else if (markdown === 'rejected') {
+          throw this.deliveryFailure('terminal-markdown-rejected');
+        }
       }
+      logReplyMention('rendered', plan, transport, mentionReason(plan));
       this.#finished = true;
     });
   }
@@ -323,10 +355,24 @@ export class OmpReplyController {
     return this.commitPending();
   }
 
-  private async patchKnownTerminal(projection: Projection): Promise<void> {
+  private async patchKnownTerminal(
+    projection: Projection,
+    plan: ImReplyPlan,
+    degraded: boolean,
+    fallback?: Projection,
+  ): Promise<void> {
     if (!this.#messageId) throw this.deliveryFailure('known-message-missing-message-id');
     const patch = await this.commitStaticPatch(projection, true);
-    if (patch === 'rejected') throw this.deliveryFailure('static-terminal-patch-rejected');
+    if (patch === 'success') {
+      if (degraded) logReplyMention('degraded', plan, this.requireOpen(), 'mention-rejected');
+      return;
+    }
+    if (fallback) {
+      logReplyMention('degraded', plan, this.requireOpen(), 'mention-rejected');
+      const retry = await this.commitStaticPatch(fallback, true);
+      if (retry === 'success') return;
+    }
+    throw this.deliveryFailure('static-terminal-patch-rejected');
   }
 
   private async commitStaticPatch(
@@ -436,7 +482,7 @@ export class OmpReplyController {
       pending && pending.sequence > 0 ? pending.sequence + 1 : this.#sequence + 1;
     const entry: ActiveDelivery = {
       runId,
-      target: this.#target,
+      replyPolicy: this.#replyPolicy,
       ...(this.#cardId ? { cardId: this.#cardId } : {}),
       ...(this.#messageId ? { messageId: this.#messageId } : {}),
       ...(this.#transport ? { transport: this.#transport } : {}),
@@ -555,20 +601,20 @@ async function scanRecoverableDeliveries(
 ): Promise<void> {
   for (const entry of journal.entries()) {
     if (journal.isClaimed(entry.runId)) continue;
-    if (
-      entry.deliveryState === 'no_message' ||
-      entry.deliveryState === 'delivered' ||
-      entry.deliveryState === 'not_sent'
-    ) {
-      if (startup) await journal.remove(entry.runId);
-      continue;
-    }
     const scanNow = now();
     if (
       entry.time.openedAtMs > scanNow ||
       (entry.time.messageKnownAtMs !== undefined && entry.time.messageKnownAtMs > scanNow)
     ) {
       await failRecovery(journal, entry, 'recovery-timestamp-in-future');
+      continue;
+    }
+    if (entry.deliveryState === 'delivered') {
+      if (startup) await journal.remove(entry.runId);
+      continue;
+    }
+    if (entry.deliveryState === 'no_message' || entry.deliveryState === 'not_sent') {
+      if (startup) await recoverInterrupted(channel, journal, entry, now);
       continue;
     }
     if (entry.deliveryState === 'message_known') {
@@ -616,11 +662,45 @@ async function retryUnknownOperation(
     if (attempt.result === 'unknown') return;
     if (attempt.result === 'rejected') {
       if (pending.kind === 'reply' && entry.time.messageKnownAtMs === undefined) {
-        await journal.remove(entry.runId);
+        const plan = interruptedReplyPlan(entry.replyPolicy);
+        logReplyMention('planned', plan, 'markdown', mentionReason(plan));
+        const mentionMode = plan.senderOwnership.kind === 'mention' ? 'plain' : 'mention';
+        if (mentionMode === 'plain') {
+          logReplyMention('degraded', plan, 'markdown', 'mention-rejected');
+        }
+        await recoverInterruptedWithoutMessage(
+          channel,
+          journal,
+          { ...entry, deliveryState: 'not_sent', pending: undefined },
+          plan,
+          mentionMode,
+        );
         return;
       }
-      if (pending.kind === 'patch') {
-        await failRecovery(journal, entry, 'static-terminal-patch-rejected');
+      if (
+        pending.terminal &&
+        (pending.kind === 'update' || pending.kind === 'patch') &&
+        entry.replyPolicy.senderOwnership.kind === 'mention'
+      ) {
+        const known = clearPending(entry, now, attempt.messageId);
+        await journal.put(known);
+        const plan = interruptedReplyPlan(entry.replyPolicy);
+        logReplyMention('degraded', plan, entry.transport ?? 'inline', 'mention-rejected');
+        await patchRecoveredMessage(
+          channel,
+          journal,
+          known,
+          plan,
+          makeProjection(
+            renderOmpReplyCard(plan, {
+              streamingMode: false,
+              toolCount: null,
+              mentionMode: 'plain',
+            }),
+          ),
+          'plain',
+          false,
+        );
         return;
       }
       const known = clearPending(entry, now, attempt.messageId);
@@ -630,7 +710,22 @@ async function retryUnknownOperation(
     }
 
     const known = clearPending(entry, now, attempt.messageId);
+    if (pending.terminal && pending.kind !== 'update') {
+      logReplyRecovery('terminal-request-replayed', entry);
+      await journal.remove(entry.runId);
+      return;
+    }
     await journal.put(known);
+    if (pending.terminal) {
+      await closeRecoveredManaged(
+        channel,
+        journal,
+        known,
+        now,
+        interruptedReplyPlan(entry.replyPolicy),
+      );
+      return;
+    }
     await recoverInterrupted(channel, journal, known, now);
   } finally {
     journal.release(entry.runId);
@@ -666,9 +761,10 @@ async function recoverInterrupted(
 ): Promise<void> {
   journal.claim(entry.runId);
   try {
-    const interrupted = markInterrupted(emptyRunState);
+    const plan = interruptedReplyPlan(entry.replyPolicy);
+    logReplyMention('planned', plan, entry.transport ?? 'markdown', mentionReason(plan));
     const staticProjection = makeProjection(
-      renderOmpReplyCard(interrupted, { streamingMode: false, toolCount: null }),
+      renderOmpReplyCard(plan, { streamingMode: false, toolCount: null }),
     );
     if (entry.transport === 'managed' && entry.cardId) {
       const sequence = entry.nextSequence;
@@ -683,7 +779,7 @@ async function recoverInterrupted(
           data: {
             card: {
               type: 'card_json',
-              data: JSON.stringify(renderManagedCard(interrupted, null)),
+              data: JSON.stringify(renderManagedCard(plan, null)),
             },
             sequence,
             uuid,
@@ -695,16 +791,99 @@ async function recoverInterrupted(
       const known = clearPending({ ...entry, nextSequence: sequence + 1, pending }, now);
       await journal.put(known);
       if (update === 'rejected') {
-        await patchRecoveredMessage(channel, journal, known, staticProjection);
+        const degraded = plan.senderOwnership.kind === 'mention';
+        if (degraded) {
+          logReplyMention('degraded', plan, 'managed', 'mention-rejected');
+        }
+        await patchRecoveredMessage(
+          channel,
+          journal,
+          known,
+          plan,
+          degraded
+            ? makeProjection(
+                renderOmpReplyCard(plan, {
+                  streamingMode: false,
+                  toolCount: null,
+                  mentionMode: 'plain',
+                }),
+              )
+            : staticProjection,
+          degraded ? 'plain' : 'mention',
+          false,
+        );
         return;
       }
-      await closeRecoveredManaged(channel, journal, known, now);
+      await closeRecoveredManaged(channel, journal, known, now, plan);
       return;
     }
-    await patchRecoveredMessage(channel, journal, entry, staticProjection);
+    if (!entry.messageId) {
+      await recoverInterruptedWithoutMessage(channel, journal, entry, plan);
+      return;
+    }
+    await patchRecoveredMessage(
+      channel,
+      journal,
+      entry,
+      plan,
+      staticProjection,
+      'mention',
+      true,
+    );
   } finally {
     journal.release(entry.runId);
   }
+}
+
+async function recoverInterruptedWithoutMessage(
+  channel: LarkChannel,
+  journal: OmpDeliveryJournal,
+  entry: ActiveDelivery,
+  plan: ImReplyPlan,
+  initialMode: ReplyMentionMode = 'mention',
+): Promise<void> {
+  let mode: ReplyMentionMode = initialMode;
+  let pending = recoveryReplyOperation(plan, mode);
+  let result = await submitRecoveryOperation(channel, journal, entry, pending);
+  if (result === 'unknown') return;
+  if (result === 'rejected' && mode === 'mention' && plan.senderOwnership.kind === 'mention') {
+    mode = 'plain';
+    logReplyMention('degraded', plan, 'markdown', 'mention-rejected');
+    pending = recoveryReplyOperation(plan, mode);
+    result = await submitRecoveryOperation(channel, journal, entry, pending);
+  }
+  if (result === 'rejected') {
+    await failRecovery(journal, entry, 'terminal-markdown-rejected');
+    return;
+  }
+  if (result === 'success') {
+    logReplyMention('rendered', plan, 'markdown', mentionReason(plan));
+    logReplyRecovery('interrupted-after-restart', entry);
+    await journal.remove(entry.runId);
+  }
+}
+
+function recoveryReplyOperation(
+  plan: ImReplyPlan,
+  mentionMode: ReplyMentionMode,
+): DurablePendingOperation {
+  const uuid = randomUUID();
+  return {
+    kind: 'reply',
+    transport: 'markdown',
+    terminal: true,
+    uuid,
+    sequence: 0,
+    request: {
+      path: { message_id: plan.target.messageId },
+      data: {
+        msg_type: 'post',
+        content: JSON.stringify(renderOmpReplyMarkdownPost(plan, mentionMode)),
+        reply_in_thread: plan.target.replyInThread,
+        uuid,
+      },
+    },
+  };
 }
 
 async function closeRecoveredManaged(
@@ -712,12 +891,12 @@ async function closeRecoveredManaged(
   journal: OmpDeliveryJournal,
   entry: ActiveDelivery,
   now: () => number,
+  plan: ImReplyPlan,
 ): Promise<void> {
   if (!entry.cardId) {
     await failRecovery(journal, entry, 'managed-recovery-missing-card-id');
     return;
   }
-  const interrupted = markInterrupted(emptyRunState);
   const sequence = entry.nextSequence;
   const uuid = randomUUID();
   const pending: DurablePendingOperation = {
@@ -730,7 +909,7 @@ async function closeRecoveredManaged(
       data: {
         settings: JSON.stringify({
           streaming_mode: false,
-          summary: { content: ompReplyPresentation(interrupted).summary },
+          summary: { content: ompReplyPresentation(plan.state).summary },
         }),
         sequence,
         uuid,
@@ -746,10 +925,15 @@ async function closeRecoveredManaged(
       channel,
       journal,
       known,
-      makeProjection(renderOmpReplyCard(interrupted, { streamingMode: false, toolCount: null })),
+      plan,
+      makeProjection(renderOmpReplyCard(plan, { streamingMode: false, toolCount: null })),
+      'mention',
+      false,
     );
     return;
   }
+  logReplyMention('rendered', plan, 'managed', mentionReason(plan));
+  logReplyRecovery('interrupted-after-restart', entry);
   await journal.remove(entry.runId);
 }
 
@@ -757,32 +941,56 @@ async function patchRecoveredMessage(
   channel: LarkChannel,
   journal: OmpDeliveryJournal,
   entry: ActiveDelivery,
+  plan: ImReplyPlan,
   projection: Projection,
+  mentionMode: ReplyMentionMode,
+  allowDegrade: boolean,
 ): Promise<void> {
   if (!entry.messageId) {
     await failRecovery(journal, entry, 'same-message-recovery-missing-message-id');
     return;
   }
-  const content =
-    entry.transport === 'markdown'
-      ? JSON.stringify(renderOmpReplyMarkdownPost(markInterrupted(emptyRunState)))
-      : projection.serialized;
-  const pending: DurablePendingOperation = {
+  const messageId = entry.messageId;
+  const operation = (mode: ReplyMentionMode, card: Projection): DurablePendingOperation => ({
     kind: 'patch',
     terminal: true,
     uuid: randomUUID(),
     sequence: 0,
     request: {
-      path: { message_id: entry.messageId },
-      data: { content },
+      path: { message_id: messageId },
+      data: {
+        content:
+          entry.transport === 'markdown'
+            ? JSON.stringify(renderOmpReplyMarkdownPost(plan, mode))
+            : card.serialized,
+      },
     },
-  };
-  const patch = await submitRecoveryOperation(channel, journal, entry, pending);
+  });
+  let patch = await submitRecoveryOperation(
+    channel,
+    journal,
+    entry,
+    operation(mentionMode, projection),
+  );
   if (patch === 'unknown') return;
+  if (patch === 'rejected' && allowDegrade && plan.senderOwnership.kind === 'mention') {
+    logReplyMention('degraded', plan, entry.transport ?? 'inline', 'mention-rejected');
+    const degraded = makeProjection(
+      renderOmpReplyCard(plan, {
+        streamingMode: false,
+        toolCount: null,
+        mentionMode: 'plain',
+      }),
+    );
+    patch = await submitRecoveryOperation(channel, journal, entry, operation('plain', degraded));
+    if (patch === 'unknown') return;
+  }
   if (patch === 'rejected') {
     await failRecovery(journal, entry, 'static-terminal-patch-rejected');
     return;
   }
+  logReplyMention('rendered', plan, entry.transport ?? 'inline', mentionReason(plan));
+  logReplyRecovery('interrupted-after-restart', entry);
   await journal.remove(entry.runId);
 }
 
@@ -861,7 +1069,7 @@ async function failRecovery(
   await journal.remove(entry.runId);
 }
 
-function validateFinalPlan(plan: ImReplyPlan, progressTarget: ImReplyTarget): void {
+function validateFinalPlan(plan: ImReplyPlan, progressPolicy: ImReplyPolicy): void {
   switch (plan.invocationKind) {
     case 'ordinary':
       break;
@@ -878,6 +1086,7 @@ function validateFinalPlan(plan: ImReplyPlan, progressTarget: ImReplyTarget): vo
 
   const expectedScopeId =
     plan.scope.kind === 'topic'
+
       ? `${plan.scope.chatId}:${plan.scope.threadId}`
       : plan.scope.chatId;
   if (plan.scope.id !== expectedScopeId || plan.scope.chatId !== plan.target.chatId) {
@@ -891,15 +1100,58 @@ function validateFinalPlan(plan: ImReplyPlan, progressTarget: ImReplyTarget): vo
     throw new Error('IM Reply placement contradicts its Conversation Scope');
   }
   if (
-    progressTarget.chatId !== plan.target.chatId ||
-    progressTarget.messageId !== plan.target.messageId ||
-    progressTarget.replyInThread !== plan.target.replyInThread ||
-    (progressTarget.replyInThread &&
-      plan.target.replyInThread &&
-      progressTarget.threadId !== plan.target.threadId)
+    JSON.stringify({
+      invocationKind: plan.invocationKind,
+      scope: plan.scope,
+      target: plan.target,
+      senderOwnership: plan.senderOwnership,
+    }) !== JSON.stringify(progressPolicy)
   ) {
-    throw new Error('Final IM Reply target differs from the Progress Reply target');
+    throw new Error('Final IM Reply policy differs from the frozen Progress Reply policy');
   }
+}
+type ReplyMentionEvent = 'planned' | 'rendered' | 'degraded';
+type ReplyMentionReason =
+  | 'verified-human-sender'
+  | 'mention-rejected'
+  | ImSenderOwnershipReason;
+type ReplyRecoveryReason = 'interrupted-after-restart' | 'terminal-request-replayed';
+
+function interruptedReplyPlan(replyPolicy: ImReplyPolicy): ImReplyPlan {
+  return {
+    ...replyPolicy,
+    reason: 'run-interrupted',
+    state: markInterrupted(emptyRunState),
+  };
+}
+
+function mentionReason(plan: ImReplyPlan): ReplyMentionReason {
+  return plan.senderOwnership.kind === 'mention'
+    ? 'verified-human-sender'
+    : plan.senderOwnership.reason;
+}
+
+function logReplyMention(
+  event: ReplyMentionEvent,
+  plan: ImReplyPlan,
+  transport: ReplyTransport,
+  reason: ReplyMentionReason,
+): void {
+  log.info('reply.mention', event, {
+    reason,
+    invocationKind: plan.invocationKind,
+    transport,
+    scope: plan.scope.kind,
+  });
+}
+
+function logReplyRecovery(reason: ReplyRecoveryReason, entry: ActiveDelivery): void {
+  log.info('reply-recovery', 'recovered', {
+    reason,
+    invocationKind: entry.replyPolicy.invocationKind,
+    transport: entry.transport ?? 'markdown',
+    scope: entry.replyPolicy.scope.kind,
+  });
 }
 
 function makeProjection(card: object): Projection {
@@ -924,9 +1176,14 @@ function isClearRejection(error: unknown): boolean {
   );
 }
 
-function renderManagedCard(state: RunState, toolCount?: number | null): object {
-  return renderOmpReplyCard(state, {
+function renderManagedCard(
+  input: RunState | ImReplyPlan,
+  toolCount?: number | null,
+  mentionMode?: ReplyMentionMode,
+): object {
+  return renderOmpReplyCard(input, {
     streamingMode: true,
     ...(toolCount === undefined ? {} : { toolCount }),
+    ...(mentionMode === undefined ? {} : { mentionMode }),
   });
 }

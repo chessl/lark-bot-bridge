@@ -18,6 +18,14 @@ export interface OmpConfig {
   binaryPath: string;
   profile?: string;
 }
+export interface CollaborationConfig {
+  trustedPeerBots: Array<{ alias: string; openId: string }>;
+  personalSubstitution: {
+    enabled: boolean;
+    targetOpenIds: string[];
+  };
+}
+
 
 export interface AttachmentConfig {
   maxCount: number;
@@ -95,10 +103,11 @@ export interface ProfileConfig {
   attachments: AttachmentConfig;
   /** In-meeting agent settings. See {@link MeetingConfig}. */
   meeting: MeetingConfig;
+  collaboration: CollaborationConfig;
 }
 
 export interface RootConfig {
-  schemaVersion: 2;
+  schemaVersion: 3;
   activeProfile: string;
   profiles: Record<string, ProfileConfig>;
 }
@@ -116,6 +125,10 @@ export function createDefaultProfileConfig(input: CreateDefaultProfileConfigInpu
   return normalizeProfileConfig({
     ...input,
     omp: input.omp ?? { binaryPath: process.env.LARK_CHANNEL_OMP_BIN ?? 'omp' },
+    collaboration: {
+      trustedPeerBots: [],
+      personalSubstitution: { enabled: false, targetOpenIds: [] },
+    },
   });
 }
 
@@ -126,8 +139,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   const raw = input as {
     mode?: unknown;
     app?: unknown;
-    /** Legacy v2 shape, accepted once and omitted on the next save. */
-    accounts?: { app?: unknown };
     preferences?: AppPreferences;
     access?: Partial<ProfileAccess>;
     workspaces?: {
@@ -136,9 +147,10 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     omp?: OmpConfig;
     attachments?: Partial<AttachmentConfig>;
     meeting?: unknown;
+    collaboration?: unknown;
   };
 
-  const app = normalizeApp(raw.app ?? raw.accounts?.app);
+  const app = normalizeApp(raw.app);
   if (!raw.omp) {
     throw new Error('omp profile requires omp configuration');
   }
@@ -147,6 +159,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   const access = normalizeAccess(raw.access);
   const workspaces = normalizeWorkspaces(raw.workspaces);
   const meeting = normalizeMeeting(raw.meeting);
+  const collaboration = normalizeCollaboration(raw.collaboration);
 
   return {
     mode: raw.mode === 'team' ? 'team' : 'personal',
@@ -164,6 +177,55 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
       cacheMaxBytes: numberOr(raw.attachments?.cacheMaxBytes, 512 * 1024 * 1024),
     },
     meeting,
+    collaboration,
+  };
+}
+
+function normalizeCollaboration(input: unknown): CollaborationConfig {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('profile collaboration configuration is required');
+  }
+  const raw = input as {
+    trustedPeerBots?: unknown;
+    personalSubstitution?: unknown;
+  };
+  if (!Array.isArray(raw.trustedPeerBots)) {
+    throw new Error('collaboration trustedPeerBots must be an array');
+  }
+  const trustedPeerBots = raw.trustedPeerBots.map((entry) => {
+    if (
+      !entry ||
+      typeof entry !== 'object' ||
+      !('alias' in entry) ||
+      typeof entry.alias !== 'string' ||
+      !entry.alias.trim() ||
+      !('openId' in entry) ||
+      typeof entry.openId !== 'string' ||
+      !entry.openId.trim()
+    ) {
+      throw new Error('collaboration trustedPeerBots entry is invalid');
+    }
+    return { alias: entry.alias.trim(), openId: entry.openId.trim() };
+  });
+  const substitution = raw.personalSubstitution;
+  if (!substitution || typeof substitution !== 'object' || Array.isArray(substitution)) {
+    throw new Error('collaboration personalSubstitution is required');
+  }
+  if (
+    !('enabled' in substitution) ||
+    typeof substitution.enabled !== 'boolean' ||
+    !('targetOpenIds' in substitution) ||
+    !Array.isArray(substitution.targetOpenIds) ||
+    !substitution.targetOpenIds.every((value) => typeof value === 'string' && value.trim())
+  ) {
+    throw new Error('collaboration personalSubstitution is invalid');
+  }
+  return {
+    trustedPeerBots,
+    personalSubstitution: {
+      enabled: substitution.enabled,
+      targetOpenIds: substitution.targetOpenIds.map((value) => value.trim()),
+    },
   };
 }
 

@@ -69,16 +69,25 @@ describe('IM message planning', () => {
         rawSenderId: 'ou_sender',
         expected: { kind: 'unknown', reason: 'unknown-sender-type' },
       },
+      {
+        name: 'contradictory sender type',
+        senderType: 'user',
+        normalizedSenderType: 'bot',
+        rawSenderId: 'ou_sender',
+        expected: { kind: 'unknown', reason: 'contradictory-sender-type' },
+      },
     ] satisfies Array<{
       name: string;
       senderType: string | undefined;
+      normalizedSenderType?: string;
       rawSenderId: string | undefined;
       expected: object;
     }>,
-  )('keeps $name explicit', ({ name, senderType, rawSenderId, expected }) => {
+  )('keeps $name explicit', ({ name, senderType, normalizedSenderType, rawSenderId, expected }) => {
     const message = imMessage({
       messageId: `om_${name}`,
       ...(senderType === undefined ? {} : { senderType }),
+      ...(normalizedSenderType === undefined ? {} : { normalizedSenderType }),
       ...(rawSenderId === undefined ? {} : { rawSenderId }),
     });
     const plan = ordinaryPlan(message, CHAT_SCOPE);
@@ -174,6 +183,12 @@ describe('ordinary IM Invocation creation', () => {
       threadId: 'omt_topic',
       replyInThread: true,
     });
+    expect(invocation.replyPolicy).toEqual({
+      invocationKind: 'ordinary',
+      scope: TOPIC_SCOPE,
+      target: invocation.replyTarget,
+      senderOwnership: { kind: 'mention', openId: 'ou_second' },
+    });
     expect(Object.isFrozen(invocation)).toBe(true);
     expect(Object.isFrozen(invocation.sourceMessages)).toBe(true);
   });
@@ -182,7 +197,15 @@ describe('ordinary IM Invocation creation', () => {
 describe('IM Reply planning', () => {
   it.each(
     [
-      { name: 'done', state: finalizeIfRunning(createRunState()), reason: 'run-completed' },
+      {
+        name: 'done',
+        state: {
+          ...finalizeIfRunning(createRunState()),
+          finalText: 'answer',
+        } satisfies RunState,
+        reason: 'run-completed',
+      },
+      { name: 'empty done', state: finalizeIfRunning(createRunState()), reason: 'run-completed' },
       {
         name: 'error',
         state: { ...createRunState(), terminal: 'error' } satisfies RunState,
@@ -213,6 +236,7 @@ describe('IM Reply planning', () => {
       scope: CHAT_SCOPE,
       target: { messageId: 'om_message' },
       state,
+      senderOwnership: { kind: 'mention', openId: 'ou_sender' },
     });
   });
 
@@ -254,6 +278,7 @@ function imMessage(
     senderName?: string;
     senderType?: string;
     rawSenderId?: string;
+    normalizedSenderType?: string;
     threadId?: string;
   } = {},
 ): NormalizedMessage {
@@ -263,6 +288,12 @@ function imMessage(
     chatId: 'oc_chat',
     chatType: 'group',
     senderId,
+    ...(input.normalizedSenderType ?? input.senderType
+      ? {
+          senderType: input.normalizedSenderType ?? input.senderType,
+          senderIsBot: (input.normalizedSenderType ?? input.senderType) === 'bot',
+        }
+      : {}),
     ...(input.senderName ? { senderName: input.senderName } : {}),
     content: input.content ?? 'hello',
     rawContentType: 'text',

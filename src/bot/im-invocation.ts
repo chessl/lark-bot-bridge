@@ -8,6 +8,7 @@ export type ImIdentityReason =
   | 'missing-raw-sender'
   | 'missing-sender-id'
   | 'contradictory-sender-id'
+  | 'contradictory-sender-type'
   | 'unknown-sender-type';
 
 export type ImSenderIdentity =
@@ -57,6 +58,15 @@ export type ImReplyReason =
   | 'run-failed'
   | 'run-interrupted'
   | 'run-timed-out';
+export type ImSenderOwnershipReason =
+  | ImIdentityReason
+  | 'direct-message'
+  | 'verified-bot-sender';
+
+export type ImSenderOwnership =
+  | Readonly<{ kind: 'mention'; openId: string }>
+  | Readonly<{ kind: 'none'; reason: ImSenderOwnershipReason }>;
+
 
 export interface PlanImMessageInput {
   message: NormalizedMessage;
@@ -116,6 +126,13 @@ export type ImPromptPolicy = Readonly<{
   botIdentity?: Readonly<{ openId: string; name?: string }>;
 }>;
 
+export type ImReplyPolicy = Readonly<{
+  invocationKind: 'ordinary';
+  scope: ImConversationScope;
+  target: ImReplyTarget;
+  senderOwnership: ImSenderOwnership;
+}>;
+
 export type ImInvocation = Readonly<{
   kind: 'ordinary';
   routeReason: 'ordinary-message';
@@ -123,15 +140,14 @@ export type ImInvocation = Readonly<{
   sourceMessages: readonly [ImSourceMessage, ...ImSourceMessage[]];
   replyTarget: ImReplyTarget;
   promptPolicy: ImPromptPolicy;
+  replyPolicy: ImReplyPolicy;
 }>;
 
-export type ImReplyPlan = Readonly<{
-  invocationKind: ImInvocation['kind'];
-  reason: ImReplyReason;
-  scope: ImConversationScope;
-  target: ImReplyTarget;
-  state: RunState;
-}>;
+export type ImReplyPlan = ImReplyPolicy &
+  Readonly<{
+    reason: ImReplyReason;
+    state: RunState;
+  }>;
 
 export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
   if (!input.authorized) return Object.freeze({ lane: 'drop', reason: 'access-denied' });
@@ -176,12 +192,19 @@ export function createImInvocation(
   const [firstSource, ...remainingSources] = sourceMessages;
   const last = remainingSources[remainingSources.length - 1] ?? firstSource;
   const promptMessages = nonEmpty(sourceMessages.map(toPromptMessage));
+  const target = replyTarget(last.message);
+  const replyPolicy = Object.freeze({
+    invocationKind: 'ordinary',
+    scope: first.scope,
+    target,
+    senderOwnership: senderOwnership(first.scope, last.sender),
+  }) satisfies ImReplyPolicy;
   return Object.freeze({
     kind: 'ordinary',
     routeReason: 'ordinary-message',
     scope: first.scope,
     sourceMessages: Object.freeze(sourceMessages),
-    replyTarget: replyTarget(last.message),
+    replyTarget: target,
     promptPolicy: Object.freeze({
       kind: 'ordinary',
       reason: 'ordinary-message-batch',
@@ -195,6 +218,7 @@ export function createImInvocation(
           }
         : {}),
     }),
+    replyPolicy,
   });
 }
 
@@ -221,10 +245,8 @@ export function finalizeImReply(invocation: ImInvocation, state: RunState): ImRe
     }
   }
   return Object.freeze({
-    invocationKind: invocation.kind,
+    ...invocation.replyPolicy,
     reason,
-    scope: invocation.scope,
-    target: invocation.replyTarget,
     state,
   });
 }
@@ -273,10 +295,19 @@ function parseSender(message: NormalizedMessage): ImSenderIdentity {
     return Object.freeze({ kind: 'unknown', reason: 'contradictory-sender-id' });
   }
   const senderType = 'sender_type' in rawSender ? rawSender.sender_type : undefined;
-  if (senderType === 'user') {
+  const rawKind = senderKind(senderType);
+  const normalizedKind = senderKind(message.senderType);
+  if (
+    (normalizedKind !== undefined && normalizedKind !== rawKind) ||
+    (message.senderIsBot === true && rawKind !== 'bot') ||
+    (message.senderIsBot === false && senderType === 'bot')
+  ) {
+    return Object.freeze({ kind: 'unknown', reason: 'contradictory-sender-type' });
+  }
+  if (rawKind === 'human') {
     return Object.freeze({ kind: 'human', id: verifiedHumanId(rawId) });
   }
-  if (senderType === 'app' || senderType === 'bot') {
+  if (rawKind === 'bot') {
     return Object.freeze({ kind: 'bot', id: verifiedBotId(rawId) });
   }
   return Object.freeze({ kind: 'unknown', reason: 'unknown-sender-type' });
@@ -359,6 +390,26 @@ function replyTarget(message: NormalizedMessage): ImReplyTarget {
     messageId: message.messageId,
     replyInThread: false,
   });
+}
+
+function senderOwnership(
+  scope: ImConversationScope,
+  sender: ImSenderIdentity,
+): ImSenderOwnership {
+  if (scope.mode === 'p2p') return Object.freeze({ kind: 'none', reason: 'direct-message' });
+  if (sender.kind === 'human') {
+    return Object.freeze({ kind: 'mention', openId: sender.id });
+  }
+  return Object.freeze({
+    kind: 'none',
+    reason: sender.kind === 'bot' ? 'verified-bot-sender' : sender.reason,
+  });
+}
+
+function senderKind(value: unknown): 'human' | 'bot' | undefined {
+  if (value === 'user') return 'human';
+  if (value === 'app' || value === 'bot') return 'bot';
+  return undefined;
 }
 
 function nonEmpty<T>(items: readonly T[]): [T, ...T[]] {

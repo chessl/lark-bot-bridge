@@ -994,7 +994,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     chatId,
     chatType: firstMsg.chatType,
     messageId: lastMsg.messageId,
-    actorId: firstMsg.senderId,
+    actorId: lastMsg.senderId,
     ...(threadId ? { threadId } : {}),
   };
   const flow = await scopedRuns.start({
@@ -1039,7 +1039,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const state = createRunState(messageReceipts.get(lastMsg));
   const reply = new OmpReplyController({
     channel,
-    target: replyTarget,
+    replyPolicy: invocation.replyPolicy,
     ...(deliveryJournal
       ? {
           journal: deliveryJournal,
