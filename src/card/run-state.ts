@@ -407,15 +407,15 @@ function retryLabel(attempt?: number, maxAttempts?: number, delayMs?: number): s
 }
 
 function safeToolLabel(rawName: string): { name: string; action: ToolAction } {
+  const name = boundLabel(rawName, MAX_TOOL_LABEL_CHARS) || '使用工具';
   const key = rawName.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (/(read|fetch|get|view)/.test(key)) return { name: '读取信息', action: '读取' };
-  if (/(grep|glob|search|find|query)/.test(key)) return { name: '搜索信息', action: '搜索' };
+  if (/(read|fetch|get|view)/.test(key)) return { name, action: '读取' };
+  if (/(grep|glob|search|find|query)/.test(key)) return { name, action: '搜索' };
   if (/(edit|write|patch|replace|move|rename|delete)/.test(key)) {
-    return { name: '修改内容', action: '修改' };
+    return { name, action: '修改' };
   }
-  if (/(agent|task|delegate)/.test(key)) return { name: '协作任务', action: '协作' };
-  if (/(bash|shell|exec|run|command)/.test(key)) return { name: '运行操作', action: '执行' };
-  return { name: boundLabel('使用工具', MAX_TOOL_LABEL_CHARS), action: '执行' };
+  if (/(agent|task|delegate)/.test(key)) return { name, action: '协作' };
+  return { name, action: '执行' };
 }
 
 function boundLabel(value: string, max: number): string {

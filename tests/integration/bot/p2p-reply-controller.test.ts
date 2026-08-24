@@ -467,7 +467,7 @@ describe('P2P OMP Reply', () => {
     });
     expect(elements.at(-1)).not.toHaveProperty('border');
     expect(JSON.stringify(elements.at(-1))).toContain('调用工具 1 次');
-    expect(JSON.stringify(elements.at(-1))).toContain('运行操作');
+    expect(JSON.stringify(elements.at(-1))).toContain('Bash');
     expect(JSON.stringify(elements.at(-1))).toContain('执行');
     expect(JSON.stringify(elements.at(-1))).toContain('完成');
   });
@@ -524,13 +524,13 @@ describe('P2P OMP Reply', () => {
     expect(twentyOutbound).toContain('REASON\\\\_02\\\\_END');
     expect(twentyOutbound).toContain('中间过程（13 条）');
     expect(twentyOutbound).toContain(`${'X'.repeat(599)}…`);
-    expect(twentyOutbound.match(/运行操作/g)).toHaveLength(19);
-    expect(twentyOutbound).toContain('读取信息');
+    expect(twentyOutbound.match(/Bash/g)).toHaveLength(19);
+    expect(twentyOutbound).toContain('Read');
     expect(twentyOutbound).toContain('调用工具 20 次');
 
     const overflowOutbound = JSON.stringify(overflow);
-    expect(overflowOutbound).not.toContain('读取信息');
-    expect(overflowOutbound.match(/运行操作/g)).toHaveLength(20);
+    expect(overflowOutbound).not.toContain('Read');
+    expect(overflowOutbound.match(/Bash/g)).toHaveLength(20);
     expect(overflowOutbound).toContain('调用工具 21 次');
     for (const card of [twelve, twenty, overflow]) {
       expect(totalCardElements(card)).toBeLessThanOrEqual(200);
