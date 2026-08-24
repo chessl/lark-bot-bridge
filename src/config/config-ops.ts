@@ -87,17 +87,20 @@ export async function saveAccountConfig(
   state.cfg = runtimeProfileConfig(root, state.profile);
 }
 
-/** Persist preferences, deployment mode, and mention policy. */
-export async function savePreferencesConfig(
-  state: MutableProfileState,
-  preferences: AppPreferences,
-  requireMentionInGroup: boolean,
-  mode: ProfileMode,
+export interface SavePreferencesConfigInput {
+  state: MutableProfileState;
+  preferences: AppPreferences;
+  requireMentionInGroup: boolean;
+  mode: ProfileMode;
   /** In-meeting agent settings; omitted by callers that don't edit them. */
-  meeting?: ProfileConfig['meeting'],
-  /** Trusted peer settings; omitted by callers that do not edit collaboration. */
-  collaboration?: ProfileConfig['collaboration'],
-): Promise<void> {
+  meeting?: ProfileConfig['meeting'];
+  /** Collaboration settings; omitted by callers that don't edit them. */
+  collaboration?: ProfileConfig['collaboration'];
+}
+
+/** Persist preferences, deployment mode, and mention policy. */
+export async function savePreferencesConfig(input: SavePreferencesConfigInput): Promise<void> {
+  const { state, preferences, requireMentionInGroup, mode, meeting, collaboration } = input;
   await withConfigFileLock(state.configPath, async () => {
     const root = await loadRootConfig(state.configPath);
     if (!root) throw new Error('config not initialized');

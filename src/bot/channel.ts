@@ -350,10 +350,12 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           });
           const firstPlan = plans[0];
           if (!firstPlan) return;
-          const invocation = createImInvocation(
-            [firstPlan, ...plans.slice(1)],
-            channel.botIdentity,
-          );
+          const invocation = createImInvocation([firstPlan, ...plans.slice(1)], {
+            ...(channel.botIdentity ? { botIdentity: channel.botIdentity } : {}),
+            trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
+            personalSubstitutionTargetOpenIds:
+              controls.cfg.collaboration.personalSubstitution.targetOpenIds,
+          });
           await runAgentBatch({
             channel,
             scopedRuns,
@@ -824,9 +826,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     authorized: accessDecision.ok,
     duplicate: seenImMessageIds.has(msg.messageId),
     mentionRequired:
-      msg.chatType !== 'p2p' &&
-      requireMentionForChat(controls.cfg, msg.chatId) &&
-      !msg.mentionedBot,
+      msg.chatType !== 'p2p' && requireMentionForChat(controls.cfg, msg.chatId),
     recognizedCommand: isKnownTextCommand(msg.content),
     currentBotOpenId: channel.botIdentity?.openId,
     trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
@@ -892,8 +892,16 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   }
 
   if (plan.lane === 'peer' || plan.lane === 'substitution') {
+    const policy = {
+      ...(channel.botIdentity ? { botIdentity: channel.botIdentity } : {}),
+      trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
+      personalSubstitutionTargetOpenIds:
+        controls.cfg.collaboration.personalSubstitution.targetOpenIds,
+    };
     const invocation =
-      plan.lane === 'peer' ? createImInvocation([plan]) : createImInvocation([plan]);
+      plan.lane === 'peer'
+        ? createImInvocation([plan], policy)
+        : createImInvocation([plan], policy);
     enqueueInvocation(invocation);
     log.info('intake', 'isolated-enqueued', {
       scope,
@@ -990,7 +998,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           ...new Set(
             batch
               .map((m) => replyQuoteTargetForMessage(m, mode))
-              .filter((id): id is string => Boolean(id) && !batchIds.has(id!)),
+              .filter((id): id is string => id !== undefined && !batchIds.has(id)),
           ),
         ]
       : [];

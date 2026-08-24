@@ -189,7 +189,9 @@ describe('profile retention and export', () => {
     const exportedSecret = 'test-export-secret-from-keystore';
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'claude' });
     const rootConfig = await readRoot(root);
-    rootConfig.profiles.claude!.app.secret = {
+    const profile = rootConfig.profiles.claude;
+    if (!profile) throw new Error('missing claude profile');
+    profile.app.secret = {
       source: 'keystore',
       id: secretKeyForApp(appId),
     };

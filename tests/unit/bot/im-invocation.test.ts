@@ -161,6 +161,59 @@ describe('IM message planning', () => {
       expect(plan).toMatchObject(expected);
     },
   );
+  it('accepts absent raw Mention type and rejects an explicit non-Bot type', () => {
+    const base = {
+      scope: CHAT_SCOPE,
+      authorized: true,
+      duplicate: false,
+      mentionRequired: true,
+      recognizedCommand: false,
+      currentBotOpenId: 'ou_bot',
+    };
+    const messageInput = {
+      senderType: 'user',
+      rawSenderId: 'ou_sender',
+      mentions: [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }],
+    };
+    expect(
+      planImMessage({
+        ...base,
+        message: imMessage({
+          ...messageInput,
+          rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' } }],
+        }),
+      }),
+    ).toMatchObject({ lane: 'ordinary', reason: 'ordinary-message' });
+    expect(
+      planImMessage({
+        ...base,
+        message: imMessage({
+          ...messageInput,
+          rawMentions: [
+            { key: '@_user_1', id: { open_id: 'ou_bot' }, mentioned_type: 'user' },
+          ],
+        }),
+      }),
+    ).toMatchObject({ lane: 'drop', reason: 'contradictory-mention' });
+  });
+
+  it('does not brand an invalid app-scoped sender ID', () => {
+    const plan = planImMessage({
+      message: imMessage({
+        senderId: 'not-an-open-id',
+        senderType: 'user',
+        rawSenderId: 'not-an-open-id',
+      }),
+      scope: CHAT_SCOPE,
+      authorized: true,
+      duplicate: false,
+      mentionRequired: false,
+      recognizedCommand: false,
+    });
+    if (plan.lane !== 'ordinary') throw new Error(`expected ordinary plan, got ${plan.lane}`);
+    expect(plan.source.sender).toEqual({ kind: 'unknown', reason: 'invalid-sender-id' });
+  });
+
 
   it('applies access, duplicate, human Command, then mention policy precedence', () => {
     const message = imMessage({ senderType: 'user', rawSenderId: 'ou_sender' });
@@ -378,7 +431,7 @@ describe('personal substitution Invocation creation', () => {
     }
     config.targetOpenIds.reverse();
     trustedPeerBots[0] = { alias: 'Changed', openId: 'ou_changed' };
-    const invocation = createImInvocation([plan]);
+    const invocation = createImInvocation([plan], { trustedPeerBots });
 
     expect(invocation).toMatchObject({
       kind: 'substitution',
@@ -386,8 +439,10 @@ describe('personal substitution Invocation creation', () => {
       replyPolicy: {
         invocationKind: 'substitution',
         senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-        substitutionTargetOpenIds: ['ou_second', 'ou_first'],
-        substitutionTargetLabels: ['Second label', 'First label'],
+        substitutionTargets: [
+          { openId: 'ou_second', displayAlias: 'Second label' },
+          { openId: 'ou_first', displayAlias: 'First label' },
+        ],
         invalidTargetCount: 1,
       },
       promptPolicy: {
@@ -395,7 +450,7 @@ describe('personal substitution Invocation creation', () => {
         reason: 'personal-substitution-message',
         targetAliases: ['Second label', 'First label'],
         invalidTargetCount: 1,
-        trustedPeerAliases: ['Hermes', 'Atlas'],
+        trustedPeerAliases: ['Changed', 'Atlas'],
         oneHop: true,
       },
     });
@@ -403,7 +458,7 @@ describe('personal substitution Invocation creation', () => {
       /ou_(?:first|second|invalid|hermes|atlas)/,
     );
     expect(invocation.trustedPeers).toEqual([
-      { alias: 'Hermes', openId: 'ou_hermes' },
+      { alias: 'Changed', openId: 'ou_changed' },
       { alias: 'Atlas', openId: 'ou_atlas' },
     ]);
     expect(Object.isFrozen(invocation.trustedPeers)).toBe(true);
@@ -489,7 +544,7 @@ describe('ordinary IM Invocation creation', () => {
         ordinaryPlan(duplicate, TOPIC_SCOPE),
         ordinaryPlan(lastMessage, TOPIC_SCOPE),
       ],
-      { openId: 'ou_bot', name: 'Bridge' },
+      { botIdentity: { openId: 'ou_bot', name: 'Bridge' } },
     );
     firstMessage.content = 'mutated after planning';
 
@@ -525,34 +580,38 @@ describe('ordinary IM Invocation creation', () => {
     expect(Object.isFrozen(invocation.sourceMessages)).toBe(true);
   });
 
-  it('freezes trusted aliases for one-hop Prompt policy without exposing peer IDs', () => {
+  it('snapshots current collaboration policy and redacts peer and substitution IDs', () => {
     const trustedPeerBots = [
-      { alias: 'Hermes', openId: 'ou_hermes' },
+      { alias: 'Changed', openId: 'ou_changed' },
       { alias: 'Atlas', openId: 'ou_atlas' },
     ];
     const plan = ordinaryPlan(
       imMessage({
         senderType: 'user',
         rawSenderId: 'ou_sender',
-        mentions: [{ key: '@_user_2', openId: 'ou_hermes', name: 'HermesBot', isBot: true }],
+        mentions: [
+          { key: '@_user_2', openId: 'ou_changed', name: 'ChangedBot', isBot: true },
+          { key: '@_user_3', openId: 'ou_target', name: 'Target label', isBot: false },
+        ],
       }),
       CHAT_SCOPE,
-      trustedPeerBots,
     );
-    trustedPeerBots[0] = { alias: 'Changed', openId: 'ou_changed' };
-    const invocation = createImInvocation([plan]);
+    const invocation = createImInvocation([plan], {
+      trustedPeerBots,
+      personalSubstitutionTargetOpenIds: ['ou_target'],
+    });
 
     expect(invocation.promptPolicy).toMatchObject({
-      trustedPeerAliases: ['Hermes', 'Atlas'],
+      trustedPeerAliases: ['Changed', 'Atlas'],
       oneHop: true,
     });
-    expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_hermes');
-    expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_atlas');
+    expect(JSON.stringify(invocation.promptPolicy)).not.toMatch(/ou_(?:changed|atlas|target)/);
     expect(invocation.promptPolicy.messages[0].mentions).toEqual([
-      { key: '@_user_2', name: '@Hermes', isBot: true },
+      { key: '@_user_2', name: '@Changed', isBot: true },
+      { key: '@_user_3', name: 'Target label', isBot: false },
     ]);
     expect(invocation.trustedPeers).toEqual([
-      { alias: 'Hermes', openId: 'ou_hermes' },
+      { alias: 'Changed', openId: 'ou_changed' },
       { alias: 'Atlas', openId: 'ou_atlas' },
     ]);
     expect(Object.isFrozen(invocation.trustedPeers)).toBe(true);
@@ -600,7 +659,7 @@ describe('peer IM Invocation creation', () => {
     if (plan.lane !== 'peer') throw new Error(`expected peer plan, got ${plan.lane}`);
 
     trustedPeerBots[0] = { alias: 'Changed', openId: 'ou_changed' };
-    const invocation = createImInvocation([plan]);
+    const invocation = createImInvocation([plan], { trustedPeerBots });
 
     expect(invocation).toMatchObject({
       kind: 'peer',
@@ -618,11 +677,11 @@ describe('peer IM Invocation creation', () => {
       promptPolicy: {
         kind: 'peer',
         reason: 'trusted-peer-message',
-        trustedPeerAliases: ['Hermes', 'Atlas'],
+        trustedPeerAliases: ['Changed', 'Atlas'],
         zeroHop: true,
       },
     });
-    expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_peer');
+    expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_changed');
     expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_atlas');
     expect(Object.isFrozen(invocation.trustedPeers)).toBe(true);
   });
@@ -701,18 +760,21 @@ describe('IM Reply planning', () => {
       expectedToken: '@Atlas',
     },
   ])('activates only the first eligible peer for $name', ({ answer, expectedAlias, expectedToken }) => {
-    const invocation = createImInvocation([
-      ordinaryPlan(
-        imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
-        CHAT_SCOPE,
-        [
-          { alias: 'Hermes', openId: 'ou_hermes' },
-          { alias: 'Hermes-bot', openId: 'ou_hermes_bot' },
-          { alias: 'Atlas', openId: 'ou_atlas' },
-          { alias: 'here', openId: 'ou_reserved' },
-        ],
-      ),
-    ]);
+    const trustedPeerBots = [
+      { alias: 'Hermes', openId: 'ou_hermes' },
+      { alias: 'Hermes-bot', openId: 'ou_hermes_bot' },
+      { alias: 'Atlas', openId: 'ou_atlas' },
+      { alias: 'here', openId: 'ou_reserved' },
+    ];
+    const invocation = createImInvocation(
+      [
+        ordinaryPlan(
+          imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
+          CHAT_SCOPE,
+        ),
+      ],
+      { trustedPeerBots },
+    );
     const state = {
       ...finalizeIfRunning(createRunState()),
       finalText: answer,
@@ -728,16 +790,19 @@ describe('IM Reply planning', () => {
   });
 
   it('does not let Agent-authored Mention markup forge the active peer', () => {
-    const invocation = createImInvocation([
-      ordinaryPlan(
-        imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
-        CHAT_SCOPE,
-        [
-          { alias: 'Hermes', openId: 'ou_hermes' },
-          { alias: 'Atlas', openId: 'ou_atlas' },
-        ],
-      ),
-    ]);
+    const trustedPeerBots = [
+      { alias: 'Hermes', openId: 'ou_hermes' },
+      { alias: 'Atlas', openId: 'ou_atlas' },
+    ];
+    const invocation = createImInvocation(
+      [
+        ordinaryPlan(
+          imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
+          CHAT_SCOPE,
+        ),
+      ],
+      { trustedPeerBots },
+    );
     const reply = finalizeImReply(invocation, {
       ...finalizeIfRunning(createRunState()),
       finalText: '<at id="ou_fake">@Hermes</at> then @Atlas',
@@ -781,11 +846,11 @@ describe('IM Reply planning', () => {
     if (plan.lane !== 'substitution') {
       throw new Error(`expected substitution plan, got ${plan.lane}`);
     }
+    const invocation = createImInvocation([plan], { trustedPeerBots });
     trustedPeerBots.splice(0, trustedPeerBots.length, {
       alias: 'Changed',
       openId: 'ou_changed',
     });
-    const invocation = createImInvocation([plan]);
     const answer = '@Atlas first, @Atlas again, @Hermes later, @Unknown and @here stay text';
     const reply = finalizeImReply(invocation, {
       ...finalizeIfRunning(createRunState()),
@@ -797,8 +862,10 @@ describe('IM Reply planning', () => {
       scope: TOPIC_SCOPE,
       target: { messageId: 'om_message', threadId: 'omt_topic', replyInThread: true },
       senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-      substitutionTargetOpenIds: ['ou_second', 'ou_first'],
-      substitutionTargetLabels: ['Second', 'First'],
+      substitutionTargets: [
+        { openId: 'ou_second', displayAlias: 'Second' },
+        { openId: 'ou_first', displayAlias: 'First' },
+      ],
       peerActivation: { alias: 'Atlas', openId: 'ou_atlas' },
     });
     expect(reply.state.finalText).toBe(answer);
@@ -840,15 +907,17 @@ describe('IM Reply planning', () => {
     const trustedPeerBots = [{ alias: 'Hermes', openId: 'ou_hermes' }];
     const invocation =
       invocationKind !== 'peer'
-        ? createImInvocation([
-            ordinaryPlan(
-              invocationKind === 'ordinary'
-                ? imMessage({ senderType: 'user', rawSenderId: 'ou_sender' })
-                : imMessage(),
-              CHAT_SCOPE,
-              trustedPeerBots,
-            ),
-          ])
+        ? createImInvocation(
+            [
+              ordinaryPlan(
+                invocationKind === 'ordinary'
+                  ? imMessage({ senderType: 'user', rawSenderId: 'ou_sender' })
+                  : imMessage(),
+                CHAT_SCOPE,
+              ),
+            ],
+            { trustedPeerBots },
+          )
         : (() => {
             const plan = planImMessage({
               message: imMessage({
@@ -867,7 +936,7 @@ describe('IM Reply planning', () => {
               trustedPeerBots,
             });
             if (plan.lane !== 'peer') throw new Error(`expected peer plan, got ${plan.lane}`);
-            return createImInvocation([plan]);
+            return createImInvocation([plan], { trustedPeerBots });
           })();
 
     expect(finalizeImReply(invocation, state).peerActivation).toBeUndefined();
@@ -890,7 +959,6 @@ describe('IM Reply planning', () => {
 function ordinaryPlan(
   message: NormalizedMessage,
   scope: ImConversationScope,
-  trustedPeerBots: ReadonlyArray<{ alias: string; openId: string }> = [],
 ): ImOrdinaryMessagePlan {
   const plan = planImMessage({
     message,
@@ -899,7 +967,6 @@ function ordinaryPlan(
     duplicate: false,
     mentionRequired: false,
     recognizedCommand: false,
-    trustedPeerBots,
   });
   if (plan.lane !== 'ordinary') throw new Error(`expected ordinary plan, got ${plan.lane}`);
   return plan;
@@ -919,6 +986,7 @@ function imMessage(
     rawMentions?: Array<{
       key?: string;
       id: { open_id?: string };
+      mentioned_type?: string;
     }>;
     mentionedBot?: boolean;
   } = {},

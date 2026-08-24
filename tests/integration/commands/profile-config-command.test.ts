@@ -192,6 +192,30 @@ describe('profile-aware account and config commands', () => {
     });
     expect(lookup).not.toHaveBeenCalled();
   });
+  it('preserves unsaved substitution drafts through add and delete card actions', async () => {
+    vi.useFakeTimers();
+    const h = await createHarness();
+
+    await h.command('/config substitution-add 0,1', {
+      personal_substitution_enabled: 'yes',
+      personal_substitution_target_0: 'draft@example.com',
+    });
+    await vi.runAllTimersAsync();
+    const added = JSON.stringify(h.channel.rawClient.requests.at(-1));
+    expect(added).toContain('draft@example.com');
+    expect(added).toContain('personal_substitution_target_1');
+
+    await h.command('/config substitution-delete 0,2,1', {
+      personal_substitution_enabled: 'yes',
+      personal_substitution_target_0: 'draft@example.com',
+      personal_substitution_target_1: 'remove@example.com',
+    });
+    await vi.runAllTimersAsync();
+    const deleted = JSON.stringify(h.channel.rawClient.requests.at(-1));
+    expect(deleted).toContain('draft@example.com');
+    expect(deleted).not.toContain('remove@example.com');
+  });
+
   it('saves /account submit into the active profile and profile-local keystore', async () => {
     vi.useFakeTimers();
     const h = await createHarness();
@@ -305,9 +329,11 @@ async function writeRoot(
       }),
     },
   };
-  root.profiles.claude!.workspaces.default = workspace;
-  root.profiles.claude!.preferences = {
-    ...root.profiles.claude!.preferences,
+  const profile = root.profiles.claude;
+  if (!profile) throw new Error('missing claude profile');
+  profile.workspaces.default = workspace;
+  profile.preferences = {
+    ...profile.preferences,
     ...preferences,
   };
   await writeJson(resolveAppPaths({ rootDir }).configFile, root);

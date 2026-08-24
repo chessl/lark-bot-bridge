@@ -1,13 +1,19 @@
 import type { NormalizedMessage } from '@larksuite/channel';
+import { z } from 'zod';
 import type { RunState } from '../card/run-state';
 
-export type VerifiedHumanId = string & { readonly __brand: 'VerifiedHumanId' };
-export type VerifiedBotId = string & { readonly __brand: 'VerifiedBotId' };
+const APP_SCOPED_OPEN_ID = /^ou_[A-Za-z0-9_-]+$/;
+const VerifiedHumanIdSchema = z.string().regex(APP_SCOPED_OPEN_ID).brand<'VerifiedHumanId'>();
+const VerifiedBotIdSchema = z.string().regex(APP_SCOPED_OPEN_ID).brand<'VerifiedBotId'>();
+
+export type VerifiedHumanId = z.infer<typeof VerifiedHumanIdSchema>;
+export type VerifiedBotId = z.infer<typeof VerifiedBotIdSchema>;
 
 export type ImIdentityReason =
   | 'missing-raw-sender'
   | 'missing-sender-id'
   | 'contradictory-sender-id'
+  | 'invalid-sender-id'
   | 'contradictory-sender-type'
   | 'unknown-sender-type';
 
@@ -83,6 +89,11 @@ export type ImTrustedPeer = Readonly<{
   openId: VerifiedBotId;
 }>;
 
+export type ImSubstitutionReplyTarget = Readonly<{
+  openId: string;
+  displayAlias: string;
+}>;
+
 export type ImSubstitutionTarget = Readonly<{
   openId: VerifiedHumanId;
   displayAlias: string;
@@ -147,7 +158,6 @@ export type ImOrdinaryMessagePlan = Readonly<{
   reason: 'ordinary-message';
   scope: ImConversationScope;
   source: ImSourceMessage;
-  trustedPeers: readonly ImTrustedPeer[];
 }>;
 
 export type ImPeerMessagePlan = Readonly<{
@@ -156,7 +166,6 @@ export type ImPeerMessagePlan = Readonly<{
   scope: ImConversationScope;
   source: ImSourceMessage;
   peer: ImTrustedPeer;
-  trustedPeers: readonly ImTrustedPeer[];
 }>;
 
 export type ImSubstitutionMessagePlan = Readonly<{
@@ -166,7 +175,6 @@ export type ImSubstitutionMessagePlan = Readonly<{
   source: ImSourceMessage;
   targets: readonly [ImSubstitutionTarget, ...ImSubstitutionTarget[]];
   invalidTargetCount: number;
-  trustedPeers: readonly ImTrustedPeer[];
 }>;
 
 export type ImSourceMessage = Readonly<{
@@ -249,8 +257,10 @@ export type ImReplyPolicy =
   | (ImReplyPolicyBase &
       Readonly<{
         invocationKind: 'substitution';
-        substitutionTargetOpenIds: readonly [string, ...string[]];
-        substitutionTargetLabels: readonly [string, ...string[]];
+        substitutionTargets: readonly [
+          ImSubstitutionReplyTarget,
+          ...ImSubstitutionReplyTarget[],
+        ];
         invalidTargetCount: number;
       }>);
 
@@ -321,7 +331,6 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
       reason: 'ordinary-message',
       scope,
       source,
-      trustedPeers,
     });
   }
   if (source.sender.kind === 'human') {
@@ -347,14 +356,14 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
         reason: 'ordinary-message',
         scope,
         source,
-        trustedPeers,
       });
     }
     const substitution = input.personalSubstitution;
     if (substitution?.enabled === true && substitution.targetOpenIds.length > 0) {
+      const configuredTargetOpenIds = snapshotConfiguredHumanIds(substitution.targetOpenIds);
       const mentions = directSubstitutionMentions(
         input.message,
-        substitution.targetOpenIds,
+        configuredTargetOpenIds,
         source.sender.id,
       );
       if (mentions && mentions.targets.length === 0) {
@@ -374,7 +383,6 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
           source,
           targets: Object.freeze(nonEmpty(mentions.targets)),
           invalidTargetCount: mentions.invalidTargetCount,
-          trustedPeers,
         });
       }
     }
@@ -386,7 +394,6 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
       reason: 'ordinary-message',
       scope,
       source,
-      trustedPeers,
     });
   }
 
@@ -420,29 +427,35 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
     scope,
     source,
     peer,
-    trustedPeers,
   });
 }
 
+type CreateImInvocationPolicy = Readonly<{
+  botIdentity?: Readonly<{ openId: string; name?: string }>;
+  trustedPeerBots?: ReadonlyArray<{ alias: string; openId: string }>;
+  personalSubstitutionTargetOpenIds?: readonly string[];
+}>;
+
 export function createImInvocation(
   plans: readonly [ImOrdinaryMessagePlan, ...ImOrdinaryMessagePlan[]],
-  botIdentity?: Readonly<{ openId: string; name?: string }>,
+  policy?: CreateImInvocationPolicy,
 ): ImOrdinaryInvocation;
 export function createImInvocation(
   plans: readonly [ImPeerMessagePlan],
-  botIdentity?: Readonly<{ openId: string; name?: string }>,
+  policy?: CreateImInvocationPolicy,
 ): ImPeerInvocation;
 export function createImInvocation(
   plans: readonly [ImSubstitutionMessagePlan],
-  botIdentity?: Readonly<{ openId: string; name?: string }>,
+  policy?: CreateImInvocationPolicy,
 ): ImSubstitutionInvocation;
 export function createImInvocation(
   plans:
     | readonly [ImOrdinaryMessagePlan, ...ImOrdinaryMessagePlan[]]
     | readonly [ImPeerMessagePlan]
     | readonly [ImSubstitutionMessagePlan],
-  botIdentity?: Readonly<{ openId: string; name?: string }>,
+  policy: CreateImInvocationPolicy = {},
 ): ImInvocation {
+  const trustedPeers = snapshotTrustedPeers(policy.trustedPeerBots ?? []);
   const first = plans[0];
   if (first.lane === 'peer') {
     const target = replyTarget(first.source.message);
@@ -460,12 +473,12 @@ export function createImInvocation(
       sourceMessages,
       replyTarget: target,
       peerAlias: first.peer.alias,
-      trustedPeers: first.trustedPeers,
+      trustedPeers,
       promptPolicy: Object.freeze({
         kind: 'peer',
         reason: 'trusted-peer-message',
         message: toPeerPromptMessage(first.source, first.peer.alias),
-        trustedPeerAliases: Object.freeze(first.trustedPeers.map(({ alias }) => alias)),
+        trustedPeerAliases: Object.freeze(trustedPeers.map(({ alias }) => alias)),
         zeroHop: true,
       }),
       replyPolicy,
@@ -477,19 +490,13 @@ export function createImInvocation(
     const targets = Object.freeze(
       nonEmpty(first.targets.map((substitutionTarget) => Object.freeze({ ...substitutionTarget }))),
     );
-    const substitutionTargetOpenIds = Object.freeze(
-      nonEmpty(targets.map(({ openId }) => openId)),
-    );
-    const substitutionTargetLabels = Object.freeze(
-      nonEmpty(targets.map(({ displayAlias }) => displayAlias)),
-    );
+    const targetAliases = Object.freeze(nonEmpty(targets.map(({ displayAlias }) => displayAlias)));
     const replyPolicy = Object.freeze({
       invocationKind: 'substitution',
       scope: first.scope,
       target,
       senderOwnership: senderOwnership(first.scope, first.source.sender),
-      substitutionTargetOpenIds,
-      substitutionTargetLabels,
+      substitutionTargets: targets,
       invalidTargetCount: first.invalidTargetCount,
     }) satisfies ImSubstitutionInvocation['replyPolicy'];
     return Object.freeze({
@@ -499,14 +506,14 @@ export function createImInvocation(
       sourceMessages,
       replyTarget: target,
       targets,
-      trustedPeers: first.trustedPeers,
+      trustedPeers,
       promptPolicy: Object.freeze({
         kind: 'substitution',
         reason: 'personal-substitution-message',
         message: toSubstitutionPromptMessage(first.source),
-        targetAliases: substitutionTargetLabels,
+        targetAliases,
         invalidTargetCount: first.invalidTargetCount,
-        trustedPeerAliases: Object.freeze(first.trustedPeers.map(({ alias }) => alias)),
+        trustedPeerAliases: Object.freeze(trustedPeers.map(({ alias }) => alias)),
         oneHop: true,
       }),
       replyPolicy,
@@ -528,8 +535,13 @@ export function createImInvocation(
   const [firstSource, ...remainingSources] = sourceMessages;
   const last = remainingSources[remainingSources.length - 1] ?? firstSource;
   const target = replyTarget(last.message);
+  const configuredTargetOpenIds = snapshotConfiguredHumanIds(
+    policy.personalSubstitutionTargetOpenIds ?? [],
+  );
   const promptMessages = nonEmpty(
-    sourceMessages.map((source) => toPromptMessage(source, first.trustedPeers)),
+    sourceMessages.map((source) =>
+      toPromptMessage(source, trustedPeers, configuredTargetOpenIds),
+    ),
   );
   const replyPolicy = Object.freeze({
     invocationKind: 'ordinary',
@@ -543,18 +555,18 @@ export function createImInvocation(
     scope: first.scope,
     sourceMessages: Object.freeze(sourceMessages),
     replyTarget: target,
-    trustedPeers: first.trustedPeers,
+    trustedPeers,
     promptPolicy: Object.freeze({
       kind: 'ordinary',
       reason: 'ordinary-message-batch',
       messages: Object.freeze(promptMessages),
-      trustedPeerAliases: Object.freeze(first.trustedPeers.map(({ alias }) => alias)),
+      trustedPeerAliases: Object.freeze(trustedPeers.map(({ alias }) => alias)),
       oneHop: true,
-      ...(botIdentity
+      ...(policy.botIdentity
         ? {
             botIdentity: Object.freeze({
-              openId: botIdentity.openId,
-              ...(botIdentity.name ? { name: botIdentity.name } : {}),
+              openId: policy.botIdentity.openId,
+              ...(policy.botIdentity.name ? { name: policy.botIdentity.name } : {}),
             }),
           }
         : {}),
@@ -615,7 +627,7 @@ export function sanitizeImAnswer(answer: string): string {
 
 const LEGAL_ALIAS = /^[\p{L}\p{N}_-]+$/u;
 const LEGAL_ALIAS_SOURCE = /^[\p{L}\p{N}\p{M}_-]+$/u;
-const EMAIL_LOCAL = /^[\p{L}\p{N}._%+\-]$/u;
+const EMAIL_LOCAL = /^[\p{L}\p{N}._%+-]$/u;
 const RESERVED_ALIASES: Record<string, true> = { all: true, everyone: true, here: true };
 
 function firstTrustedPeerActivation(
@@ -803,8 +815,8 @@ function previousCodePoint(
 export function substitutionMentionOpenIds(plan: ImReplyPlan): readonly string[] {
   return plan.invocationKind === 'substitution' &&
     plan.state.terminal === 'done' &&
-    Boolean(plan.state.finalText?.trim())
-    ? plan.substitutionTargetOpenIds
+    plan.state.finalText?.trim()
+    ? plan.substitutionTargets.map(({ openId }) => openId)
     : [];
 }
 
@@ -863,10 +875,16 @@ function parseSender(message: NormalizedMessage): ImSenderIdentity {
     return Object.freeze({ kind: 'unknown', reason: 'contradictory-sender-type' });
   }
   if (rawKind === 'human') {
-    return Object.freeze({ kind: 'human', id: verifiedHumanId(rawId) });
+    const id = VerifiedHumanIdSchema.safeParse(rawId);
+    return id.success
+      ? Object.freeze({ kind: 'human', id: id.data })
+      : Object.freeze({ kind: 'unknown', reason: 'invalid-sender-id' });
   }
   if (rawKind === 'bot') {
-    return Object.freeze({ kind: 'bot', id: verifiedBotId(rawId) });
+    const id = VerifiedBotIdSchema.safeParse(rawId);
+    return id.success
+      ? Object.freeze({ kind: 'bot', id: id.data })
+      : Object.freeze({ kind: 'unknown', reason: 'invalid-sender-id' });
   }
   return Object.freeze({ kind: 'unknown', reason: 'unknown-sender-type' });
 }
@@ -874,6 +892,7 @@ function parseSender(message: NormalizedMessage): ImSenderIdentity {
 function toPromptMessage(
   source: ImSourceMessage,
   trustedPeers: readonly ImTrustedPeer[],
+  configuredTargetOpenIds: readonly VerifiedHumanId[],
 ): ImPromptMessage {
   const message = source.message;
   const interactiveCard = readInteractiveCard(message);
@@ -889,12 +908,15 @@ function toPromptMessage(
         const trustedPeer = mention.openId
           ? trustedPeers.find((peer) => peer.openId === mention.openId)
           : undefined;
+        const configuredTarget = configuredTargetOpenIds.some(
+          (openId) => openId === mention.openId,
+        );
         return Object.freeze({
           key: mention.key,
           ...(trustedPeer
             ? { name: `@${trustedPeer.alias}`, isBot: true }
             : {
-                ...(mention.openId ? { openId: mention.openId } : {}),
+                ...(!configuredTarget && mention.openId ? { openId: mention.openId } : {}),
                 ...(mention.name ? { name: mention.name } : {}),
                 ...(mention.isBot === undefined ? {} : { isBot: mention.isBot }),
               }),
@@ -937,15 +959,19 @@ function snapshotTrustedPeers(
     peers.map(({ alias, openId }) =>
       Object.freeze({
         alias,
-        openId: verifiedBotId(openId),
+        openId: VerifiedBotIdSchema.parse(openId),
       }),
     ),
   );
 }
+function snapshotConfiguredHumanIds(openIds: readonly string[]): readonly VerifiedHumanId[] {
+  return Object.freeze(openIds.map((openId) => VerifiedHumanIdSchema.parse(openId)));
+}
+
 
 function directSubstitutionMentions(
   message: NormalizedMessage,
-  configuredTargetOpenIds: readonly string[],
+  configuredTargetOpenIds: readonly VerifiedHumanId[],
   senderOpenId: VerifiedHumanId,
 ):
   | Readonly<{ targets: readonly ImSubstitutionTarget[]; invalidTargetCount: number }>
@@ -965,7 +991,7 @@ function directSubstitutionMentions(
   }
 
   const configured = new Set(configuredTargetOpenIds);
-  const seen = new Set<string>();
+  const seen = new Set<VerifiedHumanId>();
   const targets: ImSubstitutionTarget[] = [];
   let invalidTargetCount = 0;
   for (const rawMention of raw.message.mentions) {
@@ -987,6 +1013,17 @@ function directSubstitutionMentions(
       rawMention.id.open_id
         ? rawMention.id.open_id
         : undefined;
+    let hasRawMentionType = false;
+    let rawMentionType: unknown;
+    if (
+      rawMention !== null &&
+      typeof rawMention === 'object' &&
+      'mentioned_type' in rawMention
+    ) {
+      hasRawMentionType = true;
+      rawMentionType = rawMention.mentioned_type;
+    }
+    const parsedRawId = rawId ? VerifiedHumanIdSchema.safeParse(rawId) : undefined;
     const normalized = rawKey
       ? (message.mentions ?? []).filter((mention) => mention.key === rawKey)
       : [];
@@ -999,20 +1036,21 @@ function directSubstitutionMentions(
         ? candidate
         : undefined;
     if (
-      !rawId ||
+      !parsedRawId?.success ||
+      (hasRawMentionType && senderKind(rawMentionType) !== 'human') ||
       !identity ||
-      rawId === senderOpenId ||
-      !configured.has(rawId)
+      parsedRawId.data === senderOpenId ||
+      !configured.has(parsedRawId.data)
     ) {
       invalidTargetCount++;
       continue;
     }
-    if (seen.has(rawId)) continue;
-    seen.add(rawId);
+    if (seen.has(parsedRawId.data)) continue;
+    seen.add(parsedRawId.data);
     targets.push(
       Object.freeze({
-        openId: verifiedHumanId(rawId),
-        displayAlias: safeDisplayAlias(identity.name, rawId),
+        openId: parsedRawId.data,
+        displayAlias: safeDisplayAlias(identity.name, parsedRawId.data),
       }),
     );
   }
@@ -1034,7 +1072,8 @@ function directCurrentBotMention(
   message: NormalizedMessage,
   currentBotOpenId: string | undefined,
 ): 'direct' | 'not-direct' | 'contradictory' {
-  if (!currentBotOpenId) return 'not-direct';
+  const currentBot = VerifiedBotIdSchema.safeParse(currentBotOpenId);
+  if (!currentBot.success) return 'not-direct';
   const raw = message.raw;
   if (
     typeof raw !== 'object' ||
@@ -1048,27 +1087,41 @@ function directCurrentBotMention(
     return 'not-direct';
   }
 
-  let direct = false;
-  for (const mention of raw.message.mentions) {
-    if (
-      !mention ||
-      typeof mention !== 'object' ||
-      !('id' in mention) ||
-      typeof mention.id !== 'object' ||
-      mention.id === null ||
-      !('open_id' in mention.id) ||
-      mention.id.open_id !== currentBotOpenId
-    ) {
-      continue;
-    }
-    direct = true;
-  }
-  if (!direct) return 'not-direct';
-
-  const normalized = (message.mentions ?? []).find(
-    (mention) => mention.openId === currentBotOpenId,
+  const rawMatches = raw.message.mentions.filter(
+    (mention) =>
+      mention !== null &&
+      typeof mention === 'object' &&
+      'id' in mention &&
+      mention.id !== null &&
+      typeof mention.id === 'object' &&
+      'open_id' in mention.id &&
+      mention.id.open_id === currentBot.data,
   );
-  if (!normalized || normalized.isBot === false) return 'contradictory';
+  const [rawMention, ...rawDuplicates] = rawMatches;
+  if (!rawMention) return 'not-direct';
+  if (
+    typeof rawMention !== 'object' ||
+    rawMention === null ||
+    rawDuplicates.length > 0 ||
+    ('mentioned_type' in rawMention && senderKind(rawMention.mentioned_type) !== 'bot')
+  ) {
+    return 'contradictory';
+  }
+
+  const rawKey =
+    'key' in rawMention && typeof rawMention.key === 'string' ? rawMention.key : undefined;
+  const normalizedMatches = (message.mentions ?? []).filter((mention) =>
+    rawKey ? mention.key === rawKey : mention.openId === currentBot.data,
+  );
+  const [normalized, ...normalizedDuplicates] = normalizedMatches;
+  if (
+    !normalized ||
+    normalizedDuplicates.length > 0 ||
+    normalized.openId !== currentBot.data ||
+    normalized.isBot === false
+  ) {
+    return 'contradictory';
+  }
   return 'direct';
 }
 
@@ -1171,11 +1224,4 @@ function nonEmpty<T>(items: readonly T[]): [T, ...T[]] {
   return [first, ...items.slice(1)];
 }
 
-function verifiedHumanId(value: string): VerifiedHumanId {
-  return value as VerifiedHumanId;
-}
-
-function verifiedBotId(value: string): VerifiedBotId {
-  return value as VerifiedBotId;
-}
 

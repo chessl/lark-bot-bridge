@@ -11,7 +11,7 @@ import {
   loadRootConfig,
   saveRootConfig,
 } from '../../../src/config/profile-store';
-import { Supervisor } from '../../../src/runtime/supervisor';
+import { Supervisor, type SupervisorOptions } from '../../../src/runtime/supervisor';
 
 const roots: string[] = [];
 const started: string[] = [];
@@ -23,25 +23,27 @@ let root: string;
 let sup: Supervisor;
 
 function app(id: string) {
-  return { id, secret: '${APP_SECRET}', tenant: 'feishu' as const };
+  return { id, secret: `\${APP_SECRET}`, tenant: 'feishu' as const };
 }
 
-// Stub startChannel — no network, records lifecycle, returns a minimal bridge.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const stubStartChannel: any = async (deps: any) => {
-  started.push(deps.appPaths.profile);
+// Stub startChannel: no network, records lifecycle, returns a minimal bridge.
+const stubStartChannel: NonNullable<SupervisorOptions['startChannelFn']> = async (deps) => {
+  const profile = deps.controls.profile;
+  const deliveryJournal = deps.deliveryJournal;
+  if (!deliveryJournal) throw new Error('missing delivery journal');
+  started.push(profile);
   const generation = started.length;
-  deliveryJournals.push(deps.deliveryJournal);
+  deliveryJournals.push(deliveryJournal);
   bridgeControls.push(deps.controls);
   lifecycle.push(`start:${generation}:${deps.deferDeliveryRecovery ? 'deferred' : 'active'}`);
   return {
-    channel: { botIdentity: { name: `bot-${deps.appPaths.profile}` } },
+    channel: { botIdentity: { name: `bot-${profile}` } },
     activateDeliveryRecovery: async () => {
       lifecycle.push(`activate:${generation}`);
     },
     disconnect: async () => {
       lifecycle.push(`disconnect:${generation}`);
-      disconnected.push(deps.appPaths.profile);
+      disconnected.push(profile);
     },
   };
 };
@@ -62,7 +64,8 @@ beforeEach(async () => {
     createRootConfig('personal', createDefaultProfileConfig({ app: app('cli_a') })),
     configPath,
   );
-  const rc = (await loadRootConfig(configPath))!;
+  const rc = await loadRootConfig(configPath);
+  if (!rc) throw new Error('missing root config');
   for (const [name, id] of [
     ['work', 'cli_b'],
     ['dup', 'cli_b'],

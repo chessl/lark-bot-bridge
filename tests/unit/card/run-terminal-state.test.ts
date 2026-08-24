@@ -249,8 +249,10 @@ describe('terminal OMP Run state', () => {
         scope: { kind: 'chat', id: 'oc_group', chatId: 'oc_group', mode: 'group' },
         target: { chatId: 'oc_group', messageId: 'om_source', replyInThread: false },
         senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-        substitutionTargetOpenIds: ['ou_target', 'ou_second'],
-        substitutionTargetLabels: ['Target', 'Second'],
+        substitutionTargets: [
+          { openId: 'ou_target', displayAlias: 'Target' },
+          { openId: 'ou_second', displayAlias: 'Second' },
+        ],
         invalidTargetCount: 2,
         state,
       };

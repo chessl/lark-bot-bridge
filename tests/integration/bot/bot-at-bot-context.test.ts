@@ -156,6 +156,7 @@ describe('sender identity in bridge_context', () => {
         content: '请协助处理',
         rawSenderType: 'user',
         mentions: [
+          { key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true },
           { key: '@_user_2', openId: 'ou_hermes', name: 'HermesBot', isBot: true },
         ],
       }),
@@ -166,9 +167,62 @@ describe('sender identity in bridge_context', () => {
     const context = readSection(prompt, 'bridge_context') as {
       mentions?: Array<{ name?: string; openId?: string; isBot?: boolean }>;
     };
-    expect(context.mentions).toEqual([{ name: '@Hermes', isBot: true }]);
+    expect(context.mentions).toContainEqual({ name: '@Hermes', isBot: true });
     expect(prompt).toContain('@Hermes');
     expect(prompt).not.toContain('ou_hermes');
+  });
+  it('freezes the live collaboration policy when the ordinary batch becomes an Invocation', async () => {
+    vi.useFakeTimers();
+    const h = await createHarness();
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_batch_policy',
+        content: '请协作处理',
+        rawSenderType: 'user',
+        mentions: [
+          { key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true },
+          { key: '@_user_2', openId: 'ou_atlas', name: 'AtlasBot', isBot: true },
+          { key: '@_user_3', openId: 'ou_target', name: 'Target label', isBot: false },
+        ],
+        rawMentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' }, name: 'Bridge' }],
+      }),
+    );
+    h.controls.cfg.collaboration.trustedPeerBots = [
+      { alias: 'Atlas', openId: 'ou_atlas' },
+    ];
+    h.controls.cfg.collaboration.personalSubstitution = {
+      enabled: true,
+      targetOpenIds: ['ou_target'],
+    };
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(h.agent.runOptions).toHaveLength(1);
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('@Atlas');
+    expect(prompt).toContain('Target label');
+    expect(prompt).not.toMatch(/ou_(?:atlas|target)/);
+  });
+
+
+  it('does not waive requireMention from normalized mentionedBot alone', async () => {
+    vi.useFakeTimers();
+    const h = await createHarness();
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_normalized_only',
+        content: 'normalized mention only',
+        rawSenderType: 'user',
+        rawMentions: [],
+        mentionedBot: true,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(h.agent.runOptions).toHaveLength(0);
   });
 
   it('silently drops untrusted, indirect, and Bot Command traffic', async () => {
@@ -676,6 +730,7 @@ function message(input: {
     key: string;
     id: { open_id: string };
     name: string;
+    mentioned_type?: string;
   }>;
   threadId?: string;
   mentionedBot?: boolean;
@@ -710,7 +765,11 @@ function message(input: {
             },
             message: {
               message_id: input.messageId,
-              ...(input.rawMentions ? { mentions: input.rawMentions } : {}),
+              mentions:
+                input.rawMentions ??
+                (input.mentionedBot === false
+                  ? []
+                  : [{ key: '@_user_1', id: { open_id: 'ou_bot' }, name: 'Bridge' }]),
             },
           },
         }

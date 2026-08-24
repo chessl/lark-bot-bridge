@@ -23,10 +23,9 @@ export interface TrustedPeerBot {
   openId: string;
 }
 
-export interface PersonalSubstitutionConfig {
-  enabled: boolean;
-  targetOpenIds: string[];
-}
+export type PersonalSubstitutionConfig =
+  | Readonly<{ enabled: false; targetOpenIds: string[] }>
+  | Readonly<{ enabled: true; targetOpenIds: [string, ...string[]] }>;
 
 export interface CollaborationConfig {
   trustedPeerBots: TrustedPeerBot[];
@@ -272,10 +271,14 @@ export function normalizePersonalSubstitution(input: unknown): PersonalSubstitut
     openIds.add(value);
     return value;
   });
-  if (input.enabled && targetOpenIds.length === 0) {
-    throw new Error('enabled personal substitution requires at least one target');
+  if (input.enabled) {
+    const [first, ...rest] = targetOpenIds;
+    if (first === undefined) {
+      throw new Error('enabled personal substitution requires at least one target');
+    }
+    return { enabled: true, targetOpenIds: [first, ...rest] };
   }
-  return { enabled: input.enabled, targetOpenIds };
+  return { enabled: false, targetOpenIds };
 }
 
 function normalizeCollaboration(input: unknown): CollaborationConfig {

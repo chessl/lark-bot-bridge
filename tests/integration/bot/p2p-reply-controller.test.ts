@@ -691,6 +691,51 @@ describe('P2P OMP Reply', () => {
     expect(patch).not.toContain('<at');
     expect(channel.sent).toEqual([]);
   });
+  it.each(['update', 'close'] satisfies Array<'update' | 'close'>)(
+    'degrades the managed %s fallback patch after Mention rejection',
+    async (branch) => {
+      const target: ImReplyTarget = {
+        chatId: `oc_${branch}_fallback`,
+        messageId: `om_${branch}_fallback`,
+        replyInThread: false,
+      };
+      const replyPolicy: ImReplyPolicy = {
+        ...testReplyPolicy(target),
+        senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+      };
+      let patchAttempt = 0;
+      const patch = async () => {
+        patchAttempt++;
+        return patchAttempt === 1
+          ? { code: 230001, msg: 'mention rejected' }
+          : { code: 0 };
+      };
+      const channel = createFakeLarkChannel(
+        branch === 'update'
+          ? { update: async () => ({ code: 230002, msg: 'update rejected' }), patch }
+          : { close: async () => ({ code: 230002, msg: 'close rejected' }), patch },
+      );
+      const controller = new OmpReplyController({
+        channel: channel as unknown as LarkChannel,
+        replyPolicy,
+      });
+      await controller.open(createRunState());
+      await controller.finish({
+        ...replyPolicy,
+        reason: 'run-completed',
+        state: { ...finalizeIfRunning(createRunState()), finalText: 'finished' },
+      });
+
+      expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledTimes(2);
+      const degraded = JSON.stringify(
+        channel.rawClient.im.v1.message.patch.mock.calls.at(-1)?.[0],
+      );
+      expect(degraded).toContain('Mention 不可用');
+      expect(degraded).toContain('\\\\@请求者');
+      expect(degraded).not.toContain('<at');
+    },
+  );
+
 
   it('keeps combined substitution ownership and peer degradation inside one managed Reply', async () => {
     const target = {
@@ -708,8 +753,10 @@ describe('P2P OMP Reply', () => {
       },
       target,
       senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-      substitutionTargetOpenIds: ['ou_target', 'ou_second'],
-      substitutionTargetLabels: ['Target', 'Second'],
+      substitutionTargets: [
+        { openId: 'ou_target', displayAlias: 'Target' },
+        { openId: 'ou_second', displayAlias: 'Second' },
+      ],
       invalidTargetCount: 2,
     };
     const channel = createFakeLarkChannel({

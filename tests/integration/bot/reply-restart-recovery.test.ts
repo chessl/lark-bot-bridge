@@ -40,8 +40,10 @@ const SUBSTITUTION_REPLY_POLICY: ImReplyPolicy = {
   scope: REPLY_POLICY.scope,
   target: TARGET,
   senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-  substitutionTargetOpenIds: ['ou_target', 'ou_second'],
-  substitutionTargetLabels: ['Target', 'Second'],
+  substitutionTargets: [
+    { openId: 'ou_target', displayAlias: 'Target' },
+    { openId: 'ou_second', displayAlias: 'Second' },
+  ],
   invalidTargetCount: 2,
 };
 const cleanups: Array<() => Promise<void>> = [];

@@ -40,6 +40,7 @@ const SenderOwnershipSchema = z.discriminatedUnion('kind', [
       'missing-raw-sender',
       'missing-sender-id',
       'contradictory-sender-id',
+      'invalid-sender-id',
       'contradictory-sender-type',
       'unknown-sender-type',
       'direct-message',
@@ -57,12 +58,20 @@ const ReplyPolicySchema = z.discriminatedUnion('invocationKind', [
   ReplyPolicyBaseSchema.extend({ invocationKind: z.literal('peer') }),
   ReplyPolicyBaseSchema.extend({
     invocationKind: z.literal('substitution'),
-    substitutionTargetOpenIds: z
-      .tuple([z.string().min(1)], z.string().min(1))
+    substitutionTargets: z
+      .tuple(
+        [
+          z.object({
+            openId: z.string().regex(/^ou_[A-Za-z0-9_-]+$/),
+            displayAlias: z.string().min(1),
+          }),
+        ],
+        z.object({
+          openId: z.string().regex(/^ou_[A-Za-z0-9_-]+$/),
+          displayAlias: z.string().min(1),
+        }),
+      )
       .refine((targets) => targets.length <= 10),
-    substitutionTargetLabels: z
-      .tuple([z.string().min(1)], z.string().min(1))
-      .refine((labels) => labels.length <= 10),
     invalidTargetCount: z.number().int().nonnegative(),
   }),
 ]) satisfies z.ZodType<ImReplyPolicy>;

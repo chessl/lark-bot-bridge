@@ -1,10 +1,11 @@
 import { modelLabel, supportedModels } from '../agent/models';
 import type { KnownChat } from '../bot/lark-info';
-import type {
-  PersonalSubstitutionConfig,
-  ProfileMode,
-  TrustedPeerBot,
-} from '../config/profile-schema';
+import type { ProfileMode, TrustedPeerBot } from '../config/profile-schema';
+export type PersonalSubstitutionDraft = Readonly<{
+  enabled: boolean;
+  targetOpenIds: readonly string[];
+}>;
+
 
 export interface ConfigFormOpts {
   /** Deployment mode: 'personal' (default) or 'team'. */
@@ -20,7 +21,7 @@ export interface ConfigFormOpts {
   admins: string[];
   knownChats: KnownChat[];
   trustedPeerBots?: TrustedPeerBot[];
-  personalSubstitution?: PersonalSubstitutionConfig;
+  personalSubstitution?: PersonalSubstitutionDraft;
   collaborationExpanded?: boolean;
   collaborationError?: string;
   maskTrustedPeerIds?: boolean;
@@ -264,7 +265,7 @@ function safePeerSummary(peers: readonly TrustedPeerBot[], includeAliases: boole
     .join('、');
 }
 
-function safeSubstitutionSummary(config: PersonalSubstitutionConfig | undefined): string {
+function safeSubstitutionSummary(config: PersonalSubstitutionDraft | undefined): string {
   const enabled = config?.enabled === true;
   const count = config?.targetOpenIds.length ?? 0;
   return `${enabled ? '启用' : '禁用'}（${count} 个已保存目标）`;

@@ -75,6 +75,11 @@ import type { SessionStore } from '../session/store';
 import { readUiSidecar } from '../ui/sidecar';
 import { validateAppCredentials } from '../utils/feishu-auth';
 import type { WorkspaceStore } from '../workspace/store';
+type PersonalSubstitutionDraft = {
+  enabled: boolean;
+  targetOpenIds: string[];
+};
+
 
 export interface Controls {
   profile: string;
@@ -1541,7 +1546,7 @@ function restoreTrustedPeerDraft(
 function personalSubstitutionDraft(
   ctx: CommandContext,
   count: number | undefined,
-): PersonalSubstitutionConfig {
+): PersonalSubstitutionDraft {
   const fv = ctx.formValue ?? {};
   const current = maskSavedPersonalSubstitution(
     ctx.controls.cfg.collaboration.personalSubstitution,
@@ -1573,7 +1578,7 @@ function personalSubstitutionDraft(
 
 function maskSavedPersonalSubstitution(
   config: PersonalSubstitutionConfig,
-): PersonalSubstitutionConfig {
+): PersonalSubstitutionDraft {
   return {
     enabled: config.enabled,
     targetOpenIds: config.targetOpenIds.map(
@@ -1584,7 +1589,7 @@ function maskSavedPersonalSubstitution(
 
 async function resolvePersonalSubstitution(
   ctx: CommandContext,
-  draft: PersonalSubstitutionConfig,
+  draft: PersonalSubstitutionDraft,
 ): Promise<PersonalSubstitutionConfig> {
   const saved = ctx.controls.cfg.collaboration.personalSubstitution.targetOpenIds;
   const resolved: Array<string | undefined> = Array.from(
@@ -1653,12 +1658,7 @@ function configFormOptions(
 ): ConfigFormOpts {
   const idleMs = getRunIdleTimeoutMs(ctx.controls.cfg);
   const access = ctx.controls.cfg.access;
-  const safePersonalSubstitution = {
-    enabled: personalSubstitution.enabled,
-    targetOpenIds: personalSubstitution.targetOpenIds.map((target) =>
-      /^…[A-Za-z0-9_-]{1,6} \[substitution saved \d+\]$/.test(target) ? target : '',
-    ),
-  };
+  const safePersonalSubstitution = personalSubstitution;
   return {
     mode: ctx.controls.cfg.mode,
     model: normalizeModelSelection(ctx.controls.cfg.preferences?.model),
@@ -1817,16 +1817,16 @@ async function submitConfig(ctx: CommandContext, counts: ConfigDraftCounts): Pro
     try {
       trustedPeerBots = normalizeTrustedPeerBots(peerDraft, ctx.channel.botIdentity?.openId);
       personalSubstitution = await resolvePersonalSubstitution(ctx, substitutionDraft);
-      await savePreferencesConfig(
-        ctx,
-        nextPreferences,
+      await configOps.savePreferencesConfig({
+        state: ctx.controls,
+        preferences: nextPreferences,
         requireMentionInGroup,
         mode,
-        {
+        collaboration: {
           trustedPeerBots,
           personalSubstitution,
         },
-      );
+      });
     } catch {
       log.warn('command', 'config-save-rejected', { reason: 'invalid-collaboration' });
       await waitForSettle();
@@ -1949,22 +1949,6 @@ async function saveAccountConfig(
   return configOps.saveAccountConfig(ctx.controls, newApp, plaintextSecret);
 }
 
-async function savePreferencesConfig(
-  ctx: CommandContext,
-  preferences: AppPreferences,
-  requireMentionInGroup: boolean,
-  mode: ProfileMode,
-  collaboration: ProfileConfig['collaboration'],
-): Promise<void> {
-  return configOps.savePreferencesConfig(
-    ctx.controls,
-    preferences,
-    requireMentionInGroup,
-    mode,
-    undefined,
-    collaboration,
-  );
-}
 
 // ────────────── /meeting — in-meeting agent (智能体入会) ──────────────
 
@@ -2145,20 +2129,24 @@ function pickMeetingSession(
         };
   }
 
-  const all = manager.all();
-  if (all.length === 0) {
+  const [first, ...remaining] = manager.all();
+  if (!first) {
     return { ok: false, message: '当前没有在跟的会议。先 `/meeting join <9位会议号>`。' };
   }
-  if (all.length === 1) return { ok: true, session: all[0]! };
+  if (remaining.length === 0) return { ok: true, session: first };
 
   // Multiple meetings: prefer the one started from this chat.
-  const fromHere = all.filter((s) => s.originChatId === ctx.msg.chatId);
-  if (fromHere.length === 1) return { ok: true, session: fromHere[0]! };
+  const fromHere = [first, ...remaining].filter((session) => session.originChatId === ctx.msg.chatId);
+  const onlyHere = fromHere[0];
+  if (fromHere.length === 1 && onlyHere) return { ok: true, session: onlyHere };
 
-  const list = all.map((s) => `- ${s.meetingNo}${s.topic ? `（${s.topic}）` : ''}`).join('\n');
+  const all = [first, ...remaining];
+  const list = all
+    .map((session) => `- ${session.meetingNo}${session.topic ? `（${session.topic}）` : ''}`)
+    .join('\n');
   return {
     ok: false,
-    message: `当前在跟 ${all.length} 场会议，请指定会议号：\n${list}\n\n例如 \`/meeting notes ${all[0]!.meetingNo}\``,
+    message: `当前在跟 ${all.length} 场会议，请指定会议号：\n${list}\n\n例如 \`/meeting notes ${first.meetingNo}\``,
   };
 }
 

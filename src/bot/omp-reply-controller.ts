@@ -213,11 +213,11 @@ export class OmpReplyController {
         if (update === 'mention_rejected') {
           await this.patchKnownTerminal(degradedTerminal ?? staticTerminal, plan, true);
         } else if (update === 'rejected') {
-          await this.patchKnownTerminal(staticTerminal, plan, false);
+          await this.patchKnownTerminal(staticTerminal, plan, false, degradedTerminal);
         } else {
           const close = await this.commitClose(finalState);
           if (close !== 'success') {
-            await this.patchKnownTerminal(staticTerminal, plan, false);
+            await this.patchKnownTerminal(staticTerminal, plan, false, degradedTerminal);
           }
         }
       } else if (transport === 'inline') {
@@ -1271,8 +1271,7 @@ function validateFinalPlan(plan: ImReplyPlan, progressPolicy: ImReplyPolicy): vo
       senderOwnership: plan.senderOwnership,
       ...(plan.invocationKind === 'substitution'
         ? {
-            substitutionTargetOpenIds: plan.substitutionTargetOpenIds,
-            substitutionTargetLabels: plan.substitutionTargetLabels,
+            substitutionTargets: plan.substitutionTargets,
             invalidTargetCount: plan.invalidTargetCount,
           }
         : {}),

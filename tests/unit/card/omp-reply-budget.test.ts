@@ -132,8 +132,7 @@ describe('OMP Reply CardKit budget', () => {
       scope: { kind: 'chat', id: 'oc_group', chatId: 'oc_group', mode: 'group' },
       target: { chatId: 'oc_group', messageId: 'om_source', replyInThread: false },
       senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-      substitutionTargetOpenIds: ['ou_target'],
-      substitutionTargetLabels: ['Target'],
+      substitutionTargets: [{ openId: 'ou_target', displayAlias: 'Target' }],
       invalidTargetCount: 0,
       state,
       peerActivation: {

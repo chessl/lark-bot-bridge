@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { Controls } from '../../../src/commands/index.js';
 import {
   createDefaultProfileConfig,
+  type PersonalSubstitutionConfig,
   type ProfileConfig,
 } from '../../../src/config/profile-schema.js';
 import { log } from '../../../src/core/logger.js';
@@ -458,16 +459,22 @@ async function createHarness(options: FixtureOptions = {}): Promise<{
     access: { allowedUsers: ['ou_user'] },
     omp: { binaryPath: '/usr/local/bin/omp' },
   });
+  const [firstSubstitutionTarget, ...remainingSubstitutionTargets] =
+    options.personalSubstitutionTargetOpenIds ?? [];
+  const personalSubstitution: PersonalSubstitutionConfig =
+    firstSubstitutionTarget === undefined
+      ? { enabled: false, targetOpenIds: [] }
+      : {
+          enabled: true,
+          targetOpenIds: [firstSubstitutionTarget, ...remainingSubstitutionTargets],
+        };
   const profileConfig = {
     ...baseProfileConfig,
     workspaces: { ...baseProfileConfig.workspaces, default: workspace },
     collaboration: {
       ...baseProfileConfig.collaboration,
       trustedPeerBots: options.trustedPeerBots ?? [],
-      personalSubstitution: {
-        enabled: options.personalSubstitutionTargetOpenIds !== undefined,
-        targetOpenIds: options.personalSubstitutionTargetOpenIds ?? [],
-      },
+      personalSubstitution,
     },
   };
   const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
