@@ -1,7 +1,11 @@
 import pkg from '../../package.json';
 import { OmpAdapter } from '../agent/omp/adapter';
 import type { OmpRunEngine } from '../agent/types';
-import { startChannel as realStartChannel, type StartChannelDeps } from '../bot/channel';
+import {
+  startChannel as realStartChannel,
+  type BridgeChannel,
+  type StartChannelDeps,
+} from '../bot/channel';
 import { OmpDeliveryJournal } from '../bot/omp-delivery-journal';
 import type { Controls } from '../commands';
 import type { AppPaths } from '../config/app-paths';
@@ -20,12 +24,7 @@ import {
 import { resolveProfileRuntime } from './profile-runtime';
 import { type ProcessEntry, register, unregister, unregisterSync, updateEntry } from './registry';
 
-type SupervisorBridge = Readonly<{
-  channel: Readonly<{ botIdentity?: Readonly<{ name?: string }> }>;
-  disconnect(): Promise<void>;
-  activateDeliveryRecovery?(): Promise<void>;
-}>;
-type StartChannelFn = (deps: StartChannelDeps) => Promise<SupervisorBridge>;
+type StartChannelFn = (deps: StartChannelDeps) => Promise<BridgeChannel>;
 
 export interface SupervisorOptions {
   /** Root config path (config.json). */
@@ -53,7 +52,7 @@ export interface ManagedStatus {
  * (no process.exit) so the supervisor keeps hosting the others.
  */
 class ManagedProfile {
-  bridge!: SupervisorBridge;
+  bridge!: BridgeChannel;
   controls!: Controls;
   locks: AcquiredRuntimeLock[] = [];
   entry!: ProcessEntry;

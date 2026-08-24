@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createLarkChannel } from '@larksuite/channel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OmpAdapter } from '../../../src/agent/omp/adapter';
 import { OmpDeliveryJournal } from '../../../src/bot/omp-delivery-journal';
@@ -26,6 +27,18 @@ function app(id: string) {
   return { id, secret: `\${APP_SECRET}`, tenant: 'feishu' as const };
 }
 
+function stubChannel(profile: string) {
+  const channel = createLarkChannel({
+    appId: `cli_${profile}`,
+    appSecret: 'test-secret',
+  });
+  Object.defineProperty(channel, 'botIdentity', {
+    configurable: true,
+    value: { name: `bot-${profile}` },
+  });
+  return channel;
+}
+
 // Stub startChannel: no network, records lifecycle, returns a minimal bridge.
 const stubStartChannel: NonNullable<SupervisorOptions['startChannelFn']> = async (deps) => {
   const profile = deps.controls.profile;
@@ -37,7 +50,7 @@ const stubStartChannel: NonNullable<SupervisorOptions['startChannelFn']> = async
   bridgeControls.push(deps.controls);
   lifecycle.push(`start:${generation}:${deps.deferDeliveryRecovery ? 'deferred' : 'active'}`);
   return {
-    channel: { botIdentity: { name: `bot-${profile}` } },
+    channel: stubChannel(profile),
     activateDeliveryRecovery: async () => {
       lifecycle.push(`activate:${generation}`);
     },
