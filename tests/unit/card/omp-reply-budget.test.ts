@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   renderOmpReplyCard,
   renderOmpReplyMarkdown,
+  renderOmpReplyMarkdownPost,
 } from '../../../src/card/omp-reply-renderer.js';
 import { createRunState, type RunState, type ToolEntry } from '../../../src/card/run-state.js';
 
@@ -111,11 +112,14 @@ describe('OMP Reply CardKit budget', () => {
     );
   });
 
-  it('applies the UTF-8 Final Reply budget to terminal Markdown fallback', () => {
-    const markdown = renderOmpReplyMarkdown(terminalState('界🚀'.repeat(10_000)));
+  it('budgets terminal Markdown using the serialized post envelope', () => {
+    const state = terminalState('界🚀"\\\n'.repeat(10_000));
+    const markdown = renderOmpReplyMarkdown(state);
+    const post = renderOmpReplyMarkdownPost(state);
     const markerIndex = markdown.indexOf(TRUNCATION_MARKER);
 
-    expect(Buffer.byteLength(markdown)).toBeLessThanOrEqual(MAX_CARD_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(post))).toBeLessThanOrEqual(MAX_CARD_BYTES);
+    expect(JSON.stringify(post)).toContain(TRUNCATION_MARKER);
     expect(markerIndex).toBeGreaterThan(0);
     expect(markdown).not.toContain('�');
     expect(markdown.charCodeAt(markerIndex - 1)).not.toBeGreaterThanOrEqual(0xd800);

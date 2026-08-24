@@ -204,7 +204,7 @@ export function renderOmpReplyMarkdown(
   }
   const finalText = ompReplyPresentation(state).finalReply;
   const full = buildOmpReplyMarkdown(state, finalText, options);
-  if (Buffer.byteLength(full) <= MAX_CARD_BYTES || state.terminal !== 'done') return full;
+  if (withinMarkdownBudget(full) || state.terminal !== 'done') return full;
 
   let lower = 0;
   let upper = finalText.length;
@@ -217,7 +217,7 @@ export function renderOmpReplyMarkdown(
       `${finalText.slice(0, middle)}${TRUNCATION_MARKER}`,
       options,
     );
-    if (Buffer.byteLength(candidate) <= MAX_CARD_BYTES) {
+    if (withinMarkdownBudget(candidate)) {
       lower = middle;
       best = candidate;
     } else {
@@ -225,6 +225,26 @@ export function renderOmpReplyMarkdown(
     }
   }
   return best;
+}
+
+export function renderOmpReplyMarkdownPost(
+  state: RunState,
+  options?: Pick<RenderOptions, 'toolCount'>,
+): object {
+  return markdownPost(renderOmpReplyMarkdown(state, options));
+}
+
+function withinMarkdownBudget(markdown: string): boolean {
+  return Buffer.byteLength(JSON.stringify(markdownPost(markdown))) <= MAX_CARD_BYTES;
+}
+
+function markdownPost(markdown: string): object {
+  return {
+    zh_cn: {
+      title: '',
+      content: [[{ tag: 'md', text: markdown }]],
+    },
+  };
 }
 
 function buildOmpReplyMarkdown(

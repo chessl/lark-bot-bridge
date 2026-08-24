@@ -3,7 +3,7 @@ import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import {
   ompReplyPresentation,
   renderOmpReplyCard,
-  renderOmpReplyMarkdown,
+  renderOmpReplyMarkdownPost,
 } from '../card/omp-reply-renderer';
 import { initialState as emptyRunState, markInterrupted, type RunState } from '../card/run-state';
 import type {
@@ -219,7 +219,7 @@ export class OmpReplyController {
         const markdown = await this.commitReply(
           'markdown',
           'post',
-          JSON.stringify(markdownPost(renderOmpReplyMarkdown(finalState))),
+          JSON.stringify(renderOmpReplyMarkdownPost(finalState)),
           true,
         );
         if (markdown === 'rejected') throw this.deliveryFailure('terminal-markdown-rejected');
@@ -776,7 +776,7 @@ async function patchRecoveredMessage(
   const content =
     entry.transport === 'markdown'
       ? JSON.stringify(
-          markdownPost(renderOmpReplyMarkdown(markInterrupted(emptyRunState), { toolCount: null })),
+          renderOmpReplyMarkdownPost(markInterrupted(emptyRunState), { toolCount: null }),
         )
       : projection.serialized;
   const pending: DurablePendingOperation = {
@@ -875,14 +875,6 @@ function makeProjection(card: object): Projection {
   return { card, serialized: JSON.stringify(card) };
 }
 
-function markdownPost(markdown: string): object {
-  return {
-    zh_cn: {
-      title: '',
-      content: [[{ tag: 'md', text: markdown }]],
-    },
-  };
-}
 
 function isClearRejection(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
