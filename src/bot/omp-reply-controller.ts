@@ -60,13 +60,15 @@ interface Projection {
 
 type PendingOperation =
   | (Extract<DurablePendingOperation, { kind: 'reply' }> & PendingAttempt)
-  | (Extract<DurablePendingOperation, { kind: 'update' }> & PendingAttempt & {
-      projection: Projection;
-    })
+  | (Extract<DurablePendingOperation, { kind: 'update' }> &
+      PendingAttempt & {
+        projection: Projection;
+      })
   | (Extract<DurablePendingOperation, { kind: 'close' }> & PendingAttempt)
-  | (Extract<DurablePendingOperation, { kind: 'patch' }> & PendingAttempt & {
-      projection: Projection;
-    });
+  | (Extract<DurablePendingOperation, { kind: 'patch' }> &
+      PendingAttempt & {
+        projection: Projection;
+      });
 
 interface PendingAttempt {
   attempts: number;
@@ -304,9 +306,7 @@ export class OmpReplyController {
     return this.commitPending();
   }
 
-  private async commitClose(
-    finalState: RunState,
-  ): Promise<Exclude<OperationResult, 'unknown'>> {
+  private async commitClose(finalState: RunState): Promise<Exclude<OperationResult, 'unknown'>> {
     const cardId = this.requireManagedCard();
     const sequence = this.#sequence + 1;
     const uuid = randomUUID();
@@ -547,7 +547,9 @@ export async function activateOmpReplyRecovery(input: {
   await input.journal.load();
   let scanner = Promise.resolve();
   const scan = (startup: boolean): Promise<void> => {
-    const result = scanner.then(() => scanRecoverableDeliveries(input.channel, input.journal, now, startup));
+    const result = scanner.then(() =>
+      scanRecoverableDeliveries(input.channel, input.journal, now, startup),
+    );
     scanner = result.catch(() => undefined);
     return result;
   };
@@ -700,10 +702,7 @@ async function recoverInterrupted(
       };
       const update = await submitRecoveryOperation(channel, journal, entry, pending);
       if (update === 'unknown') return;
-      const known = clearPending(
-        { ...entry, nextSequence: sequence + 1, pending },
-        now,
-      );
+      const known = clearPending({ ...entry, nextSequence: sequence + 1, pending }, now);
       await journal.put(known);
       if (update === 'rejected') {
         await patchRecoveredMessage(channel, journal, known, staticProjection);
@@ -757,9 +756,7 @@ async function closeRecoveredManaged(
       channel,
       journal,
       known,
-      makeProjection(
-        renderOmpReplyCard(interrupted, { streamingMode: false, toolCount: null }),
-      ),
+      makeProjection(renderOmpReplyCard(interrupted, { streamingMode: false, toolCount: null })),
     );
     return;
   }
@@ -779,9 +776,7 @@ async function patchRecoveredMessage(
   const content =
     entry.transport === 'markdown'
       ? JSON.stringify(
-          markdownPost(
-            renderOmpReplyMarkdown(markInterrupted(emptyRunState), { toolCount: null }),
-          ),
+          markdownPost(renderOmpReplyMarkdown(markInterrupted(emptyRunState), { toolCount: null })),
         )
       : projection.serialized;
   const pending: DurablePendingOperation = {
@@ -813,7 +808,9 @@ async function submitRecoveryOperation(
     ...entry,
     deliveryState: 'unknown',
     nextSequence:
-      pending.sequence > 0 ? Math.max(entry.nextSequence, pending.sequence + 1) : entry.nextSequence,
+      pending.sequence > 0
+        ? Math.max(entry.nextSequence, pending.sequence + 1)
+        : entry.nextSequence,
     pending,
   });
   for (const delayMs of RETRY_DELAYS_MS) {
@@ -836,11 +833,7 @@ async function attemptDurableOperation(
       const response = await channel.rawClient.im.v1.message.reply(operation.request);
       const code = response.code;
       const messageId = response.data?.message_id;
-      if (
-        (code === undefined || code === 0) &&
-        typeof messageId === 'string' &&
-        messageId.trim()
-      ) {
+      if ((code === undefined || code === 0) && typeof messageId === 'string' && messageId.trim()) {
         return { result: 'success', messageId };
       }
       if (code === CARD_ALREADY_BOUND && exactRetry) return { result: 'success' };
@@ -915,4 +908,3 @@ function renderManagedCard(state: RunState, toolCount?: number | null): object {
     ...(toolCount === undefined ? {} : { toolCount }),
   });
 }
-

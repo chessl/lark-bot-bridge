@@ -278,7 +278,6 @@ export function configSavedCard(opts: ConfigFormOpts): object {
   };
 }
 
-
 /**
  * Shown after `/config` saves "群里不需要 @ bot" but the app is missing the
  * `im:message.group_msg` scope. Guides the user through one-click incremental

@@ -106,7 +106,9 @@ describe('OMP Reply CardKit budget', () => {
     expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(MAX_CARD_BYTES);
     expect(answer).toContain(TRUNCATION_MARKER);
     expect(answer).not.toContain('�');
-    expect(beforeMarker?.charCodeAt((beforeMarker?.length ?? 0) - 1)).not.toBeGreaterThanOrEqual(0xd800);
+    expect(beforeMarker?.charCodeAt((beforeMarker?.length ?? 0) - 1)).not.toBeGreaterThanOrEqual(
+      0xd800,
+    );
   });
 
   it('applies the UTF-8 Final Reply budget to terminal Markdown fallback', () => {

@@ -56,12 +56,12 @@ export function ConfigView({ profile }: { profile: string }) {
       )
       .catch(() => {});
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload only when the selected profile changes.
   useEffect(() => {
     setCfg(null);
     setChatNames({});
     load();
     void loadChatNames();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   if (error) return <p className="text-destructive text-sm">加载失败：{error}</p>;
@@ -406,6 +406,7 @@ function MeetingCard({
     }
   }
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: restart polling only when profile or enablement changes.
   useEffect(() => {
     if (!cfg.enabled) return;
     void load();
@@ -413,7 +414,6 @@ function MeetingCard({
     // Sessions and push counters move on their own; poll while the card is open.
     const timer = setInterval(() => void load(), 5000);
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, cfg.enabled]);
 
   async function join() {
@@ -549,9 +549,9 @@ function MeetingCard({
             ) : (
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium leading-none">
+                  <span className="text-sm font-medium leading-none">
                     在会会议（{live.sessions.length}）
-                  </label>
+                  </span>
                   <Badge
                     variant={
                       live.push.hooked
@@ -635,11 +635,11 @@ function MeetingCard({
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      <label className="text-sm font-medium leading-none">{label}</label>
+    <fieldset className="space-y-1.5">
+      <legend className="text-sm font-medium leading-none">{label}</legend>
       {children}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
+    </fieldset>
   );
 }
 
@@ -655,11 +655,11 @@ function ToggleRow({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="space-y-0.5">
-        <label className="text-sm font-medium leading-none">{label}</label>
-        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-      </div>
+    <label className="flex items-center justify-between gap-4">
+      <span className="space-y-0.5">
+        <span className="block text-sm font-medium leading-none">{label}</span>
+        {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
+      </span>
       <input
         aria-label={label}
         className={CHECKBOX_CLASS}
@@ -667,7 +667,7 @@ function ToggleRow({
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
       />
-    </div>
+    </label>
   );
 }
 
@@ -715,7 +715,7 @@ function AllowedChats({
 
   return (
     <div className="space-y-2">
-      <label className="text-sm font-medium leading-none">允许响应的群（{ids.length}）</label>
+      <p className="text-sm font-medium leading-none">允许响应的群（{ids.length}）</p>
       <div className="divide-y rounded-md border">
         {ids.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">（暂无）</p>}
         {ids.map((id) => {
@@ -949,6 +949,7 @@ function MyChatsPane({
     }
   }
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the dialog or profile changes.
   useEffect(() => {
     if (!open) return;
     setChats(null);
@@ -961,7 +962,6 @@ function MyChatsPane({
     void loadStatus().then((s) => {
       if (s?.loggedIn && s.scopes.includes("im:chat:read")) void fetchChats(true);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, profile]);
 
   async function startAuth(scopes: string[]) {
@@ -1207,9 +1207,9 @@ function AccessList({
   const [draft, setDraft] = useState("");
   return (
     <div className="space-y-2">
-      <label className="text-sm font-medium leading-none">
+      <p className="text-sm font-medium leading-none">
         {label}（{ids.length}）
-      </label>
+      </p>
       <div className="rounded-md border divide-y">
         {ids.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">（暂无）</p>}
         {ids.map((id) => (

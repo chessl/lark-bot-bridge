@@ -137,7 +137,6 @@ describe('/status and /doctor diagnostics', () => {
     expect(lastMarkdownOrText(h.channel)).toContain('agent echo check: interrupted');
   });
 
-
   it('uses the profile default workspace when the chat has no bound cwd', async () => {
     const h = await createHarness({
       configuredWorkspace: true,
@@ -366,7 +365,6 @@ function lastMarkdownOrText(channel: FakeChannel): string {
   expect(value).toBeTypeOf('string');
   return value as string;
 }
-
 
 function jsonStringContent(value: string): string {
   return JSON.stringify(value).slice(1, -1);

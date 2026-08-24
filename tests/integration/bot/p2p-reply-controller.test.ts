@@ -1,7 +1,7 @@
-import type * as LarkChannelModule from '@larksuite/channel';
-import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
+import type * as LarkChannelModule from '@larksuite/channel';
+import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { AgentEvent } from '../../../src/agent/types.js';
 import { OmpReplyController } from '../../../src/bot/omp-reply-controller.js';
@@ -136,7 +136,9 @@ describe('P2P OMP Reply', () => {
     await startTestBridge(h);
 
     await h.channel.handlers.message?.(message('om_trigger', 'run'));
-    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+    await waitFor(() =>
+      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+    );
 
     expect(h.channel.operations.indexOf('im:reply')).toBeLessThan(
       h.channel.operations.indexOf('omp:consume'),
@@ -589,7 +591,9 @@ describe('P2P OMP Reply', () => {
     await startTestBridge(h);
 
     await h.channel.handlers.message?.(message('om_budget', 'run', 1_000_000));
-    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+    await waitFor(() =>
+      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+    );
 
     const finalCard = h.channel.updates.at(-1)?.card;
     const outbound = JSON.stringify(finalCard);
@@ -702,9 +706,7 @@ describe('P2P OMP Reply', () => {
     vi.useFakeTimers();
 
     void h.channel.handlers.message?.(message('om_bound', 'run'));
-    await vi.waitFor(() =>
-      expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce(),
-    );
+    await vi.waitFor(() => expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce());
     await vi.runAllTimersAsync();
     await vi.waitFor(() =>
       expect(h.channel.rawClient.cardkit.v1.card.settings).toHaveBeenCalledOnce(),
@@ -754,9 +756,7 @@ describe('P2P OMP Reply', () => {
     expect(operationSequence(updateCalls[0])).toBe(1);
     const closeCall = h.channel.rawClient.cardkit.v1.card.settings.mock.calls[0]?.[0];
     expect(operationSequence(closeCall)).toBe(2);
-    expect(h.channel.operations).toEqual(
-      expect.arrayContaining(['card:update:1', 'card:close:2']),
-    );
+    expect(h.channel.operations).toEqual(expect.arrayContaining(['card:update:1', 'card:close:2']));
     expect(h.channel.operations.lastIndexOf('card:update:1')).toBeLessThan(
       h.channel.operations.indexOf('card:close:2'),
     );
@@ -865,7 +865,9 @@ describe('P2P OMP Reply', () => {
     await terminalGate.reachedPromise;
     await vi.runAllTimersAsync();
     expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce();
-    expect(operationSequence(h.channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0])).toBe(1);
+    expect(operationSequence(h.channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0])).toBe(
+      1,
+    );
 
     terminalGate.resolve();
     await vi.advanceTimersByTimeAsync(0);
@@ -973,7 +975,9 @@ describe('P2P OMP Reply', () => {
     await startTestBridge(h);
 
     await h.channel.handlers.message?.(message('om_metrics', 'run', 1_000_000));
-    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+    await waitFor(() =>
+      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+    );
 
     const metrics = cardElements(h.channel.updates.at(-1)?.card).filter(
       (element) => 'element_id' in element && element.element_id === 'metrics',
@@ -990,10 +994,7 @@ describe('P2P OMP Reply', () => {
   it.each([
     {
       name: 'streamed assistant text',
-      visible: [
-        { type: 'text_started' },
-        { type: 'final_text', content: 'streamed' },
-      ],
+      visible: [{ type: 'text_started' }, { type: 'final_text', content: 'streamed' }],
     },
     {
       name: 'non-streaming assistant text',
@@ -1013,16 +1014,14 @@ describe('P2P OMP Reply', () => {
     const h = await createHarness({
       wallNow: clock(1_000),
       monoNow: clock(0, 100, 500, 1_000),
-      events: [
-        { type: 'prompt_sent' },
-        ...visible,
-        { type: 'done', terminationReason: 'normal' },
-      ],
+      events: [{ type: 'prompt_sent' }, ...visible, { type: 'done', terminationReason: 'normal' }],
     });
     await startTestBridge(h);
 
     await h.channel.handlers.message?.(message(`om_first_${visible.length}`, 'run'));
-    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+    await waitFor(() =>
+      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+    );
 
     expect(JSON.stringify(h.channel.updates.at(-1)?.card)).toContain('首字 0.4s');
   });
@@ -1031,16 +1030,15 @@ describe('P2P OMP Reply', () => {
     const h = await createHarness({
       wallNow: clock(1_000, 2_000),
       monoNow: clock(0, 100, 1_100, 2_100),
-      events: [
-        { type: 'prompt_sent' },
-        { type: 'done', terminationReason: 'normal' },
-      ],
+      events: [{ type: 'prompt_sent' }, { type: 'done', terminationReason: 'normal' }],
     });
     await startTestBridge(h);
 
     await h.channel.handlers.message?.(message('om_batch_first', 'first'));
     await h.channel.handlers.message?.(message('om_batch_last', 'last'));
-    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+    await waitFor(() =>
+      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+    );
 
     const outbound = JSON.stringify(h.channel.updates.at(-1)?.card);
     expect(outbound).toContain('总耗时 2.0s');
@@ -1049,7 +1047,6 @@ describe('P2P OMP Reply', () => {
       path: { message_id: 'om_batch_last' },
     });
   });
-
 
   it.each([
     { name: 'zero', received: 600_000, created: 600_000, expected: '飞书到达 ≈0.0s' },
@@ -1061,15 +1058,14 @@ describe('P2P OMP Reply', () => {
     const h = await createHarness({
       wallNow: clock(sample.received),
       monoNow: clock(0, 1_000, 2_000),
-      events: [
-        { type: 'prompt_sent' },
-        { type: 'done', terminationReason: 'normal' },
-      ],
+      events: [{ type: 'prompt_sent' }, { type: 'done', terminationReason: 'normal' }],
     });
     await startTestBridge(h);
 
     await h.channel.handlers.message?.(message(`om_arrival_${sample.name}`, 'run', sample.created));
-    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+    await waitFor(() =>
+      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+    );
 
     const outbound = JSON.stringify(h.channel.updates.at(-1)?.card);
     if (sample.expected) expect(outbound).toContain(sample.expected);
@@ -1097,31 +1093,36 @@ describe('P2P OMP Reply', () => {
   ] satisfies readonly {
     name: string;
     terminal: AgentEvent;
-  }[])('freezes available metrics on $name without inventing missing values', async ({ terminal }) => {
-    const h = await createHarness({
-      wallNow: clock(1_000),
-      monoNow: clock(10, 1_010, 61_010),
-      events: [
-        { type: 'prompt_sent' },
-        { type: 'usage', inputTokens: 12 },
-        terminal,
-        { type: 'usage', inputTokens: 999, outputTokens: 999 },
-      ],
-    });
-    await startTestBridge(h);
+  }[])(
+    'freezes available metrics on $name without inventing missing values',
+    async ({ terminal }) => {
+      const h = await createHarness({
+        wallNow: clock(1_000),
+        monoNow: clock(10, 1_010, 61_010),
+        events: [
+          { type: 'prompt_sent' },
+          { type: 'usage', inputTokens: 12 },
+          terminal,
+          { type: 'usage', inputTokens: 999, outputTokens: 999 },
+        ],
+      });
+      await startTestBridge(h);
 
-    await h.channel.handlers.message?.(message(`om_frozen_${terminal.type}`, 'run'));
-    await waitFor(() => h.channel.operations.some((operation) => operation.startsWith('card:close:')));
+      await h.channel.handlers.message?.(message(`om_frozen_${terminal.type}`, 'run'));
+      await waitFor(() =>
+        h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+      );
 
-    const outbound = JSON.stringify(h.channel.updates.at(-1)?.card);
-    expect(outbound).toContain('总耗时 1m1s');
-    expect(outbound).toContain('前置 1.0s');
-    expect(outbound).toContain('OMP 1m0s');
-    expect(outbound).toContain('输入 12');
-    expect(outbound).not.toContain('输出 ');
-    expect(outbound).not.toContain('首字');
-    expect(outbound).not.toContain('999');
-  });
+      const outbound = JSON.stringify(h.channel.updates.at(-1)?.card);
+      expect(outbound).toContain('总耗时 1m1s');
+      expect(outbound).toContain('前置 1.0s');
+      expect(outbound).toContain('OMP 1m0s');
+      expect(outbound).toContain('输入 12');
+      expect(outbound).not.toContain('输出 ');
+      expect(outbound).not.toContain('首字');
+      expect(outbound).not.toContain('999');
+    },
+  );
 
   it('keeps the frozen metric projection byte-identical across exact delivery retries', async () => {
     const h = await createHarness({
@@ -1158,7 +1159,6 @@ describe('P2P OMP Reply', () => {
     expect(updates[0]).toContain('输出 3');
     expect(updates[0]).toContain('工具 1');
   });
-
 });
 
 async function createHarness(
@@ -1290,9 +1290,7 @@ function createFakeLarkChannel(
   const streams: unknown[] = [];
   const replyMock = vi.fn(async (input: unknown) => {
     operations.push('im:reply');
-    return options.reply
-      ? options.reply(input)
-      : { code: 0, data: { message_id: 'om_reply_1' } };
+    return options.reply ? options.reply(input) : { code: 0, data: { message_id: 'om_reply_1' } };
   });
   const update = vi.fn(async (input: unknown) => {
     const sequence = operationSequence(input);

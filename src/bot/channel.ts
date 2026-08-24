@@ -1038,7 +1038,6 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   }
 }
 
-
 /**
  * Reduce the ordered OMP event stream and project each visible state.
  */
@@ -1149,7 +1148,6 @@ async function processAgentStream(
   if (run.wasInterrupted()) await run.stop();
   return state;
 }
-
 
 function buildPrompt(
   batch: NormalizedMessage[],

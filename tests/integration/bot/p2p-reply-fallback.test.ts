@@ -1,7 +1,7 @@
-import type * as LarkChannelModule from '@larksuite/channel';
-import type { NormalizedMessage } from '@larksuite/channel';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
+import type * as LarkChannelModule from '@larksuite/channel';
+import type { NormalizedMessage } from '@larksuite/channel';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { Controls } from '../../../src/commands/index.js';
 import {
@@ -174,9 +174,7 @@ describe('P2P OMP Reply safe fallback', () => {
     vi.useFakeTimers();
 
     void h.channel.handlers.message?.(message('om_unknown'));
-    await vi.waitFor(() =>
-      expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce(),
-    );
+    await vi.waitFor(() => expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce());
     await vi.runAllTimersAsync();
     await vi.waitFor(() => expect(h.agent.runs[0]?.stopped).toBe(true));
 
@@ -198,9 +196,7 @@ describe('P2P OMP Reply safe fallback', () => {
     vi.useFakeTimers();
 
     void h.channel.handlers.message?.(message('om_bound'));
-    await vi.waitFor(() =>
-      expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce(),
-    );
+    await vi.waitFor(() => expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce());
     await vi.runAllTimersAsync();
     await vi.waitFor(() => expect(h.agent.runs[0]?.stopped).toBe(true));
 

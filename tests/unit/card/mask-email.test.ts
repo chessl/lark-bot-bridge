@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import type { AgentEvent } from '../../../src/agent/types.js';
 import { deepMaskEmails, maskEmails } from '../../../src/card/mask-email.js';
 import {
   renderOmpReplyCard,
   renderOmpReplyMarkdown,
 } from '../../../src/card/omp-reply-renderer.js';
-import { reduce, initialState, type RunState } from '../../../src/card/run-state.js';
-import type { AgentEvent } from '../../../src/agent/types.js';
+import { initialState, type RunState, reduce } from '../../../src/card/run-state.js';
 
 describe('maskEmails', () => {
   it('rewrites the @ of a plain email', () => {

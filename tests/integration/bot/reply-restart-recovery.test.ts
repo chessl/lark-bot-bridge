@@ -1,8 +1,7 @@
-import type { LarkChannel } from '@larksuite/channel';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { LarkChannel } from '@larksuite/channel';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
-import { initialState } from '../../../src/card/run-state.js';
 import {
   type ActiveDelivery,
   type DeliveryFailure,
@@ -13,6 +12,7 @@ import {
   activateOmpReplyRecovery,
   OmpReplyController,
 } from '../../../src/bot/omp-reply-controller.js';
+import { initialState } from '../../../src/card/run-state.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
 
 const NOW = 1_800_000_000_000;
@@ -400,10 +400,7 @@ async function temporaryProfile(): Promise<TmpProfile> {
   return tmp;
 }
 
-function trackedJournal(
-  path: string,
-  failures?: DeliveryFailure[],
-): OmpDeliveryJournal {
+function trackedJournal(path: string, failures?: DeliveryFailure[]): OmpDeliveryJournal {
   const journal = new OmpDeliveryJournal({
     path,
     ...(failures ? { onFailure: (failure) => failures.push(failure) } : {}),
@@ -498,7 +495,9 @@ function fakeChannel(options: { reply?: (input: unknown) => Promise<unknown> } =
   close: Mock;
   patch: Mock;
 } {
-  const reply = vi.fn(options.reply ?? (async () => ({ code: 0, data: { message_id: 'om_reply' } })));
+  const reply = vi.fn(
+    options.reply ?? (async () => ({ code: 0, data: { message_id: 'om_reply' } })),
+  );
   const update = vi.fn(async () => ({ code: 0 }));
   const close = vi.fn(async () => ({ code: 0 }));
   const patch = vi.fn(async () => ({ code: 0 }));

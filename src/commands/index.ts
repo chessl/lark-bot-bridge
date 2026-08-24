@@ -1019,7 +1019,6 @@ function buildDoctorReport(
   ].join('\n');
 }
 
-
 function formatDoctorEchoStatus(echoText: string, state: RunState): string {
   if (state.terminal !== 'running' && state.terminal !== 'done') return state.terminal;
   const trimmed = echoText.trim();

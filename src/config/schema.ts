@@ -49,7 +49,6 @@ export interface SecretsConfig {
   defaults?: { env?: string; file?: string; exec?: string };
 }
 
-
 /**
  * Access control settings. Empty lists are fail-closed in the v2 policy:
  * no DM senders, no group chats, and only the runtime owner can administer
@@ -140,7 +139,6 @@ export function isSecretRef(s: SecretInput): s is SecretRef {
 export function secretKeyForApp(appId: string): string {
   return `app-${appId}`;
 }
-
 
 /** Resolve the max-concurrent-runs preference with default + sanity clamp. */
 export function getMaxConcurrentRuns(cfg: AppConfig): number {

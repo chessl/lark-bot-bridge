@@ -670,7 +670,6 @@ function message(input: {
   } as unknown as NormalizedMessage;
 }
 
-
 async function waitFor(predicate: () => boolean, timeoutMs = 1500): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

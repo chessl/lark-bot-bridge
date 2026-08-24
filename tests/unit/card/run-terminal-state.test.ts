@@ -4,11 +4,7 @@ import {
   renderOmpReplyCard,
   renderOmpReplyMarkdown,
 } from '../../../src/card/omp-reply-renderer.js';
-import {
-  initialState,
-  reduce,
-  type RunState,
-} from '../../../src/card/run-state.js';
+import { initialState, type RunState, reduce } from '../../../src/card/run-state.js';
 import { log } from '../../../src/core/logger.js';
 
 function stateFrom(events: readonly AgentEvent[]): RunState {

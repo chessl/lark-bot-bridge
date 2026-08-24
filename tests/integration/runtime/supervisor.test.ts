@@ -153,12 +153,7 @@ describe('Supervisor', () => {
     expect(deliveryJournals[1]).toBe(deliveryJournals[0]);
     expect(deliveryJournals[0]?.get('run_before_restart')).toBeDefined();
     expect(deliveryJournals[1]?.get('run_before_restart')).toBeDefined();
-    expect(lifecycle).toEqual([
-      'start:1:active',
-      'start:2:deferred',
-      'disconnect:1',
-      'activate:2',
-    ]);
+    expect(lifecycle).toEqual(['start:1:active', 'start:2:deferred', 'disconnect:1', 'activate:2']);
   });
 
   it('refuses to bring up two profiles sharing one app id', async () => {

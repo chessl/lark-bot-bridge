@@ -154,7 +154,6 @@ export class OmpDeliveryJournal {
         }));
   }
 
-
   async load(): Promise<void> {
     if (this.#loaded) return;
     this.#loaded = true;
@@ -162,7 +161,12 @@ export class OmpDeliveryJournal {
     try {
       text = await readFile(this.#path, 'utf8');
     } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      ) {
         return;
       }
       this.recordFailure(undefined, 'journal-read-failed');
@@ -213,7 +217,6 @@ export class OmpDeliveryJournal {
   entries(): readonly ActiveDelivery[] {
     return [...this.#entries.values()];
   }
-
 
   put(entry: ActiveDelivery): Promise<void> {
     return this.enqueue(() => this.#entries.set(entry.runId, entry));

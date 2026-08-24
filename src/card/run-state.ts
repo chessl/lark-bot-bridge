@@ -17,7 +17,6 @@ export interface ToolEntry {
   status: ToolStatus;
 }
 
-
 export type FooterStatus = 'thinking' | 'tool_running' | 'streaming' | null;
 export type Terminal = 'running' | 'done' | 'interrupted' | 'error' | 'idle_timeout';
 export type LifecycleKind = 'retry' | 'fallback' | 'compaction';
@@ -46,7 +45,6 @@ export type RunMetricReceipt = Readonly<
   Required<Pick<RunMetrics, 'receivedAtWall' | 'receivedAtMono'>> &
     Pick<RunMetrics, 'messageCreatedAtWall'>
 >;
-
 
 export interface RunState {
   tools: ToolEntry[];
@@ -79,11 +77,7 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
   return reduceWithClock(state, evt, DEFAULT_MONO_NOW);
 }
 
-export function reduceWithClock(
-  state: RunState,
-  evt: AgentEvent,
-  monoNow: () => number,
-): RunState {
+export function reduceWithClock(state: RunState, evt: AgentEvent, monoNow: () => number): RunState {
   if (state.terminal !== 'running') {
     return ignoreEvent(
       state,
@@ -211,9 +205,7 @@ export function reduceWithClock(
 }
 
 export function markInterrupted(state: RunState, atMono = performance.now()): RunState {
-  return state.terminal === 'running'
-    ? terminateAbnormally(state, 'interrupted', atMono)
-    : state;
+  return state.terminal === 'running' ? terminateAbnormally(state, 'interrupted', atMono) : state;
 }
 
 export function markIdleTimeout(state: RunState, atMono = performance.now()): RunState {
@@ -229,10 +221,7 @@ function captureFirstText(state: RunState, monoNow: () => number): RunState {
     : state;
 }
 
-function addUsage(
-  state: RunState,
-  event: Extract<AgentEvent, { type: 'usage' }>,
-): RunState {
+function addUsage(state: RunState, event: Extract<AgentEvent, { type: 'usage' }>): RunState {
   const inputParts = [event.inputTokens, event.cacheReadTokens, event.cacheWriteTokens].filter(
     (value): value is number => value !== undefined && Number.isFinite(value) && value >= 0,
   );
@@ -248,16 +237,11 @@ function addUsage(
     ...state,
     metrics: {
       ...state.metrics,
-      ...(inputParts.length > 0
-        ? { inputTokens: (state.metrics.inputTokens ?? 0) + input }
-        : {}),
-      ...(output !== undefined
-        ? { outputTokens: (state.metrics.outputTokens ?? 0) + output }
-        : {}),
+      ...(inputParts.length > 0 ? { inputTokens: (state.metrics.inputTokens ?? 0) + input } : {}),
+      ...(output !== undefined ? { outputTokens: (state.metrics.outputTokens ?? 0) + output } : {}),
     },
   };
 }
-
 
 function completeDraft(state: RunState): RunState {
   if (!state.assistantDraft) return state;
@@ -322,7 +306,6 @@ function finishTool(state: RunState, id: string, isError: boolean): RunState {
   });
   return changed ? { ...state, tools } : state;
 }
-
 
 function pushActivity(state: RunState, activity: LifecycleActivity): RunState {
   return { ...state, activityStack: [...(state.activityStack ?? []), activity] };

@@ -1,8 +1,8 @@
+import { realpath } from 'node:fs/promises';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import type * as LarkChannelModule from '@larksuite/channel';
 import type { NormalizedMessage } from '@larksuite/channel';
-import { realpath } from 'node:fs/promises';
-import { setTimeout as delay } from 'node:timers/promises';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { Controls } from '../../../src/commands/index.js';
 import {
@@ -373,9 +373,7 @@ function message(
     createTime: 1760000001000,
     ...(input.threadId ? { threadId: input.threadId } : {}),
     ...(input.rootId ? { rootId: input.rootId } : {}),
-    ...(input.parentId
-      ? { parentId: input.parentId, replyToMessageId: input.parentId }
-      : {}),
+    ...(input.parentId ? { parentId: input.parentId, replyToMessageId: input.parentId } : {}),
   } as unknown as NormalizedMessage;
 }
 

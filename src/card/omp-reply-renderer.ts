@@ -97,21 +97,16 @@ function buildOmpReplyCard(
         ...(toolCount === undefined
           ? []
           : [
-              disclosure(
-                'tools',
-                `🔧 调用工具 ${toolCount} 次`,
-                running,
-                [
-                  {
-                    tag: 'markdown',
-                    content:
-                      tools.length > 0
-                        ? tools.map((tool) => toolRow(tool)).join('\n')
-                        : "<font color='grey'>尚未调用工具</font>",
-                    text_size: 'notation',
-                  },
-                ],
-              ),
+              disclosure('tools', `🔧 调用工具 ${toolCount} 次`, running, [
+                {
+                  tag: 'markdown',
+                  content:
+                    tools.length > 0
+                      ? tools.map((tool) => toolRow(tool)).join('\n')
+                      : "<font color='grey'>尚未调用工具</font>",
+                  text_size: 'notation',
+                },
+              ]),
             ]),
       ],
     },
@@ -177,14 +172,12 @@ function countNestedElements(value: unknown): number {
 function codePointBoundary(value: string, index: number): number {
   const previousCode = value.charCodeAt(index - 1);
   const nextCode = value.charCodeAt(index);
-  return (
-    index > 0 &&
+  return index > 0 &&
     index < value.length &&
     previousCode >= 0xd800 &&
     previousCode <= 0xdbff &&
     nextCode >= 0xdc00 &&
     nextCode <= 0xdfff
-  )
     ? index - 1
     : index;
 }
@@ -193,13 +186,11 @@ function previousCodePointBoundary(value: string, index: number): number {
   const previous = index - 1;
   const previousCode = value.charCodeAt(previous);
   const precedingCode = value.charCodeAt(previous - 1);
-  return (
-    previous > 0 &&
+  return previous > 0 &&
     previousCode >= 0xdc00 &&
     previousCode <= 0xdfff &&
     precedingCode >= 0xd800 &&
     precedingCode <= 0xdbff
-  )
     ? previous - 1
     : previous;
 }
@@ -276,21 +267,15 @@ function metricParts(state: RunState, toolCount: number | undefined): string[] {
     metrics.modelId,
     metrics.effort ? `effort ${metrics.effort}` : undefined,
     contextPercent !== undefined ? `ctx ${formatPercent(contextPercent)}%` : undefined,
-    terminal
-      ? formatInterval('总耗时', metrics.receivedAtMono, metrics.terminalAtMono)
-      : undefined,
+    terminal ? formatInterval('总耗时', metrics.receivedAtMono, metrics.terminalAtMono) : undefined,
     terminal && arrival !== undefined && arrival >= 0 && arrival <= 10 * 60_000
       ? `飞书到达 ≈${formatDuration(arrival)}`
       : undefined,
-    terminal
-      ? formatInterval('前置', metrics.receivedAtMono, metrics.promptSentAtMono)
-      : undefined,
+    terminal ? formatInterval('前置', metrics.receivedAtMono, metrics.promptSentAtMono) : undefined,
     terminal
       ? formatInterval('首字', metrics.promptSentAtMono, metrics.firstTextAtMono)
       : undefined,
-    terminal
-      ? formatInterval('OMP', metrics.promptSentAtMono, metrics.terminalAtMono)
-      : undefined,
+    terminal ? formatInterval('OMP', metrics.promptSentAtMono, metrics.terminalAtMono) : undefined,
     terminal && metrics.inputTokens !== undefined
       ? `输入 ${formatTokens(metrics.inputTokens)}`
       : undefined,
@@ -330,7 +315,12 @@ function formatTokens(tokens: number): string {
   return tokens < 1000 ? String(tokens) : `${(tokens / 1000).toFixed(1)}k`;
 }
 
-function disclosure(elementId: string, title: string, expanded: boolean, elements: object[]): object {
+function disclosure(
+  elementId: string,
+  title: string,
+  expanded: boolean,
+  elements: object[],
+): object {
   return {
     tag: 'collapsible_panel',
     element_id: elementId,
@@ -354,10 +344,7 @@ function placeholder(content: string): object {
   };
 }
 
-const TOOL_STATUS_PRESENTATION: Record<
-  ToolStatus,
-  Readonly<{ icon: string; label: string }>
-> = {
+const TOOL_STATUS_PRESENTATION: Record<ToolStatus, Readonly<{ icon: string; label: string }>> = {
   error: { icon: '⚠️', label: '失败' },
   done: { icon: '✓', label: '完成' },
   unfinished: { icon: '◼', label: '未完成' },
