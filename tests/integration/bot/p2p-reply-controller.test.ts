@@ -171,6 +171,25 @@ describe('P2P OMP Reply', () => {
     expect(h.channel.operations.indexOf(`card:update:${finalUpdate?.sequence}`)).toBeLessThan(
       h.channel.operations.indexOf(`card:close:${(finalUpdate?.sequence ?? 0) + 1}`),
     );
+
+    const reactionCreate = h.channel.rawClient.im.v1.messageReaction.create;
+    expect(reactionCreate).toHaveBeenNthCalledWith(1, {
+      path: { message_id: 'om_trigger' },
+      data: { reaction_type: { emoji_type: 'OnIt' } },
+    });
+    expect(h.channel.rawClient.im.v1.messageReaction.delete).toHaveBeenCalledWith({
+      path: { message_id: 'om_trigger', reaction_id: 'reaction_1' },
+    });
+    expect(reactionCreate).toHaveBeenNthCalledWith(2, {
+      path: { message_id: 'om_trigger' },
+      data: { reaction_type: { emoji_type: 'Done' } },
+    });
+    expect(h.channel.operations.indexOf('reaction:add:OnIt')).toBeLessThan(
+      h.channel.operations.indexOf('im:reply'),
+    );
+    expect(h.channel.operations.indexOf('reaction:delete:reaction_1')).toBeLessThan(
+      h.channel.operations.indexOf('reaction:add:Done'),
+    );
   });
 
   it.each([
@@ -258,6 +277,7 @@ describe('P2P OMP Reply', () => {
       await waitFor(() =>
         h.channel.operations.some((operation) => operation.startsWith('card:close:')),
       );
+      await waitFor(() => h.channel.operations.includes('reaction:delete:reaction_1'));
 
       expect(h.channel.createdCards).toHaveLength(1);
       expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
@@ -291,6 +311,10 @@ describe('P2P OMP Reply', () => {
       expect(h.channel.operations.indexOf(`card:update:${finalUpdate?.sequence}`)).toBeLessThan(
         h.channel.operations.indexOf(`card:close:${closeSequence}`),
       );
+      const reactionTypes =
+        h.channel.rawClient.im.v1.messageReaction.create.mock.calls.map(reactionEmojiType);
+      expect(reactionTypes).toEqual(expectedSummary === '已完成' ? ['OnIt', 'Done'] : ['OnIt']);
+      expect(h.channel.rawClient.im.v1.messageReaction.delete).toHaveBeenCalledOnce();
     },
   );
 
@@ -1266,8 +1290,14 @@ function createFakeLarkChannel(
             reply: replyMock,
           },
           messageReaction: {
-            create: vi.fn(async () => ({ data: { reaction_id: 'reaction_1' } })),
-            delete: vi.fn(async () => ({})),
+            create: vi.fn(async (input: unknown) => {
+              operations.push(`reaction:add:${reactionEmojiType([input])}`);
+              return { data: { reaction_id: 'reaction_1' } };
+            }),
+            delete: vi.fn(async (input: unknown) => {
+              operations.push(`reaction:delete:${reactionRequestId(input)}`);
+              return {};
+            }),
           },
         },
       },
@@ -1410,6 +1440,25 @@ function totalCardElements(card: object | undefined): number {
     return count;
   }
   return ('header' in card ? 1 : 0) + nested(card);
+}
+
+function reactionEmojiType(call: unknown[]): string | undefined {
+  const input = call[0];
+  if (!input || typeof input !== 'object' || !('data' in input)) return undefined;
+  const data = input.data;
+  if (!data || typeof data !== 'object' || !('reaction_type' in data)) return undefined;
+  const reactionType = data.reaction_type;
+  if (!reactionType || typeof reactionType !== 'object' || !('emoji_type' in reactionType)) {
+    return undefined;
+  }
+  return typeof reactionType.emoji_type === 'string' ? reactionType.emoji_type : undefined;
+}
+
+function reactionRequestId(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || !('path' in input)) return undefined;
+  const path = input.path;
+  if (!path || typeof path !== 'object' || !('reaction_id' in path)) return undefined;
+  return typeof path.reaction_id === 'string' ? path.reaction_id : undefined;
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void> {

@@ -1011,6 +1011,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         }
       : {}),
   });
+  let onItReactionId = await addMessageReaction(channel, lastMsg.messageId, 'OnIt');
   try {
     await reply.open(state);
     const finalState = await processAgentStream(
@@ -1025,6 +1026,13 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       monoNow,
     );
     await reply.finish(finalState);
+    if (onItReactionId) {
+      await removeMessageReaction(channel, lastMsg.messageId, onItReactionId);
+      onItReactionId = undefined;
+    }
+    if (finalState.terminal === 'done') {
+      await addMessageReaction(channel, lastMsg.messageId, 'Done');
+    }
   } catch (err) {
     log.fail('reply', err, { scope, step: 'im' });
     await run.stop().catch((stopErr) =>
@@ -1034,7 +1042,53 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       }),
     );
   } finally {
+    if (onItReactionId) {
+      await removeMessageReaction(channel, lastMsg.messageId, onItReactionId);
+    }
     reply.release();
+  }
+}
+
+async function addMessageReaction(
+  channel: LarkChannel,
+  messageId: string,
+  emojiType: 'OnIt' | 'Done',
+): Promise<string | undefined> {
+  try {
+    const response = await channel.rawClient.im.v1.messageReaction.create({
+      path: { message_id: messageId },
+      data: { reaction_type: { emoji_type: emojiType } },
+    });
+    const reactionId = response.data?.reaction_id;
+    if (!reactionId) {
+      log.warn('reaction', 'add-missing-id', { messageId, emojiType });
+    }
+    return reactionId;
+  } catch (err) {
+    log.warn('reaction', 'add-failed', {
+      messageId,
+      emojiType,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
+}
+
+async function removeMessageReaction(
+  channel: LarkChannel,
+  messageId: string,
+  reactionId: string,
+): Promise<void> {
+  try {
+    await channel.rawClient.im.v1.messageReaction.delete({
+      path: { message_id: messageId, reaction_id: reactionId },
+    });
+  } catch (err) {
+    log.warn('reaction', 'remove-failed', {
+      messageId,
+      reactionId,
+      err: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
