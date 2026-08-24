@@ -193,21 +193,31 @@ describe('profile-aware account and config commands', () => {
   it('preserves unsaved substitution drafts through add and delete card actions', async () => {
     vi.useFakeTimers();
     const h = await createHarness();
+    await h.command('/config');
+    h.channel.rawClient.requests.splice(0);
 
-    await h.command('/config substitution-add 0,1', {
-      personal_substitution_enabled: 'yes',
-      personal_substitution_target_0: 'draft@example.com',
-    });
+    await h.command(
+      '/config substitution-add 0,1',
+      {
+        personal_substitution_enabled: 'yes',
+        personal_substitution_target_0: 'draft@example.com',
+      },
+      'om_fake_1',
+    );
     await vi.runAllTimersAsync();
     const added = JSON.stringify(h.channel.rawClient.requests.at(-1));
     expect(added).toContain('draft@example.com');
     expect(added).toContain('personal_substitution_target_1');
 
-    await h.command('/config substitution-delete 0,2,1', {
-      personal_substitution_enabled: 'yes',
-      personal_substitution_target_0: 'draft@example.com',
-      personal_substitution_target_1: 'remove@example.com',
-    });
+    await h.command(
+      '/config substitution-delete 0,2,1',
+      {
+        personal_substitution_enabled: 'yes',
+        personal_substitution_target_0: 'draft@example.com',
+        personal_substitution_target_1: 'remove@example.com',
+      },
+      'om_fake_1',
+    );
     await vi.runAllTimersAsync();
     const deleted = JSON.stringify(h.channel.rawClient.requests.at(-1));
     expect(deleted).toContain('draft@example.com');
@@ -257,7 +267,11 @@ async function createHarness(
 ): Promise<{
   rootDir: string;
   channel: ReturnType<typeof createFakeChannel>;
-  command(content: string, formValue?: Record<string, unknown>): Promise<boolean>;
+  command(
+    content: string,
+    formValue?: Record<string, unknown>,
+    messageId?: string,
+  ): Promise<boolean>;
 }> {
   const rootDir = await mkdtemp(join(tmpdir(), 'bridge-profile-config-command-'));
   roots.push(rootDir);
@@ -291,10 +305,14 @@ async function createHarness(
   return {
     rootDir,
     channel,
-    command: (content: string, formValue?: Record<string, unknown>) =>
+    command: (
+      content: string,
+      formValue?: Record<string, unknown>,
+      messageId?: string,
+    ) =>
       tryHandleCommand({
         channel: channel as unknown as CommandContext['channel'],
-        msg: message(content),
+        msg: message(content, messageId),
         scope: 'chat-1',
         chatMode: 'p2p',
         sessions,
@@ -362,9 +380,9 @@ async function writeJson(path: string, value: unknown): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-function message(content: string): NormalizedMessage {
+function message(content: string, messageId?: string): NormalizedMessage {
   return {
-    messageId: `om-${content.replace(/\W+/g, '-').slice(0, 20)}`,
+    messageId: messageId ?? `om-${content.replace(/\W+/g, '-').slice(0, 20)}`,
     chatId: 'chat-1',
     chatType: 'p2p',
     senderId: 'ou-admin',

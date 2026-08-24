@@ -731,6 +731,18 @@ function message(input: {
     ...(input.threadId ? { threadId: input.threadId } : {}),
     replyToMessageId: input.parentId,
     createTime: 1760000001000,
+    raw: {
+      sender: {
+        sender_id: { open_id: 'ou_user' },
+        sender_type: 'user',
+      },
+      message: {
+        message_id: input.messageId,
+        mentions: mentionedBot
+          ? [{ key: '@_user_1', id: { open_id: 'ou_bot' }, name: 'Bridge' }]
+          : [{ key: '@_user_1', id: { open_id: 'ou_human' }, name: '同事' }],
+      },
+    },
   } as unknown as NormalizedMessage;
 }
 

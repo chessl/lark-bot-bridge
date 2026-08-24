@@ -195,6 +195,7 @@ describe('sender identity in bridge_context', () => {
       targetOpenIds: ['ou_target'],
     };
     await vi.advanceTimersByTimeAsync(800);
+    await vi.waitFor(() => expect(h.agent.runOptions).toHaveLength(1));
 
     expect(h.agent.runOptions).toHaveLength(1);
     const prompt = h.agent.runOptions[0]?.prompt ?? '';

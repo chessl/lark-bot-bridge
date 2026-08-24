@@ -368,6 +368,16 @@ function message(
     mentionAll: false,
     mentionedBot: placement.chatType === 'group',
     createTime: 1760000001000,
+    raw: {
+      sender: {
+        sender_id: { open_id: 'ou_user' },
+        sender_type: 'user',
+      },
+      message: {
+        message_id: input.messageId,
+        mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' }, name: 'Bridge' }],
+      },
+    },
     ...(input.threadId ? { threadId: input.threadId } : {}),
     ...(input.rootId ? { rootId: input.rootId } : {}),
     ...(input.parentId ? { parentId: input.parentId, replyToMessageId: input.parentId } : {}),
