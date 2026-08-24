@@ -692,7 +692,7 @@ describe('P2P OMP Reply', () => {
     expect(channel.sent).toEqual([]);
   });
 
-  it('keeps substitution disclosure and target degradation inside the one managed Reply', async () => {
+  it('keeps combined substitution ownership and peer degradation inside one managed Reply', async () => {
     const target = {
       chatId: 'oc_substitution',
       messageId: 'om_substitution',
@@ -722,19 +722,26 @@ describe('P2P OMP Reply', () => {
     await controller.open(createRunState());
     const state: RunState = {
       ...finalizeIfRunning(createRunState()),
-      finalText: 'answer',
+      finalText: 'before @Hermes after',
     };
 
     await controller.finish({
       ...replyPolicy,
       reason: 'run-completed',
       state,
+      peerActivation: {
+        alias: 'Hermes',
+        openId: 'ou_peer' as VerifiedBotId,
+        start: 7,
+        end: 14,
+      },
     });
 
     const update = JSON.stringify(channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0]);
     expect(update.match(/ou_sender/g)).toHaveLength(1);
     expect(update.match(/ou_target/g)).toHaveLength(1);
     expect(update.match(/ou_second/g)).toHaveLength(1);
+    expect(update.match(/ou_peer/g)).toHaveLength(1);
     expect(update).toContain('AI 代');
     expect(update).toContain('回答（已在本回复中点名）');
     expect(update).toContain('另有 2 个对象身份无法确认');
@@ -744,8 +751,10 @@ describe('P2P OMP Reply', () => {
     expect(patch).toContain('\\\\@请求者');
     expect(patch).toContain('\\\\@Target');
     expect(patch).toContain('\\\\@Second');
+    expect(patch).toContain('\\\\@Hermes');
+    expect(patch).toContain('Peer 未通知');
     expect(patch).toContain('Mention 不可用');
-    expect(patch).not.toMatch(/ou_sender|ou_target|ou_second|<at/);
+    expect(patch).not.toMatch(/ou_sender|ou_target|ou_second|ou_peer|<at/);
     expect(channel.sent).toEqual([]);
   });
 

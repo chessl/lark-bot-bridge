@@ -88,6 +88,7 @@ type FixtureOptions = {
   close?: (input: unknown, attempt: number) => Promise<unknown>;
   patch?: (messageId: string, card: object, attempt: number) => Promise<unknown>;
   trustedPeerBots?: Array<{ alias: string; openId: string }>;
+  personalSubstitutionTargetOpenIds?: string[];
 };
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -217,6 +218,69 @@ describe('P2P OMP Reply safe fallback', () => {
     }
   });
 
+  it('keeps substitution ownership, targets, and one peer across every transport', async () => {
+    for (const transport of ['managed', 'inline', 'markdown'] as const) {
+      const h = await createHarness({
+        events: terminalEvents(
+          `\`\`\`text\n${'x'.repeat(40_000)}\n\`\`\`\nbefore @Atlas, then @Hermes and @Atlas ${transport}`,
+        ),
+        trustedPeerBots: [
+          { alias: 'Hermes', openId: 'ou_hermes' },
+          { alias: 'Atlas', openId: 'ou_atlas' },
+        ],
+        personalSubstitutionTargetOpenIds: ['ou_first', 'ou_second'],
+        ...(transport === 'managed'
+          ? {}
+          : {
+              createCard: async () => {
+                throw new Error('managed unavailable');
+              },
+            }),
+        ...(transport === 'markdown'
+          ? {
+              reply: async (_input: unknown, attempt: number) =>
+                attempt === 1
+                  ? { code: 230001, msg: 'inline rejected' }
+                  : successReply(`om_substitution_${transport}`),
+            }
+          : {}),
+      });
+      await startTestBridge(h);
+
+      await h.channel.handlers.message?.(
+        verifiedSubstitutionMessage(`om_substitution_${transport}`),
+      );
+      await waitFor(() =>
+        transport === 'managed'
+          ? h.channel.rawClient.cardkit.v1.card.update.mock.calls.length > 0
+          : transport === 'inline'
+            ? h.channel.patches.length > 0
+            : h.channel.successfulReplyIds.length > 0,
+      );
+
+      const outbound =
+        transport === 'managed'
+          ? updateCardData(h.channel.rawClient.cardkit.v1.card.update.mock.calls.at(-1)?.[0]) ?? ''
+          : transport === 'inline'
+            ? JSON.stringify(h.channel.patches.at(-1)?.card)
+            : replyContent(replyInputs(h.channel).at(-1));
+      expect(outbound).toContain('内容过长，已截断');
+      expect(outbound.match(/ou_user/g)).toHaveLength(1);
+      expect(outbound.match(/ou_second/g)).toHaveLength(1);
+      expect(outbound.match(/ou_first/g)).toHaveLength(1);
+      expect(outbound.indexOf('ou_second')).toBeLessThan(outbound.indexOf('ou_first'));
+      expect(outbound.match(/ou_atlas/g)).toHaveLength(1);
+      expect(outbound).not.toContain('ou_hermes');
+      expect(outbound).toContain('AI 代');
+      expect(
+        replyInputs(h.channel).every(
+          (input) => requestMessageId(input) === `om_substitution_${transport}`,
+        ),
+      ).toBe(true);
+      expect(h.channel.successfulReplyIds).toHaveLength(1);
+    }
+  });
+
   it('exact-retries an unknown managed submission and never changes transport', async () => {
     const h = await createHarness({
       reply: async () => {
@@ -260,16 +324,18 @@ describe('P2P OMP Reply safe fallback', () => {
     expect(h.channel.rawClient.cardkit.v1.card.settings).not.toHaveBeenCalled();
   });
 
-  it('exact-retries an uncertain terminal update, then patches the known message after clear rejection', async () => {
+  it('exact-retries a combined terminal update, then degrades the same known message', async () => {
     const h = await createHarness({
-      events: terminalEvents('UPDATE_RECOVERY_SENTINEL'),
+      events: terminalEvents('before @Atlas UPDATE_RECOVERY_SENTINEL'),
+      trustedPeerBots: [{ alias: 'Atlas', openId: 'ou_atlas' }],
+      personalSubstitutionTargetOpenIds: ['ou_first', 'ou_second'],
       update: async (_input, attempt) =>
         attempt === 1 ? { status: 503 } : { code: 230001, msg: 'rejected' },
     });
     await startTestBridge(h);
     vi.useFakeTimers();
 
-    void h.channel.handlers.message?.(message('om_update_recovery'));
+    void h.channel.handlers.message?.(verifiedSubstitutionMessage('om_update_recovery'));
     await vi.waitFor(() =>
       expect(h.channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce(),
     );
@@ -282,8 +348,15 @@ describe('P2P OMP Reply safe fallback', () => {
     expect(updates).toHaveLength(2);
     expect(updates[1]).toBe(updates[0]);
     expect(h.channel.patches[0]?.messageId).toBe('om_reply_1');
-    expect(JSON.stringify(h.channel.patches[0]?.card)).toContain('UPDATE_RECOVERY_SENTINEL');
+    const fallback = JSON.stringify(h.channel.patches[0]?.card);
+    expect(fallback).toContain('UPDATE_RECOVERY_SENTINEL');
+    expect(fallback).toContain('\\\\@请求者');
+    expect(fallback).toContain('\\\\@Second');
+    expect(fallback).toContain('\\\\@First');
+    expect(fallback).toContain('\\\\@Atlas');
+    expect(fallback).not.toMatch(/ou_user|ou_first|ou_second|ou_atlas|<at/);
     expect(h.channel.successfulReplyIds).toEqual(['om_reply_1']);
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
     expect(h.channel.rawClient.cardkit.v1.card.settings).not.toHaveBeenCalled();
   });
 
@@ -391,6 +464,10 @@ async function createHarness(options: FixtureOptions = {}): Promise<{
     collaboration: {
       ...baseProfileConfig.collaboration,
       trustedPeerBots: options.trustedPeerBots ?? [],
+      personalSubstitution: {
+        enabled: options.personalSubstitutionTargetOpenIds !== undefined,
+        targetOpenIds: options.personalSubstitutionTargetOpenIds ?? [],
+      },
     },
   };
   const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
@@ -576,6 +653,29 @@ function verifiedMessage(messageId: string): NormalizedMessage {
       sender: {
         sender_id: { open_id: 'ou_user' },
         sender_type: 'user',
+      },
+    },
+  };
+}
+
+function verifiedSubstitutionMessage(messageId: string): NormalizedMessage {
+  return {
+    ...message(messageId),
+    chatType: 'group',
+    mentions: [
+      { key: '@_user_1', openId: 'ou_second', name: 'Second', isBot: false },
+      { key: '@_user_2', openId: 'ou_first', name: 'First', isBot: false },
+    ],
+    raw: {
+      sender: {
+        sender_id: { open_id: 'ou_user' },
+        sender_type: 'user',
+      },
+      message: {
+        mentions: [
+          { key: '@_user_1', id: { open_id: 'ou_second' } },
+          { key: '@_user_2', id: { open_id: 'ou_first' } },
+        ],
       },
     },
   };

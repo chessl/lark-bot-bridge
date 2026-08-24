@@ -167,7 +167,7 @@ describe('OMP Reply restart recovery', () => {
     expect(restarted.entries()).toEqual([]);
   });
 
-  it('exact-retries a durable substitution terminal request without recomputing policy', async () => {
+  it('exact-retries a durable combined substitution terminal request without recomputing policy', async () => {
     const tmp = await temporaryProfile();
     const path = join(tmp.profile, 'substitution-exact-retry.json');
     const pending: DurablePendingOperation = {
@@ -193,7 +193,11 @@ describe('OMP Reply restart recovery', () => {
                   { tag: 'text', text: ' 回答（已在本回复中点名）' },
                 ],
                 [{ tag: 'text', text: '另有 2 个对象身份无法确认，未代答。' }],
-                [{ tag: 'md', text: 'answer' }],
+                [
+                  { tag: 'md', text: 'before ' },
+                  { tag: 'at', user_id: 'ou_peer' },
+                  { tag: 'md', text: ' after' },
+                ],
               ],
             },
           }),
@@ -221,8 +225,10 @@ describe('OMP Reply restart recovery', () => {
     expect(fake.reply).toHaveBeenCalledOnce();
     expect(fake.reply.mock.calls[0]?.[0]).toEqual(pending.request);
     const replay = JSON.stringify(fake.reply.mock.calls[0]?.[0]);
+    expect(replay.match(/ou_sender/g)).toHaveLength(1);
     expect(replay.match(/ou_target/g)).toHaveLength(1);
     expect(replay.match(/ou_second/g)).toHaveLength(1);
+    expect(replay.match(/ou_peer/g)).toHaveLength(1);
     expect(replay.indexOf('ou_target')).toBeLessThan(replay.indexOf('ou_second'));
     expect(replay).toContain('另有 2 个对象身份无法确认');
     expect(fake.update).not.toHaveBeenCalled();

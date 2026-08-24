@@ -345,6 +345,10 @@ describe('personal substitution planning', () => {
 describe('personal substitution Invocation creation', () => {
   it('freezes multiple targets, labels, and invalid count without exposing IDs to Prompt', () => {
     const config = { enabled: true, targetOpenIds: ['ou_first', 'ou_second'] };
+    const trustedPeerBots = [
+      { alias: 'Hermes', openId: 'ou_hermes' },
+      { alias: 'Atlas', openId: 'ou_atlas' },
+    ];
     const plan = planImMessage({
       message: imMessage({
         senderType: 'user',
@@ -367,11 +371,13 @@ describe('personal substitution Invocation creation', () => {
       mentionRequired: true,
       recognizedCommand: false,
       personalSubstitution: config,
+      trustedPeerBots,
     });
     if (plan.lane !== 'substitution') {
       throw new Error(`expected substitution plan, got ${plan.lane}`);
     }
     config.targetOpenIds.reverse();
+    trustedPeerBots[0] = { alias: 'Changed', openId: 'ou_changed' };
     const invocation = createImInvocation([plan]);
 
     expect(invocation).toMatchObject({
@@ -389,9 +395,18 @@ describe('personal substitution Invocation creation', () => {
         reason: 'personal-substitution-message',
         targetAliases: ['Second label', 'First label'],
         invalidTargetCount: 1,
+        trustedPeerAliases: ['Hermes', 'Atlas'],
+        oneHop: true,
       },
     });
-    expect(JSON.stringify(invocation.promptPolicy)).not.toMatch(/ou_(?:first|second|invalid)/);
+    expect(JSON.stringify(invocation.promptPolicy)).not.toMatch(
+      /ou_(?:first|second|invalid|hermes|atlas)/,
+    );
+    expect(invocation.trustedPeers).toEqual([
+      { alias: 'Hermes', openId: 'ou_hermes' },
+      { alias: 'Atlas', openId: 'ou_atlas' },
+    ]);
+    expect(Object.isFrozen(invocation.trustedPeers)).toBe(true);
   });
 
   it.each([
@@ -730,6 +745,64 @@ describe('IM Reply planning', () => {
 
     expect(reply.peerActivation?.alias).toBe('Atlas');
     expect(reply.state.finalText).not.toContain('<at');
+  });
+
+  it('composes frozen substitution ownership, ordered targets, and only the first peer alias', () => {
+    const trustedPeerBots = [
+      { alias: 'Hermes', openId: 'ou_hermes' },
+      { alias: 'Atlas', openId: 'ou_atlas' },
+      { alias: 'here', openId: 'ou_reserved' },
+    ];
+    const plan = planImMessage({
+      message: imMessage({
+        senderType: 'user',
+        rawSenderId: 'ou_sender',
+        threadId: 'omt_topic',
+        mentions: [
+          { key: '@_user_1', openId: 'ou_second', name: 'Second', isBot: false },
+          { key: '@_user_2', openId: 'ou_first', name: 'First', isBot: false },
+        ],
+        rawMentions: [
+          { id: { open_id: 'ou_second' } },
+          { id: { open_id: 'ou_first' } },
+        ],
+      }),
+      scope: TOPIC_SCOPE,
+      authorized: true,
+      duplicate: false,
+      mentionRequired: true,
+      recognizedCommand: false,
+      trustedPeerBots,
+      personalSubstitution: {
+        enabled: true,
+        targetOpenIds: ['ou_first', 'ou_second'],
+      },
+    });
+    if (plan.lane !== 'substitution') {
+      throw new Error(`expected substitution plan, got ${plan.lane}`);
+    }
+    trustedPeerBots.splice(0, trustedPeerBots.length, {
+      alias: 'Changed',
+      openId: 'ou_changed',
+    });
+    const invocation = createImInvocation([plan]);
+    const answer = '@Atlas first, @Atlas again, @Hermes later, @Unknown and @here stay text';
+    const reply = finalizeImReply(invocation, {
+      ...finalizeIfRunning(createRunState()),
+      finalText: answer,
+    });
+
+    expect(reply).toMatchObject({
+      invocationKind: 'substitution',
+      scope: TOPIC_SCOPE,
+      target: { messageId: 'om_message', threadId: 'omt_topic', replyInThread: true },
+      senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+      substitutionTargetOpenIds: ['ou_second', 'ou_first'],
+      substitutionTargetLabels: ['Second', 'First'],
+      peerActivation: { alias: 'Atlas', openId: 'ou_atlas' },
+    });
+    expect(reply.state.finalText).toBe(answer);
+    expect(substitutionMentionOpenIds(reply)).toEqual(['ou_second', 'ou_first']);
   });
 
   it.each([

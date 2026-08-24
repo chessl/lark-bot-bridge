@@ -166,6 +166,7 @@ export type ImSubstitutionMessagePlan = Readonly<{
   source: ImSourceMessage;
   targets: readonly [ImSubstitutionTarget, ...ImSubstitutionTarget[]];
   invalidTargetCount: number;
+  trustedPeers: readonly ImTrustedPeer[];
 }>;
 
 export type ImSourceMessage = Readonly<{
@@ -225,6 +226,8 @@ export type ImPromptPolicy =
       message: ImSubstitutionPromptMessage;
       targetAliases: readonly [string, ...string[]];
       invalidTargetCount: number;
+      trustedPeerAliases: readonly string[];
+      oneHop: true;
     }>;
 
 type ImReplyPolicyBase = Readonly<{
@@ -283,6 +286,7 @@ export type ImSubstitutionInvocation = Readonly<{
   sourceMessages: readonly [ImSourceMessage];
   replyTarget: ImReplyTarget;
   targets: readonly [ImSubstitutionTarget, ...ImSubstitutionTarget[]];
+  trustedPeers: readonly ImTrustedPeer[];
   promptPolicy: Extract<ImPromptPolicy, { kind: 'substitution' }>;
   replyPolicy: Extract<ImReplyPolicy, { invocationKind: 'substitution' }>;
 }>;
@@ -370,6 +374,7 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
           source,
           targets: Object.freeze(nonEmpty(mentions.targets)),
           invalidTargetCount: mentions.invalidTargetCount,
+          trustedPeers,
         });
       }
     }
@@ -494,12 +499,15 @@ export function createImInvocation(
       sourceMessages,
       replyTarget: target,
       targets,
+      trustedPeers: first.trustedPeers,
       promptPolicy: Object.freeze({
         kind: 'substitution',
         reason: 'personal-substitution-message',
         message: toSubstitutionPromptMessage(first.source),
         targetAliases: substitutionTargetLabels,
         invalidTargetCount: first.invalidTargetCount,
+        trustedPeerAliases: Object.freeze(first.trustedPeers.map(({ alias }) => alias)),
+        oneHop: true,
       }),
       replyPolicy,
     });
@@ -577,14 +585,14 @@ export function finalizeImReply(invocation: ImInvocation, state: RunState): ImRe
       throw new Error(`unknown IM termination: ${exhaustive}`);
     }
   }
+  const eligibleForPeerActivation =
+    invocation.kind !== 'peer' && invocation.replyPolicy.senderOwnership.kind === 'mention';
   const answer =
-    invocation.kind === 'ordinary' &&
-    invocation.replyPolicy.senderOwnership.kind === 'mention' &&
-    state.terminal === 'done'
+    eligibleForPeerActivation && state.terminal === 'done'
       ? sanitizeImAnswer(state.finalText?.trim() ?? '')
       : '';
   const peerActivation =
-    invocation.kind === 'ordinary' && answer.length > 0
+    eligibleForPeerActivation && answer.length > 0
       ? firstTrustedPeerActivation(answer, invocation.trustedPeers)
       : undefined;
   const finalState = peerActivation ? Object.freeze({ ...state, finalText: answer }) : state;

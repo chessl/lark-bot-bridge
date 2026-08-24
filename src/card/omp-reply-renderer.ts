@@ -356,15 +356,31 @@ export function renderOmpReplyMarkdownPost(
     throw new Error('cannot render a running OMP Reply as terminal Markdown');
   }
   const finalText = ompReplyPresentation(state).finalReply;
-  if (
-    isImReplyPlan(input) &&
-    input.invocationKind === 'ordinary' &&
-    input.peerActivation
-  ) {
-    return buildOmpReplyMarkdownPost(input, finalText, mentionMode);
-  }
   const full = buildOmpReplyMarkdownPost(input, finalText, mentionMode);
   if (withinPostBudget(full) || state.terminal !== 'done') return full;
+  if (isImReplyPlan(input) && input.peerActivation) {
+    let lower = 0;
+    let upper = finalText.length - (input.peerActivation.end - input.peerActivation.start);
+    let preserved = peerPreservingReply(input, finalText, 0);
+    let best = buildOmpReplyMarkdownPost(preserved.input, preserved.finalText, mentionMode);
+    while (lower < upper) {
+      const middle = Math.floor((lower + upper + 1) / 2);
+      const candidateReply = peerPreservingReply(input, finalText, middle);
+      const candidate = buildOmpReplyMarkdownPost(
+        candidateReply.input,
+        candidateReply.finalText,
+        mentionMode,
+      );
+      if (withinPostBudget(candidate)) {
+        lower = middle;
+        preserved = candidateReply;
+        best = candidate;
+      } else {
+        upper = middle - 1;
+      }
+    }
+    return best;
+  }
 
   let lower = 0;
   let upper = finalText.length;
@@ -395,49 +411,6 @@ function buildOmpReplyMarkdownPost(
   if (!isImReplyPlan(input)) {
     return markdownPost(buildOmpReplyMarkdown(input, finalText, mentionMode));
   }
-  const activation = input.invocationKind === 'ordinary' ? input.peerActivation : undefined;
-  if (activation) {
-    if (mentionMode === 'plain') {
-      return markdownPost(renderedOmpReplyMarkdown(input, mentionMode).markdown);
-    }
-    const owner =
-      input.senderOwnership.kind === 'mention'
-        ? [[{ tag: 'at', user_id: input.senderOwnership.openId }]]
-        : [];
-    const rendered = renderedOmpReplyMarkdown(input, 'omit');
-    const markdown = rendered.markdown;
-    const renderedInput = rendered.input;
-    const renderedActivation =
-      isImReplyPlan(renderedInput) && renderedInput.invocationKind === 'ordinary'
-        ? renderedInput.peerActivation
-        : undefined;
-    if (renderedActivation && isImReplyPlan(renderedInput)) {
-      const body = sanitizeImAnswer(ompReplyPresentation(renderedInput.state).finalReply);
-      const before = maskEmails(`**回复**\n\n${body.slice(0, renderedActivation.start)}`);
-      const matched = maskEmails(body.slice(renderedActivation.start, renderedActivation.end));
-      if (
-        markdown.startsWith(before) &&
-        markdown.slice(before.length, before.length + matched.length) === matched
-      ) {
-        const peerRow = [
-          ...(before ? [{ tag: 'md', text: before }] : []),
-          { tag: 'at', user_id: renderedActivation.openId },
-          ...(markdown.length > before.length + matched.length
-            ? [{ tag: 'md', text: markdown.slice(before.length + matched.length) }]
-            : []),
-        ];
-        return { zh_cn: { title: '', content: [...owner, peerRow] } };
-      }
-      if (owner.length > 0) {
-        return {
-          zh_cn: {
-            title: '',
-            content: [...owner, [{ tag: 'md', text: markdown }]],
-          },
-        };
-      }
-    }
-  }
   if (mentionMode === 'plain') {
     return markdownPost(buildOmpReplyMarkdown(input, finalText, mentionMode));
   }
@@ -463,6 +436,31 @@ function buildOmpReplyMarkdownPost(
       ]);
     }
     content.push([{ tag: 'text', text: '' }]);
+  }
+  if (input.invocationKind !== 'peer' && input.peerActivation) {
+    const rendered = renderedOmpReplyMarkdown(input, 'omit');
+    const renderedInput = rendered.input;
+    const renderedActivation = isImReplyPlan(renderedInput)
+      ? renderedInput.peerActivation
+      : undefined;
+    if (renderedActivation && isImReplyPlan(renderedInput)) {
+      const body = sanitizeImAnswer(ompReplyPresentation(renderedInput.state).finalReply);
+      const before = maskEmails(`**回复**\n\n${body.slice(0, renderedActivation.start)}`);
+      const matched = maskEmails(body.slice(renderedActivation.start, renderedActivation.end));
+      if (
+        rendered.markdown.startsWith(before) &&
+        rendered.markdown.slice(before.length, before.length + matched.length) === matched
+      ) {
+        content.push([
+          ...(before ? [{ tag: 'md', text: before }] : []),
+          { tag: 'at', user_id: renderedActivation.openId },
+          ...(rendered.markdown.length > before.length + matched.length
+            ? [{ tag: 'md', text: rendered.markdown.slice(before.length + matched.length) }]
+            : []),
+        ]);
+        return { zh_cn: { title: '', content } };
+      }
+    }
   }
   if (content.length === 0) {
     return markdownPost(buildOmpReplyMarkdown(input, finalText, mentionMode));
@@ -673,7 +671,7 @@ function withPeerActivation(
 ): string {
   if (
     !isImReplyPlan(input) ||
-    input.invocationKind !== 'ordinary' ||
+    input.invocationKind === 'peer' ||
     !input.peerActivation ||
     mentionMode === 'omit'
   ) {

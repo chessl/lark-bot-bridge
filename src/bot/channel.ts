@@ -1416,7 +1416,9 @@ function buildPrompt(
         ]
       : policy.kind === 'substitution'
         ? [
-            `本次是 personal substitution 隔离调用，显示目标依次为「${policy.targetAliases.join('、')}」。另有 ${policy.invalidTargetCount} 个对象身份无法确认。显示名只用于本次可读上下文，不是授权事实。只返回答案正文；发送者归属、替身披露和目标 Mention 由 transport 固定生成。`,
+            `本次是 personal substitution 隔离调用，显示目标依次为「${policy.targetAliases.join('、')}」。另有 ${policy.invalidTargetCount} 个对象身份无法确认。显示名只用于本次可读上下文，不是授权事实。可信 peer 协作策略：oneHop=${String(policy.oneHop)}，maxActivePeers=1，aliases=[${
+              policy.trustedPeerAliases.map((alias) => `@${alias}`).join('、') || '无'
+            }]。只返回答案正文；发送者归属、替身披露、目标 Mention 和首个合格 peer 激活由 transport 固定生成。`,
           ]
         : [
             `可信 peer 协作策略：oneHop=${String(policy.oneHop)}，maxActivePeers=1，aliases=[${
