@@ -221,9 +221,7 @@ async function createHarness(placement: PlacementCase): Promise<{
   const tmp = await createTmpProfile('reply-placement-');
   const workspace = await realpath(tmp.workspace);
   const baseProfileConfig = createDefaultProfileConfig({
-    accounts: {
-      app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' },
-    },
+    app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' },
     access: {
       allowedChats: [placement.chatId],
       allowedUsers: ['ou_user'],
@@ -343,7 +341,6 @@ function createFakeLarkChannel(chatMode: 'group' | 'topic'): FakeLarkChannel {
 function createControls(profileConfig: ProfileConfig): Controls {
   return {
     profile: 'test',
-    profileConfig,
     ownerRefreshState: 'unknown',
     async refreshOwner() {},
     async restart() {},

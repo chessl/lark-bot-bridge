@@ -70,13 +70,12 @@ async function createHarness(): Promise<{
     ],
   });
   const profileConfig = createDefaultProfileConfig({
-    accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
+    app: { id: 'app-id', secret: 'secret', tenant: 'feishu' },
     access: { admins: ['ou-admin'] },
   });
   profileConfig.workspaces.default = tmp.workspace;
   const controls = {
     profile: 'work',
-    profileConfig,
     ownerRefreshState: 'ok',
     ownerRefreshedAt: 1_700_000_000_000,
     async refreshOwner() {},

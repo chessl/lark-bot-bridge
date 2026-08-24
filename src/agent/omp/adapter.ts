@@ -1,3 +1,4 @@
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -13,7 +14,7 @@ import { dirname, extname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { log } from '../../core/logger';
-import { mergeProcessEnv, type SpawnedProcessByStdio, spawnProcess } from '../../platform/spawn';
+import { mergeProcessEnv } from '../../platform/spawn';
 import { buildBridgeSystemPrompt } from '../bridge-system-prompt';
 import type { NativeMcpEndpoint } from '../native-tools';
 import { type AgentAvailability, checkAgentAvailability } from '../preflight';
@@ -31,7 +32,7 @@ export interface OmpAdapterOptions {
   profile?: string;
 }
 
-type OmpChild = SpawnedProcessByStdio<Writable, Readable, Readable>;
+type OmpChild = ChildProcessByStdio<Writable, Readable, Readable>;
 interface OmpMcpPatch {
   path: string;
   endpoint: NativeMcpEndpoint;
@@ -82,11 +83,11 @@ export class OmpAdapter implements OmpRunEngine {
     if (opts.nativeMcp) env.LARK_NATIVE_MCP_TOKEN = opts.nativeMcp.bearerToken;
     let child: OmpChild;
     try {
-      child = spawnProcess(this.binary, args, {
+      child = spawn(this.binary, args, {
         cwd: opts.cwd,
         env: mergeProcessEnv(process.env, env),
         stdio: ['pipe', 'pipe', 'pipe'],
-      }) as OmpChild;
+      });
     } catch (error) {
       systemPromptFile.cleanup();
       releaseMcp();

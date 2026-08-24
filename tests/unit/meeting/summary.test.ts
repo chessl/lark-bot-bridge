@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({ start: vi.fn() }));
 /** A real ProfileConfig — capability resolution reads more than `agentKind`. */
 function profileConfig(meeting: MeetingConfig) {
   const pc = createDefaultProfileConfig({
-    accounts: { app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' } },
+    app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' },
   });
   pc.meeting = meeting;
   return pc;
@@ -86,7 +86,7 @@ function deps(config: MeetingConfig, originChatId?: string, botOwnerId?: string)
       },
       controls: {
         profile: 'claude',
-        profileConfig: profileConfig(config),
+        cfg: profileConfig(config),
         ...(botOwnerId ? { botOwnerId } : {}),
       },
       scopedRuns: { start: mocks.start, interrupt: vi.fn() },
@@ -171,7 +171,7 @@ describe('summarizeEndedMeeting', () => {
           return {} as never;
         }),
       },
-      controls: { profile: 'claude', profileConfig: profileConfig(config) },
+      controls: { profile: 'claude', cfg: profileConfig(config) },
       scopedRuns: { start: mocks.start, interrupt: vi.fn() },
     } as never);
 
@@ -252,7 +252,7 @@ describe('answerInMeeting', () => {
         sendMessage,
       },
       channel: { botIdentity: { name: 'bot' } },
-      controls: { profile: 'claude', profileConfig: profileConfig(config) },
+      controls: { profile: 'claude', cfg: profileConfig(config) },
       scopedRuns: { interrupt },
     } as never);
 

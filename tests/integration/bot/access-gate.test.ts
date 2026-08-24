@@ -115,7 +115,7 @@ describe('unified access gates', () => {
       createRunId: () => 'comment-run-1',
       workspaces,
       profile: 'claude',
-      profileConfig: () => controls.profileConfig,
+      profileConfig: () => controls.cfg,
     });
 
     await handleCommentMention({
@@ -145,19 +145,16 @@ function makeControls(opts: {
   defaultWorkspace?: string;
 }): Controls {
   const profileConfig = createDefaultProfileConfig({
-    accounts: {
-      app: {
-        id: 'cli_test',
-        secret: '${APP_SECRET}',
-        tenant: 'feishu',
-      },
+    app: {
+      id: 'cli_test',
+      secret: '${APP_SECRET}',
+      tenant: 'feishu',
     },
     access: opts.access,
   });
   if (opts.defaultWorkspace) profileConfig.workspaces.default = opts.defaultWorkspace;
   return {
     profile: 'claude',
-    profileConfig,
     botOwnerId: opts.owner,
     ownerRefreshState: 'ok',
     async refreshOwner() {},
@@ -189,7 +186,7 @@ function commandContext(args: {
     scopedRuns: createTestScopedRuns({
       agent,
       workspaces: args.workspaces,
-      profileConfig: () => args.controls.profileConfig,
+      profileConfig: () => args.controls.cfg,
     }),
     controls: args.controls,
   };

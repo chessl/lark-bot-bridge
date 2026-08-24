@@ -24,7 +24,7 @@ import {
 } from '../card/run-state';
 import { type Controls, tryHandleCommand } from '../commands';
 import type { AppPaths } from '../config/app-paths';
-import type { AppConfig } from '../config/schema';
+import type { ProfileConfig } from '../config/profile-schema';
 import { getAgentStopGraceMs, getMaxConcurrentRuns, getRunIdleTimeoutMs } from '../config/schema';
 import { resolveAppSecret } from '../config/secret-resolver';
 import { log, withTrace } from '../core/logger';
@@ -153,7 +153,7 @@ export interface BridgeChannel {
 }
 
 export interface StartChannelDeps {
-  cfg: AppConfig;
+  cfg: ProfileConfig;
   agent: OmpRunEngine;
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
@@ -218,10 +218,9 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   };
 
   const opts: LarkChannelOptions = {
-    appId: cfg.accounts.app.id,
+    appId: cfg.app.id,
     appSecret,
-    domain:
-      cfg.accounts.app.tenant === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn',
+    domain: cfg.app.tenant === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn',
     source: 'lark-bot-bridge',
     logger: buildQuietLogger(),
     policy: {
@@ -274,7 +273,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     rootDir: deps.appPaths?.rootDir,
     channel,
     callbackAuth,
-    profileConfig: () => controls.profileConfig,
+    profileConfig: () => controls.cfg,
   });
   const scopedRuns = new ScopedRuns({
     agent,
@@ -284,7 +283,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     ...(sessionCatalog ? { sessionCatalog } : {}),
     workspaces,
     profile: controls.profile,
-    profileConfig: () => controls.profileConfig,
+    profileConfig: () => controls.cfg,
     stopGraceMs: () => getAgentStopGraceMs(controls.cfg),
   });
   const media = new MediaCache(channel, deps.appPaths?.mediaDir);
@@ -443,7 +442,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // installed on the event dispatcher before any push can arrive; sessions are
   // only created later (on /meeting join or an invite), so the late-bound
   // botOpenId getter is resolved by then.
-  const meetingConfig = () => controls.profileConfig.meeting;
+  const meetingConfig = () => controls.cfg.meeting;
   let meetingManager: MeetingManager | undefined;
   if (meetingConfig().enabled) {
     meetingManager = new MeetingManager({
@@ -481,7 +480,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   const ownerRefresh = createOwnerRefreshController({
     controls,
     source: channel,
-    appId: cfg.accounts.app.id,
+    appId: cfg.app.id,
   });
   await ownerRefresh.start();
   const knownChatsRefresh = startKnownChatsRefreshTimer(channel, controls);
@@ -500,7 +499,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     bot: identity?.name ?? 'unknown',
     openId: identity?.openId ?? '-',
     agent: `${agent.displayName} (${agent.id})`,
-    appId: cfg.accounts.app.id,
+    appId: cfg.app.id,
     procId: controls.processId,
   });
   console.log('正在监听消息。按 Ctrl+C 退出。\n');
@@ -509,7 +508,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // Defense-in-depth — the SDK's pingTimeout watchdog handles half-dead WS,
   // this catches anything that the SDK misses (silent state stuck, etc.).
   const probeDomain =
-    cfg.accounts.app.tenant === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn';
+    cfg.app.tenant === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn';
   const keepalive = startKeepalive({
     channel,
     domain: probeDomain,
@@ -703,8 +702,8 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
 
   const accessDecision =
     msg.chatType === 'p2p'
-      ? canUseDm(controls.profileConfig, controls, msg.senderId)
-      : canUseGroup(controls.profileConfig, controls, msg.chatId, msg.senderId);
+      ? canUseDm(controls.cfg, controls, msg.senderId)
+      : canUseGroup(controls.cfg, controls, msg.chatId, msg.senderId);
   if (!accessDecision.ok) {
     log.info('intake', 'skip-not-allowed-user', {
       scope,
@@ -730,7 +729,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   // targeted or undirected chatter.
   if (
     msg.chatType !== 'p2p' &&
-    requireMentionForChat(controls.profileConfig, controls.cfg, msg.chatId) &&
+    requireMentionForChat(controls.cfg, msg.chatId) &&
     !msg.mentionedBot
   ) {
     log.info('intake', 'skip-no-mention', { scope, chatType: msg.chatType });
@@ -859,7 +858,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       quote.resources.map((resource) => ({ messageId: quote.messageId, resource })),
     ),
   );
-  const attachments = await media.resolve(resourceItems, controls.profileConfig.attachments);
+  const attachments = await media.resolve(resourceItems, controls.cfg.attachments);
   if (attachments.length > 0) {
     log.info('media', 'resolved', { count: attachments.length });
     for (const attachment of attachments) {
@@ -906,7 +905,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // for this scope (never on the first run) and the selection actually
   // changed. The scoped-run seam owns translating this preference into the
   // adapter's model argument.
-  const modelPref = controls.profileConfig.preferences.model;
+  const modelPref = controls.cfg.preferences.model;
   const modelSelection = normalizeModelSelection(modelPref);
   const prevModel = lastRunModelByScope.get(scope);
   const modelSwitched = prevModel !== undefined && prevModel !== modelSelection;
@@ -951,8 +950,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
 
   const accessDecision =
     firstMsg.chatType === 'p2p'
-      ? canUseDm(controls.profileConfig, controls, firstMsg.senderId)
-      : canUseGroup(controls.profileConfig, controls, firstMsg.chatId, firstMsg.senderId);
+      ? canUseDm(controls.cfg, controls, firstMsg.senderId)
+      : canUseGroup(controls.cfg, controls, firstMsg.chatId, firstMsg.senderId);
   const scopeContext: ScopeContext = {
     source: 'im',
     chatId,

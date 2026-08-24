@@ -452,12 +452,10 @@ async function createHarness(options: HarnessOptions = {}): Promise<ScopedRunHar
   const activeRuns = new ActiveRuns();
   let nextRun = 1;
   const profileConfig = createDefaultProfileConfig({
-    accounts: {
-      app: {
-        id: 'cli_test',
-        secret: '${APP_SECRET}',
-        tenant: 'feishu',
-      },
+    app: {
+      id: 'cli_test',
+      secret: '${APP_SECRET}',
+      tenant: 'feishu',
     },
     omp: { binaryPath: 'omp' },
   });

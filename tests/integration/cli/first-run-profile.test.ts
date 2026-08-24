@@ -25,7 +25,7 @@ describe('OMP profile bootstrap', () => {
     const omp = await writeVersionExecutable(root, 'omp', 'omp 1.2.3');
 
     const profile = await createBootstrapProfileConfig({
-      accounts: { app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' } },
+      app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' },
       workspace,
       ompBinaryPath: omp,
     });
@@ -40,7 +40,7 @@ describe('OMP profile bootstrap', () => {
     const omp = await writeVersionExecutable(root, 'omp', 'omp 1.2.3');
 
     const profile = await createBootstrapProfileConfig({
-      accounts: { app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' } },
+      app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' },
       ompBinaryPath: omp,
       defaultWorkspace,
     });
@@ -54,7 +54,7 @@ describe('OMP profile bootstrap', () => {
 
     await expect(
       createBootstrapProfileConfig({
-        accounts: { app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' } },
+        app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' },
         ompBinaryPath: missing,
       }),
     ).rejects.toMatchObject({
@@ -76,7 +76,7 @@ describe('OMP profile bootstrap', () => {
 
     await expect(
       createBootstrapProfileConfig({
-        accounts: { app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' } },
+        app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' },
         workspace: file,
         ompBinaryPath: omp,
       }),
@@ -89,7 +89,7 @@ describe('OMP profile bootstrap', () => {
 
     await expect(
       createBootstrapProfileConfig({
-        accounts: { app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' } },
+        app: { id: 'cli_omp', secret: 'secret', tenant: 'feishu' },
         ompBinaryPath: omp,
       }),
     ).resolves.toMatchObject({ workspaces: {}, omp: { binaryPath: omp } });

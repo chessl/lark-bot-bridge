@@ -6,7 +6,7 @@ import { OmpDeliveryJournal } from '../bot/omp-delivery-journal';
 import type { Controls } from '../commands';
 import type { AppPaths } from '../config/app-paths';
 import type { ProfileConfig } from '../config/profile-schema';
-import { type AppConfig, isComplete } from '../config/schema';
+import { isComplete } from '../config/schema';
 import { log } from '../core/logger';
 import { refreshOwnerControls } from '../policy/owner';
 import { SessionCatalog } from '../session/catalog';
@@ -60,8 +60,7 @@ class ManagedProfile {
     readonly profile: string,
     private appPaths: AppPaths,
     private configPath: string,
-    private cfg: AppConfig,
-    private profileConfig: ProfileConfig,
+    private cfg: ProfileConfig,
     private agent: OmpRunEngine,
     private sessions: SessionStore,
     private sessionCatalog: SessionCatalog,
@@ -75,7 +74,7 @@ class ManagedProfile {
   }
 
   get appId(): string {
-    return this.cfg.accounts.app.id;
+    return this.cfg.app.id;
   }
 
   get botName(): string | undefined {
@@ -94,13 +93,13 @@ class ManagedProfile {
     try {
       this.entry = await register({
         appId: this.appId,
-        tenant: this.cfg.accounts.app.tenant,
+        tenant: this.cfg.app.tenant,
         profileName: this.appPaths.profile,
         configPath: this.configPath,
         version: pkg.version,
         registryFile: this.appPaths.userRegistryFile,
       });
-      this.controls = this.makeControls(this.appPaths, this.cfg, this.profileConfig);
+      this.controls = this.makeControls(this.appPaths, this.cfg);
       await this.deliveryJournal.load();
       this.bridge = await this.startChannelFn({
         cfg: this.cfg,
@@ -156,21 +155,16 @@ class ManagedProfile {
     };
   }
 
-  private makeControls(
-    currentPaths: AppPaths,
-    currentCfg: AppConfig,
-    currentProfileConfig: ProfileConfig,
-  ): Controls {
+  private makeControls(currentPaths: AppPaths, currentCfg: ProfileConfig): Controls {
     const self = this;
     const currentControls: Controls = {
       profile: currentPaths.profile,
-      profileConfig: currentProfileConfig,
       ownerRefreshState: 'unknown',
       knownChats: [],
       async refreshOwner(channelOverride) {
         const target = channelOverride ?? self.bridge?.channel;
         if (!target) return;
-        await refreshOwnerControls(currentControls, target, currentControls.cfg.accounts.app.id);
+        await refreshOwnerControls(currentControls, target, currentControls.cfg.app.id);
       },
       configPath: self.configPath,
       cfg: currentCfg,
@@ -200,19 +194,17 @@ class ManagedProfile {
       const next = nextRuntime.cfg;
       if (!isComplete(next)) throw new Error('config incomplete after change');
       const nextAgent = new OmpAdapter({
-        binary: nextRuntime.profileConfig.omp.binaryPath,
-        ...(nextRuntime.profileConfig.omp.profile
-          ? { profile: nextRuntime.profileConfig.omp.profile }
-          : {}),
+        binary: nextRuntime.cfg.omp.binaryPath,
+        ...(nextRuntime.cfg.omp.profile ? { profile: nextRuntime.cfg.omp.profile } : {}),
       });
       const availability = await nextAgent.checkAvailability();
       if (!availability.ok) throw availability.error;
 
-      const appChanged = next.accounts.app.id !== this.cfg.accounts.app.id;
+      const appChanged = next.app.id !== this.cfg.app.id;
       if (appChanged) {
-        nextAppLock = await acquireAppRuntimeLock(nextRuntime.appPaths, next.accounts.app.id);
+        nextAppLock = await acquireAppRuntimeLock(nextRuntime.appPaths, next.app.id);
       }
-      const nextControls = this.makeControls(nextRuntime.appPaths, next, nextRuntime.profileConfig);
+      const nextControls = this.makeControls(nextRuntime.appPaths, next);
       const nextBridge = await this.startChannelFn({
         cfg: next,
         agent: nextAgent,
@@ -237,8 +229,8 @@ class ManagedProfile {
       await updateEntry(
         this.entry.id,
         {
-          appId: next.accounts.app.id,
-          tenant: next.accounts.app.tenant,
+          appId: next.app.id,
+          tenant: next.app.tenant,
           configPath: this.configPath,
           botName: nextBridge.channel.botIdentity?.name,
         },
@@ -251,7 +243,6 @@ class ManagedProfile {
         await oldAppLock?.release().catch(() => undefined);
       }
       this.cfg = next;
-      this.profileConfig = nextRuntime.profileConfig;
       this.agent = nextAgent;
       this.controls = nextControls;
     } finally {
@@ -300,19 +291,19 @@ export class Supervisor {
       profile,
       allowBootstrap: false,
     });
-    const { cfg, appPaths, profileConfig, configPath } = runtime;
+    const { cfg, appPaths, configPath } = runtime;
     if (!isComplete(cfg)) throw new Error(`profile 配置不完整：${profile}`);
 
     // Dedupe by app id — two channels for one app fight over event routing.
     for (const m of this.managed.values()) {
-      if (m.appId === cfg.accounts.app.id) {
+      if (m.appId === cfg.app.id) {
         throw new Error(`该飞书应用已被 profile「${m.profile}」连接，不能重复上线`);
       }
     }
 
     const agent = new OmpAdapter({
-      binary: profileConfig.omp.binaryPath,
-      ...(profileConfig.omp.profile ? { profile: profileConfig.omp.profile } : {}),
+      binary: cfg.omp.binaryPath,
+      ...(cfg.omp.profile ? { profile: cfg.omp.profile } : {}),
     });
     if (this.opts.runAgentPreflight !== false) {
       const availability = await agent.checkAvailability();
@@ -331,7 +322,6 @@ export class Supervisor {
       appPaths,
       configPath,
       cfg,
-      profileConfig,
       agent,
       sessions,
       sessionCatalog,
@@ -343,7 +333,7 @@ export class Supervisor {
     this.managed.set(appPaths.profile, managed);
     log.info('supervisor', 'profile-online', {
       profile: appPaths.profile,
-      appId: cfg.accounts.app.id,
+      appId: cfg.app.id,
     });
   }
 

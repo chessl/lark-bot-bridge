@@ -102,10 +102,6 @@ const JournalFileSchema = z.object({ version: z.literal(1), entries: z.array(z.u
 
 export type DeliveryState = z.infer<typeof DeliveryStateSchema>;
 export type ReplyTransport = z.infer<typeof ReplyTransportSchema>;
-export type DurableReplyRequest = z.infer<typeof ReplyRequestSchema>;
-export type DurableUpdateRequest = z.infer<typeof UpdateRequestSchema>;
-export type DurableCloseRequest = z.infer<typeof CloseRequestSchema>;
-export type DurablePatchRequest = z.infer<typeof PatchRequestSchema>;
 export type DurablePendingOperation = z.infer<typeof PendingOperationSchema>;
 export type ActiveDelivery = z.infer<typeof ActiveDeliverySchema>;
 

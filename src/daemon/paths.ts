@@ -35,8 +35,6 @@ export function serviceNameForProfile(profile: string = defaultAppPaths.profile)
 
 // === macOS launchd ===
 
-export const LAUNCH_AGENT_LABEL = launchAgentLabel();
-
 export function launchAgentLabel(profile: string = defaultAppPaths.profile): string {
   return `ai.${serviceNameForProfile(profile)}`;
 }
@@ -50,8 +48,6 @@ export function launchAgentPlistPath(profile: string = defaultAppPaths.profile):
 }
 
 // === Linux systemd (user units) ===
-
-export const SYSTEMD_UNIT_NAME = systemdUnitName();
 
 export function systemdUnitName(profile: string = defaultAppPaths.profile): string {
   return `${serviceNameForProfile(profile)}.service`;

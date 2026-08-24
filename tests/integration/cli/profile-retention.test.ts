@@ -11,7 +11,7 @@ import { resolveAppPaths } from '../../../src/config/app-paths';
 import { clearKeystoreDerivedKeyCache, setSecret } from '../../../src/config/keystore';
 import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
 import { secretKeyForApp } from '../../../src/config/schema';
-import { withProfileAndAppLocks } from '../../../src/runtime/locks';
+import { withRuntimeLocks } from '../../helpers/runtime-locks';
 import type { ProcessEntry } from '../../../src/runtime/registry';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
 
@@ -50,7 +50,7 @@ describe('profile retention and export', () => {
     await writeProfiles(root, 'claude', ['claude', 'codex-dev']);
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'codex-dev' });
 
-    await withProfileAndAppLocks(appPaths, 'cli_codex_dev', async () => {
+    await withRuntimeLocks(appPaths, 'cli_codex_dev', async () => {
       await expect(runProfileRemove('codex-dev', { rootDir: root })).rejects.toThrow(
         /locked|running/i,
       );
@@ -176,7 +176,7 @@ describe('profile retention and export', () => {
     const exported = JSON.parse(lines.join('\n')) as RootConfig;
 
     expect(JSON.stringify(exported)).not.toContain('plain-secret');
-    expect(exported.profiles.claude?.accounts.app.secret).toBe('[REDACTED]');
+    expect(exported.profiles.claude?.app.secret).toBe('[REDACTED]');
     await expect(
       runProfileExport('claude', { rootDir: root, includeSecrets: true }),
     ).rejects.toThrow(/--yes/);
@@ -189,18 +189,8 @@ describe('profile retention and export', () => {
     const exportedSecret = 'test-export-secret-from-keystore';
     const appPaths = resolveAppPaths({ rootDir: root, profile: 'claude' });
     const rootConfig = await readRoot(root);
-    rootConfig.secrets = {
-      providers: {
-        bridge: {
-          source: 'exec',
-          command: appPaths.secretsGetterScript,
-          args: [],
-        },
-      },
-    };
-    rootConfig.profiles.claude!.accounts.app.secret = {
-      source: 'exec',
-      provider: 'bridge',
+    rootConfig.profiles.claude!.app.secret = {
+      source: 'keystore',
       id: secretKeyForApp(appId),
     };
     await writeJson(join(root, 'config.json'), rootConfig);
@@ -214,33 +204,8 @@ describe('profile retention and export', () => {
     const secretExport = JSON.parse(lines.pop() ?? '') as RootConfig;
 
     expect(JSON.stringify(safeExport)).not.toContain(exportedSecret);
-    expect(safeExport.profiles.claude?.accounts.app.secret).toBe('[REDACTED]');
-    expect(secretExport.profiles.claude?.accounts.app.secret).toBe(exportedSecret);
-  });
-
-  it('materializes file app secret only when exporting with secrets', async () => {
-    const root = await makeRoot();
-    await writeProfiles(root, 'claude', ['claude']);
-    const exportedSecret = 'test-export-secret-from-file';
-    const secretFile = join(root, 'app-secret.txt');
-    await writeFile(secretFile, `${exportedSecret}\n`, 'utf8');
-    const rootConfig = await readRoot(root);
-    rootConfig.profiles.claude!.accounts.app.secret = {
-      source: 'file',
-      id: secretFile,
-    };
-    await writeJson(join(root, 'config.json'), rootConfig);
-    const lines: string[] = [];
-    vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
-
-    await runProfileExport('claude', { rootDir: root });
-    const safeExport = JSON.parse(lines.pop() ?? '') as RootConfig;
-    await runProfileExport('claude', { rootDir: root, includeSecrets: true, yes: true });
-    const secretExport = JSON.parse(lines.pop() ?? '') as RootConfig;
-
-    expect(JSON.stringify(safeExport)).not.toContain(exportedSecret);
-    expect(safeExport.profiles.claude?.accounts.app.secret).toBe('[REDACTED]');
-    expect(secretExport.profiles.claude?.accounts.app.secret).toBe(exportedSecret);
+    expect(safeExport.profiles.claude?.app.secret).toBe('[REDACTED]');
+    expect(secretExport.profiles.claude?.app.secret).toBe(exportedSecret);
   });
 
   it('writes exports to a new output file and requires --force when it already exists', async () => {
@@ -265,12 +230,10 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
   const profiles: RootConfig['profiles'] = {};
   for (const name of names) {
     profiles[name] = createDefaultProfileConfig({
-      accounts: {
-        app: {
-          id: `cli_${name.replace(/[^A-Za-z0-9]/g, '_')}`,
-          secret: 'plain-secret',
-          tenant: 'feishu',
-        },
+      app: {
+        id: `cli_${name.replace(/[^A-Za-z0-9]/g, '_')}`,
+        secret: 'plain-secret',
+        tenant: 'feishu',
       },
       omp: { binaryPath: '/usr/local/bin/omp' },
     });

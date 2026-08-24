@@ -53,8 +53,8 @@ describe('OMP profile runtime resolver', () => {
       const saved = JSON.parse(await readFile(join(root, 'config.json'), 'utf8'));
 
       expect(runtime.profile).toBe('work');
-      expect(runtime.profileConfig.omp.binaryPath).toBe(binaryPath);
-      expect(runtime.profileConfig.workspaces.default).toBe(await realpath(workspace));
+      expect(runtime.cfg.omp.binaryPath).toBe(binaryPath);
+      expect(runtime.cfg.workspaces.default).toBe(await realpath(workspace));
       expect(saved.activeProfile).toBe('work');
       expect(saved.profiles.work).not.toHaveProperty('agentKind');
     });
@@ -64,7 +64,7 @@ describe('OMP profile runtime resolver', () => {
     const root = await tmpRoot();
     const configPath = join(root, 'config.json');
     const profile = createDefaultProfileConfig({
-      accounts: { app: { id: 'cli_existing', secret: 'secret', tenant: 'feishu' } },
+      app: { id: 'cli_existing', secret: 'secret', tenant: 'feishu' },
       omp: { binaryPath: '/usr/local/bin/omp' },
     });
     await saveRootConfig(
@@ -74,7 +74,7 @@ describe('OMP profile runtime resolver', () => {
 
     const runtime = await resolveProfileRuntime({ config: configPath });
     expect(runtime.profile).toBe('work');
-    expect(runtime.profileConfig.omp).toEqual({ binaryPath: '/usr/local/bin/omp' });
+    expect(runtime.cfg.omp).toEqual({ binaryPath: '/usr/local/bin/omp' });
   });
 
   it('creates a managed default workspace when none is supplied', async () => {
@@ -87,7 +87,7 @@ describe('OMP profile runtime resolver', () => {
         appId: 'cli_existing',
         appSecret: 'manual-secret',
       });
-      expect(runtime.profileConfig.workspaces.default).toBe(
+      expect(runtime.cfg.workspaces.default).toBe(
         await realpath(join(`${root}-workspaces`, 'work', 'default')),
       );
     });
@@ -111,7 +111,7 @@ describe('OMP profile runtime resolver', () => {
     const root = await tmpRoot();
     const configPath = join(root, 'config.json');
     const profile = createDefaultProfileConfig({
-      accounts: { app: { id: 'cli_existing', secret: 'literal', tenant: 'feishu' } },
+      app: { id: 'cli_existing', secret: 'literal', tenant: 'feishu' },
       omp: { binaryPath: '/usr/local/bin/omp' },
     });
     await saveRootConfig(

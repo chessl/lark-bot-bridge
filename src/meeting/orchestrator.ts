@@ -81,10 +81,7 @@ export function attachMeetingAgent(deps: MeetingAgentDeps): void {
     // message_type 3 is an in-meeting reaction, not text — never a question.
     if (chat.messageType === 3) return;
     // Read the bot name live: it is only known after connect and can change.
-    const prefixes = triggerPrefixes(
-      controls.profileConfig.meeting.trigger,
-      deps.channel.botIdentity?.name,
-    );
+    const prefixes = triggerPrefixes(controls.cfg.meeting.trigger, deps.channel.botIdentity?.name);
     const question = matchTrigger(chat.content, prefixes);
     if (question === undefined) return; // not addressed to us
     if (!question) return; // addressed but empty
@@ -137,7 +134,7 @@ export async function answerInMeeting(
   opts: AnswerOptions,
 ): Promise<string> {
   const { session, controls } = deps;
-  const config = controls.profileConfig.meeting;
+  const config = controls.cfg.meeting;
   const transcript = session.recentTranscript(config.transcript.keep);
   const prompt = buildMeetingPrompt({
     question,
@@ -205,7 +202,7 @@ export function buildMeetingPrompt(input: MeetingPromptInput): string {
  */
 export async function summarizeEndedMeeting(deps: MeetingAgentDeps): Promise<void> {
   const { session, controls } = deps;
-  if (!controls.profileConfig.meeting.summaryOnEnd) return;
+  if (!controls.cfg.meeting.summaryOnEnd) return;
 
   const transcript = session.recentTranscript();
   if (transcript.length === 0) {
@@ -216,7 +213,7 @@ export async function summarizeEndedMeeting(deps: MeetingAgentDeps): Promise<voi
     return;
   }
   const target = resolveSummaryTarget(
-    controls.profileConfig.meeting.summaryTarget,
+    controls.cfg.meeting.summaryTarget,
     session.originChatId,
     controls.botOwnerId,
   );
@@ -309,11 +306,8 @@ async function runMeetingAgent(
       // bot-name prefix with the configured one reads like a different bot.
       const prefix =
         usedPrefix ??
-        triggerPrefixes(
-          controls.profileConfig.meeting.trigger,
-          deps.channel.botIdentity?.name,
-        )[0] ??
-        controls.profileConfig.meeting.trigger;
+        triggerPrefixes(controls.cfg.meeting.trigger, deps.channel.botIdentity?.name)[0] ??
+        controls.cfg.meeting.trigger;
       return `上一个任务还在执行。发「${prefix} stop」可以中断它，然后再问我。`;
     }
     return result.rejectReason.userVisible;

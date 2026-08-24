@@ -458,12 +458,10 @@ async function createHarness(
   const tmp = await createTmpProfile('topic-quote-');
   const workspace = await realpath(tmp.workspace);
   const baseProfileConfig = createDefaultProfileConfig({
-    accounts: {
-      app: {
-        id: 'cli_test',
-        secret: 'secret',
-        tenant: 'feishu',
-      },
+    app: {
+      id: 'cli_test',
+      secret: 'secret',
+      tenant: 'feishu',
     },
     access: {
       allowedChats: ['oc_topic_chat'],
@@ -624,7 +622,6 @@ function createFakeLarkChannel(
 function createControls(profileConfig: ReturnType<typeof createDefaultProfileConfig>) {
   return {
     profile: 'test',
-    profileConfig,
     ownerRefreshState: 'unknown' as const,
     async refreshOwner() {},
     async restart() {},

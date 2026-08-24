@@ -69,18 +69,18 @@ export function buildConfigView(state: MutableProfileState, live = false): Confi
   const ms = getRunIdleTimeoutMs(state.cfg);
   return {
     profile: state.profile,
-    mode: state.profileConfig.mode,
+    mode: state.cfg.mode,
     model: normalizeModelSelection(state.cfg.preferences?.model),
     models: supportedModels(),
     maxConcurrentRuns: getMaxConcurrentRuns(state.cfg),
     runIdleTimeoutMinutes: ms ? Math.round(ms / 60_000) : 0,
     requireMentionInGroup: getRequireMentionInGroup(state.cfg),
-    meeting: state.profileConfig.meeting,
+    meeting: state.cfg.meeting,
     access: {
-      allowedUsers: state.profileConfig.access.allowedUsers,
-      allowedChats: state.profileConfig.access.allowedChats,
-      admins: state.profileConfig.access.admins,
-      chatRequireMention: state.profileConfig.access.chatRequireMention ?? {},
+      allowedUsers: state.cfg.access.allowedUsers,
+      allowedChats: state.cfg.access.allowedChats,
+      admins: state.cfg.access.admins,
+      chatRequireMention: state.cfg.access.chatRequireMention ?? {},
     },
     live,
   };
@@ -102,18 +102,6 @@ export async function loadProfileState(
     configPath: appPaths.configFile,
     profile,
     cfg: runtimeProfileConfig(root, profile),
-    profileConfig: root.profiles[profile]!,
-  };
-}
-
-export function buildStatus(rt: UiRuntime, channel: LarkChannel | undefined, version: string) {
-  return {
-    profile: rt.profile,
-    mode: rt.profileConfig.mode,
-    version,
-    connected: Boolean(channel?.botIdentity?.name),
-    botName: channel?.botIdentity?.name,
-    botOwnerId: rt.botOwnerId,
   };
 }
 
@@ -189,8 +177,7 @@ interface ParsedConfig {
 function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfig {
   const fv = asRecord(body);
 
-  const mode: ProfileMode =
-    fv.mode === 'team' || fv.mode === 'personal' ? fv.mode : state.profileConfig.mode;
+  const mode: ProfileMode = fv.mode === 'team' || fv.mode === 'personal' ? fv.mode : state.cfg.mode;
 
   const rawModel = typeof fv.model === 'string' ? fv.model : '';
   const modelValid = rawModel !== '' && supportedModels().some((m) => m.value === rawModel);
@@ -224,7 +211,7 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
       ? fv.requireMentionInGroup
       : getRequireMentionInGroup(state.cfg);
 
-  const meeting = parseMeetingBody(fv.meeting, state.profileConfig.meeting);
+  const meeting = parseMeetingBody(fv.meeting, state.cfg.meeting);
 
   return {
     mode,
@@ -540,7 +527,7 @@ export async function addBotToChatView(
     };
   }
   const state = await loadProfileState(profile, rootDir);
-  const botAppId = state.cfg.accounts?.app?.id;
+  const botAppId = state.cfg.app?.id;
   if (!botAppId) throw new ApiError(400, 'profile 未配置 app');
   return addBotToChat({ profile, rootDir }, chatId, botAppId);
 }

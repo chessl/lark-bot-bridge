@@ -36,8 +36,8 @@ describe('doctor/status visible diagnostics', () => {
 
   it('keeps doctor self-check replies free of app secrets while showing local paths', async () => {
     const h = await createHarness();
-    h.controls.cfg.accounts.app.secret = 'plain-secret-value';
-    h.controls.profileConfig.accounts.app.secret = 'plain-secret-value';
+    h.controls.cfg.app.secret = 'plain-secret-value';
+    h.controls.cfg.app.secret = 'plain-secret-value';
 
     await h.command('/doctor');
 
@@ -65,13 +65,12 @@ async function createHarness(): Promise<{
   const activeRuns = new ActiveRuns();
   const agent = new FakeAgentAdapter();
   const profileConfig = createDefaultProfileConfig({
-    accounts: { app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' } },
+    app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' },
     access: { admins: ['ou-admin'] },
   });
   profileConfig.workspaces.default = tmp.workspace;
   const controls = {
     profile: 'claude',
-    profileConfig,
     ownerRefreshState: 'ok',
     async refreshOwner() {},
     restart: vi.fn(async () => {}),
@@ -99,7 +98,7 @@ async function createHarness(): Promise<{
           agent,
           activeRuns,
           workspaces,
-          profileConfig: () => controls.profileConfig,
+          profileConfig: () => controls.cfg,
         }),
         controls,
       }),

@@ -2,13 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  configureLogger,
-  closeLogger,
-  flushLogger,
-  log,
-  sanitizeLogsForDoctor,
-} from '../../../src/core/logger.js';
+import { closeLogger, configureLogger, flushLogger, log } from '../../../src/core/logger.js';
 
 let logsDir = '';
 
@@ -108,28 +102,6 @@ describe('logger redaction', () => {
     const text = await readTodayLog();
     expect(text).not.toContain('~/.lark-bot-bridge/profiles/claude/media/private.bin');
     expect(text).toContain('[REDACTED_PATH]');
-  });
-
-  it('sanitizes doctor log buffers with stderr urls and absolute paths', () => {
-    const out = sanitizeLogsForDoctor(
-      '{"stderr":"failed /Users/example/work/repo?app_access_token=app-secret","cwd":"/opt/private/repo","authorization":"Bearer raw-token"}',
-    );
-
-    expect(out).not.toContain('/Users/example/work/repo');
-    expect(out).not.toContain('/opt/private/repo');
-    expect(out).not.toContain('app-secret');
-    expect(out).not.toContain('raw-token');
-    expect(out).toContain('[REDACTED]');
-  });
-
-  it('sanitizes stringified JSON credentials in doctor log buffers', () => {
-    const out = sanitizeLogsForDoctor(
-      '{"args":["{\\"app_secret\\":\\"doctor-secret\\",\\"token\\":\\"doctor-token\\"}"]}',
-    );
-
-    expect(out).not.toContain('doctor-secret');
-    expect(out).not.toContain('doctor-token');
-    expect(out).toContain('[REDACTED]');
   });
 });
 

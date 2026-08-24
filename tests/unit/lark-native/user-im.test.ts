@@ -49,7 +49,7 @@ describe('native user identity', () => {
         activeProfile: 'default',
         profiles: {
           default: createDefaultProfileConfig({
-            accounts: { app: { id: 'cli_test', secret: 'app-secret', tenant: 'feishu' } },
+            app: { id: 'cli_test', secret: 'app-secret', tenant: 'feishu' },
           }),
         },
       },

@@ -149,9 +149,7 @@ async function createHarness(): Promise<ResumeHarness> {
     events: [[{ type: 'done', terminationReason: 'normal' }]],
   });
   const profileConfig = createDefaultProfileConfig({
-    accounts: {
-      app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' },
-    },
+    app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' },
     omp: { binaryPath: '/usr/local/bin/omp' },
   });
   profileConfig.workspaces.default = tmp.workspace;

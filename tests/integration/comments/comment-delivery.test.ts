@@ -233,12 +233,10 @@ async function createCommentHarness(options: {
   workspaces.setCwd('doc:doc-token', tmp.workspace);
   workspaces.setCwd('doc:wiki-token', tmp.workspace);
   const profileConfig = createDefaultProfileConfig({
-    accounts: {
-      app: {
-        id: 'cli_test',
-        secret: '${APP_SECRET}',
-        tenant: 'feishu',
-      },
+    app: {
+      id: 'cli_test',
+      secret: '${APP_SECRET}',
+      tenant: 'feishu',
     },
     access: { allowedUsers: ['ou-user'] },
   });
@@ -272,7 +270,6 @@ async function createCommentHarness(options: {
       scopedRuns,
       controls: {
         profile: 'work',
-        profileConfig,
         botOwnerId: 'ou-user',
         ownerRefreshState: 'ok',
         async refreshOwner() {},

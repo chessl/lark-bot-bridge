@@ -145,10 +145,6 @@ async function createHarness(
   const store = new CallbackNonceStore(`${tmp.profile}/callback-nonces.json`);
   const controls = {
     profile: 'claude',
-    profileConfig: createDefaultProfileConfig({
-      accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
-      access: { allowedChats: ['oc_group'] },
-    }),
     botOwnerId: 'ou_owner',
     ownerRefreshState: 'ok',
     async refreshOwner() {},
@@ -156,7 +152,7 @@ async function createHarness(
     async exit() {},
     configPath: `${tmp.profile}/config.json`,
     cfg: createDefaultProfileConfig({
-      accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
+      app: { id: 'app-id', secret: 'secret', tenant: 'feishu' },
       access: { allowedChats: ['oc_group'] },
     }),
     processId: 'proc-1',

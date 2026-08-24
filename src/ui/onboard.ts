@@ -9,8 +9,7 @@ import {
   saveRootConfig,
   withConfigFileLock,
 } from '../config/profile-store';
-import { type AppConfig, secretKeyForApp, type TenantBrand } from '../config/schema';
-import { buildEncryptedAccountConfig } from '../config/store';
+import { keystoreAppCredentials, secretKeyForApp, type TenantBrand } from '../config/schema';
 import { validateAppCredentials } from '../utils/feishu-auth';
 import { HttpError } from './http';
 
@@ -68,13 +67,7 @@ export interface CreateProfileInput {
   workspace?: string;
 }
 
-/**
- * Create (or add) a profile from validated app credentials — the same sequence
- * the terminal bootstrap uses ({@link createBootstrapProfileConfig} +
- * {@link buildEncryptedAccountConfig} + keystore), so the web onboarding and
- * `run`/`start` produce identical on-disk config. The App Secret is stored only
- * in the encrypted keystore; config.json gets a SecretRef.
- */
+/** Create a profile from validated app credentials, storing its secret in the keystore. */
 export async function onboardCreate(body: unknown, rootDir?: string) {
   const fv = asRecord(body);
   const input: CreateProfileInput = {
@@ -96,14 +89,7 @@ export async function onboardCreate(body: unknown, rootDir?: string) {
   return { ok: true, profile, botName: check.botName };
 }
 
-/**
- * Persist a new profile from (already-valid) app credentials — the same
- * sequence the terminal bootstrap uses ({@link createBootstrapProfileConfig} +
- * {@link buildEncryptedAccountConfig} + keystore), so web onboarding, QR
- * creation, and `run`/`start` produce identical on-disk config. The App Secret
- * is stored only in the encrypted keystore; config.json gets a SecretRef.
- * Returns the canonical (normalized) profile name.
- */
+/** Persist a new profile from already validated app credentials. */
 export async function writeNewProfile(
   input: CreateProfileInput,
   rootDir?: string,
@@ -129,14 +115,13 @@ export async function writeNewProfile(
     throw new HttpError(409, `profile 已存在：${profile}，请换个名字`);
   }
 
-  const encrypted = await encryptAccount(input, appPaths);
+  await setSecret(secretKeyForApp(input.appId), input.appSecret, appPaths);
+  const app = keystoreAppCredentials(input.appId, input.tenant);
 
   let profileConfig: ProfileConfig;
   try {
     profileConfig = await createBootstrapProfileConfig({
-      accounts: encrypted.accounts,
-      preferences: encrypted.preferences,
-      secrets: encrypted.secrets,
+      app,
       ...(input.workspace ? { workspace: input.workspace } : {}),
       defaultWorkspace: appPaths.defaultWorkspaceDir,
     });
@@ -147,29 +132,16 @@ export async function writeNewProfile(
   await withConfigFileLock(appPaths.configFile, async () => {
     const root = await loadRootConfig(appPaths.configFile);
     if (!root) {
-      await saveRootConfig(
-        createRootConfig(profile, profileConfig, encrypted.secrets),
-        appPaths.configFile,
-      );
+      await saveRootConfig(createRootConfig(profile, profileConfig), appPaths.configFile);
       return;
     }
     if (root.profiles[profile]) {
       throw new HttpError(409, `profile 已存在：${profile}，请换个名字`);
     }
     root.activeProfile = profile;
-    root.profiles[profile] = { ...profileConfig, secrets: undefined };
-    if (!root.secrets && encrypted.secrets) root.secrets = encrypted.secrets;
+    root.profiles[profile] = profileConfig;
     await saveRootConfig(root, appPaths.configFile);
   });
 
   return { profile };
-}
-
-async function encryptAccount(
-  input: CreateProfileInput,
-  appPaths: ReturnType<typeof resolveAppPaths>,
-): Promise<AppConfig> {
-  const next = await buildEncryptedAccountConfig(input.appId, input.tenant, undefined, appPaths);
-  await setSecret(secretKeyForApp(input.appId), input.appSecret, appPaths);
-  return next;
 }

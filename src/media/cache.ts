@@ -124,33 +124,6 @@ export class MediaCache {
   }
 }
 
-/** Delete files under the media cache whose mtime is older than maxAgeMs. */
-export async function gcMediaCache(
-  maxAgeMs: number,
-  root: string = defaultAppPaths.mediaDir,
-): Promise<void> {
-  try {
-    await stat(root);
-  } catch {
-    return;
-  }
-  const cutoff = Date.now() - maxAgeMs;
-  let removed = 0;
-  const files = await listFiles(root);
-  for (const p of files) {
-    try {
-      const st = await stat(p);
-      if (st.isFile() && st.mtimeMs < cutoff) {
-        await rm(p);
-        removed++;
-      }
-    } catch {
-      /* skip */
-    }
-  }
-  if (removed > 0) log.info('media', 'gc', { removed });
-}
-
 function defaultMime(kind: AttachmentKind): string {
   switch (kind) {
     case 'image':

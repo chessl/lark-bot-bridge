@@ -18,17 +18,6 @@ export interface ResourceScopeDigestInput {
   resourceBindings?: string[];
 }
 
-export interface AttachmentPolicyShapeInput {
-  kind: string;
-  requiredness?: 'required' | 'optional';
-  decision?: 'accepted' | 'rejected' | 'skipped';
-  rejectionReason?: string;
-  originalName?: string;
-  size?: number;
-  hash?: string;
-  path?: string;
-}
-
 export function policyFingerprint(input: FingerprintInputV2): string {
   return digestCanonical({
     version: 2,
@@ -57,18 +46,6 @@ export function resourceScopeDigest(input: ResourceScopeDigestInput): string {
     commentScopeId: input.commentScopeId ?? null,
     resourceBindings: [...(input.resourceBindings ?? [])].sort(),
   });
-}
-
-export function attachmentPolicyShapeDigest(input: AttachmentPolicyShapeInput[]): string {
-  const shape = input
-    .map((item) => ({
-      kind: item.kind,
-      requiredness: item.requiredness ?? null,
-      decision: item.decision ?? null,
-      rejectionReason: item.rejectionReason ?? null,
-    }))
-    .sort((a, b) => canonicalizeJcs(a).localeCompare(canonicalizeJcs(b)));
-  return digestCanonical(shape);
 }
 
 export function attachmentPolicyConfigDigest(input: ProfileConfig['attachments']): string {

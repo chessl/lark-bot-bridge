@@ -1,5 +1,5 @@
+import { spawn } from 'node:child_process';
 import { defaultAppPaths } from '../../config/app-paths';
-import { spawnProcess } from '../../platform/spawn';
 import { isAlive } from '../../runtime/registry';
 import { readUiSidecar } from '../../ui/sidecar';
 
@@ -46,7 +46,7 @@ export async function runUi(opts: RunUiOptions = {}): Promise<void> {
 function openBrowser(url: string): void {
   const command = process.platform === 'darwin' ? 'open' : 'xdg-open';
   try {
-    const child = spawnProcess(command, [url], { stdio: 'ignore' });
+    const child = spawn(command, [url], { stdio: 'ignore' });
     child.on('error', () => {
       console.log(`若浏览器未自动打开，请手动访问上面的地址。`);
     });

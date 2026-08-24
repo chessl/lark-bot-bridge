@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
-import { open, readdir, rm, stat } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export interface LoggerOptions {
@@ -491,46 +491,6 @@ export function newTraceId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-/**
- * Scrub a log buffer of identifying and credential material before `/doctor`
- * submits it to OMP or posts the analysis card to Feishu.
- *
- * Conservative: keeps log structure intact so OMP can still correlate by
- * traceId / phase / event. Only identifying values shrink to a last-6 suffix,
- * and known credential fields become [REDACTED].
- *
- * Pattern-based on purpose — parsing each line as JSON would skip lines the
- * scrubber doesn't fully understand and is much slower for ~60KB of input.
- */
-export function sanitizeLogsForDoctor(logs: string): string {
-  let out = logs;
-  // ID-like JSON fields → last 6 chars only. The 8-char minimum on the
-  // value avoids matching short metadata that happens to share a key name.
-  out = out.replace(
-    /"(chatId|senderId|sender|openId|operatorId|userId|msgId|messageId)":"([^"]{8,})"/g,
-    (_, key: string, val: string) => `"${key}":"…${val.slice(-6)}"`,
-  );
-  // Credential fields → fully redacted. Case-insensitive on the key.
-  out = out.replace(
-    /"(secret|app_secret|appSecret|token|access_token|tenant_access_token|app_access_token|authorization)":"[^"]*"/gi,
-    (_, key: string) => `"${key}":"[REDACTED]"`,
-  );
-  out = redactJsonCredentialText(out);
-  // URL-style tokens in error messages: `?access_token=t-xxx`.
-  out = out.replace(
-    /\b(access_token|tenant_access_token|app_access_token)=[A-Za-z0-9._\-+/=]+/g,
-    '$1=[REDACTED]',
-  );
-  // HTTP Authorization headers embedded in stringified errors.
-  out = out.replace(/\bBearer\s+[A-Za-z0-9._\-+/=]+/g, 'Bearer [REDACTED]');
-  out = out.replace(/\bAuthorization\s*[:=]\s*\S+/gi, 'Authorization=[REDACTED]');
-  out = out.replace(
-    /"(prompt|stdout|stderr|env|proxy|attachmentPath|mediaPath|path|cwd|cwdRealpath|absPath)":[^,\n}]*/gi,
-    (_, key: string) => `"${key}":"[REDACTED]"`,
-  );
-  return redactDiagnosticText(out);
-}
-
 export function redactDiagnosticText(text: string): string {
   let out = redactJsonCredentialText(text);
   out = redactResourceText(out);
@@ -571,32 +531,6 @@ function redactResourceText(text: string): string {
 }
 
 /**
- * Read the tail of today's (and optionally yesterday's) log file.
- *
- * Returns up to `maxBytes` of complete JSON lines, oldest-first. If the
- * tail starts mid-line we drop the partial leader.
- */
-export async function readRecentLogs(opts: { maxBytes: number }): Promise<string> {
-  const dir = logsDir();
-  if (!dir) return '';
-  const today = todayKey();
-  const yesterday = new Date(loggerOptions.now().getTime() - 86_400_000)
-    .toISOString()
-    .slice(0, 10)
-    .replace(/-/g, '');
-  const todayPath = join(dir, logFileName(today));
-  const yesterdayPath = join(dir, logFileName(yesterday));
-
-  const tail = await readTail(todayPath, opts.maxBytes);
-  if (tail.length >= opts.maxBytes / 2) return tail;
-
-  // Top up from yesterday's file if today's is sparse.
-  const remaining = opts.maxBytes - Buffer.byteLength(tail, 'utf8');
-  const earlier = await readTail(yesterdayPath, remaining);
-  return earlier + tail;
-}
-
-/**
  * Delete log files older than the retention window. Best-effort, called
  * on bridge startup. Returns the number of files removed.
  */
@@ -627,27 +561,4 @@ export async function gcOldLogs(): Promise<number> {
     log.info('logger', 'gc', { removed, retentionDays: loggerOptions.retentionDays });
   }
   return removed;
-}
-
-async function readTail(path: string, maxBytes: number): Promise<string> {
-  try {
-    const st = await stat(path);
-    const start = Math.max(0, st.size - maxBytes);
-    const handle = await open(path, 'r');
-    try {
-      const buf = Buffer.alloc(st.size - start);
-      await handle.read(buf, 0, buf.length, start);
-      let content = buf.toString('utf8');
-      if (start > 0) {
-        const nl = content.indexOf('\n');
-        if (nl !== -1) content = content.slice(nl + 1);
-      }
-      return content;
-    } finally {
-      await handle.close();
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return '';
-    throw err;
-  }
 }

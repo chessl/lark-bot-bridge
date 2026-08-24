@@ -2,9 +2,9 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const spawnMock = vi.hoisted(() => ({ spawnProcess: vi.fn() }));
+const spawnMock = vi.hoisted(() => ({ spawn: vi.fn() }));
 
-vi.mock('../../../src/platform/spawn', () => ({ spawnProcess: spawnMock.spawnProcess }));
+vi.mock('node:child_process', () => ({ spawn: spawnMock.spawn }));
 
 import { OsKeychain } from '../../../src/lark-native/keychain';
 
@@ -55,10 +55,8 @@ function fakeSecurityChild(args: string[]): FakeChild {
 beforeEach(() => {
   keychainValues.clear();
   securityInputs.length = 0;
-  spawnMock.spawnProcess.mockReset();
-  spawnMock.spawnProcess.mockImplementation((_command: string, args: string[]) =>
-    fakeSecurityChild(args),
-  );
+  spawnMock.spawn.mockReset();
+  spawnMock.spawn.mockImplementation((_command: string, args: string[]) => fakeSecurityChild(args));
   vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
 });
 
@@ -76,7 +74,7 @@ describe('macOS user OAuth keychain', () => {
     await store.set(account, value);
     expect(securityInputs).toHaveLength(1);
     expect(securityInputs[0]?.split('\n').length).toBeGreaterThan(3);
-    expect(JSON.stringify(spawnMock.spawnProcess.mock.calls)).not.toContain('access-');
+    expect(JSON.stringify(spawnMock.spawn.mock.calls)).not.toContain('access-');
     await expect(store.get(account)).resolves.toBe(value);
 
     await store.remove(account);

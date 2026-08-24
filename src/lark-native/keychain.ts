@@ -1,5 +1,5 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { spawnProcess } from '../platform/spawn';
 
 const SERVICE = 'lark-bot-bridge';
 const TIMEOUT_MS = 15_000;
@@ -156,7 +156,7 @@ function run(command: string, args: string[], stdin?: string): Promise<ProcessRe
     return Promise.reject(new Error(`OS keychain is unsupported on ${process.platform}`));
   }
   const { promise, resolve, reject } = Promise.withResolvers<ProcessResult>();
-  const child = spawnProcess(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   const timer = setTimeout(() => child.kill('SIGTERM'), TIMEOUT_MS);

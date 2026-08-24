@@ -9,8 +9,8 @@ const omp = { binaryPath: '/usr/local/bin/omp' };
 
 describe('OMP profile schema', () => {
   it('defaults deployment mode to personal and parses team', () => {
-    expect(createDefaultProfileConfig({ accounts: { app }, omp }).mode).toBe('personal');
-    expect(createDefaultProfileConfig({ mode: 'team', accounts: { app }, omp }).mode).toBe('team');
+    expect(createDefaultProfileConfig({ app, omp }).mode).toBe('personal');
+    expect(createDefaultProfileConfig({ mode: 'team', app, omp }).mode).toBe('team');
     expect(normalizeProfileConfig({ accounts: { app }, omp, mode: 'nonsense' }).mode).toBe(
       'personal',
     );
@@ -42,7 +42,7 @@ describe('OMP profile schema', () => {
   });
 
   it('provides attachment and meeting defaults', () => {
-    const cfg = createDefaultProfileConfig({ accounts: { app }, omp });
+    const cfg = createDefaultProfileConfig({ app, omp });
     expect(cfg.attachments.maxCount).toBeGreaterThan(0);
     expect(cfg.meeting).toMatchObject({ enabled: false, respondIn: 'meeting' });
   });

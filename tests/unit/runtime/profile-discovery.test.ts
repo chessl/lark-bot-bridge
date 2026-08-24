@@ -20,7 +20,7 @@ async function root(): Promise<string> {
 
 function profile(appId: string) {
   return createDefaultProfileConfig({
-    accounts: { app: { id: appId, secret: 'secret', tenant: 'feishu' } },
+    app: { id: appId, secret: 'secret', tenant: 'feishu' },
     omp: { binaryPath: '/usr/local/bin/omp' },
   });
 }

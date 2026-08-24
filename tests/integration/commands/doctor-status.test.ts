@@ -241,7 +241,6 @@ async function createHarness(options: {
   }
   const controls = {
     profile: 'claude',
-    profileConfig,
     botOwnerId: 'ou-owner',
     ownerRefreshState: 'ok',
     ownerRefreshedAt: 1_700_000_000_000,
@@ -305,7 +304,7 @@ async function createHarness(options: {
 
 function appConfig(defaultWorkspace: string | undefined): ProfileConfig {
   const config = createDefaultProfileConfig({
-    accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
+    app: { id: 'app-id', secret: 'secret', tenant: 'feishu' },
     access: { admins: ['ou-admin'] },
   });
   if (defaultWorkspace) config.workspaces.default = defaultWorkspace;

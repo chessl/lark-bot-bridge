@@ -1,14 +1,13 @@
 import { mkdir, realpath } from 'node:fs/promises';
 import { AgentPreflightError } from '../agent/preflight';
 import { createDefaultProfileConfig, type ProfileConfig } from '../config/profile-schema';
-import type { AppConfig } from '../config/schema';
+import type { AppCredentials, AppPreferences } from '../config/schema';
 import { resolveWorkingDirectory } from '../policy/workspace';
 import { resolveExecutablePath } from './executable';
 
 export interface BootstrapProfileInput {
-  accounts: AppConfig['accounts'];
-  preferences?: AppConfig['preferences'];
-  secrets?: AppConfig['secrets'];
+  app: AppCredentials;
+  preferences?: AppPreferences;
   workspace?: string;
   defaultWorkspace?: string;
   ompBinaryPath?: string;
@@ -23,13 +22,8 @@ export async function createBootstrapProfileConfig(
       ? await ensureManagedDefaultWorkspace(input.defaultWorkspace)
       : undefined;
   const profile = createDefaultProfileConfig({
-    accounts: input.accounts,
+    app: input.app,
     preferences: input.preferences,
-    access: {
-      ...input.preferences?.access,
-      requireMentionInGroup: input.preferences?.requireMentionInGroup,
-    },
-    secrets: input.secrets,
     omp: await createBootstrapOmpConfig(input.ompBinaryPath),
   });
   if (workspace) profile.workspaces = { ...profile.workspaces, default: workspace };

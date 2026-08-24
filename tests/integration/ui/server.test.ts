@@ -30,7 +30,6 @@ async function makeControls(profile: string): Promise<any> {
     configPath,
     profile,
     cfg: runtimeProfileConfig(root, profile),
-    profileConfig: root.profiles[profile]!,
     ownerRefreshState: 'unknown',
     processId: 'test',
     refreshOwner: async () => {},
@@ -84,14 +83,14 @@ beforeEach(async () => {
   configPath = join(rootDir, 'config.json');
   await mkdir(join(rootDir, 'profiles', 'personal'), { recursive: true });
   await saveRootConfig(
-    createRootConfig('personal', createDefaultProfileConfig({ accounts: { app } })),
+    createRootConfig('personal', createDefaultProfileConfig({ app })),
     configPath,
   );
   // second profile 'work' on disk (offline)
   const rc = (await loadRootConfig(configPath))!;
   await mkdir(join(rootDir, 'profiles', 'work'), { recursive: true });
   rc.profiles.work = createDefaultProfileConfig({
-    accounts: { app: { ...app, id: 'cli_work' } },
+    app: { ...app, id: 'cli_work' },
   });
   await saveRootConfig(rc, configPath);
 
@@ -149,7 +148,7 @@ describe('ui server (supervisor-backed)', () => {
     );
     expect(view.mode).toBe('team');
     expect(view.live).toBe(true);
-    expect(online.get('personal').profileConfig.mode).toBe('team'); // in-memory controls updated
+    expect(online.get('personal').cfg.mode).toBe('team'); // in-memory controls updated
 
     const saved = JSON.parse(await readFile(configPath, 'utf8'));
     expect(saved.profiles.personal.mode).toBe('team');
@@ -194,7 +193,7 @@ describe('ui server (supervisor-backed)', () => {
       }),
     );
     expect(set.chatRequireMention).toEqual({ oc_grp: false });
-    expect(online.get('personal').profileConfig.access.chatRequireMention).toEqual({
+    expect(online.get('personal').cfg.access.chatRequireMention).toEqual({
       oc_grp: false,
     });
 

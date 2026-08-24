@@ -40,13 +40,13 @@ import { helpCard, resumeCard, statusCard, workspacesCard } from '../card/templa
 import { resolveAppPaths } from '../config/app-paths';
 import * as configOps from '../config/config-ops';
 import type { ProfileAccess, ProfileConfig, ProfileMode } from '../config/profile-schema';
-import type { AppConfig, AppPreferences, TenantBrand } from '../config/schema';
+import type { AppCredentials, AppPreferences, TenantBrand } from '../config/schema';
 import {
   getMaxConcurrentRuns,
   getRequireMentionInGroup,
   getRunIdleTimeoutMs,
+  keystoreAppCredentials,
 } from '../config/schema';
-import { buildEncryptedAccountConfig } from '../config/store';
 import { log } from '../core/logger';
 import { isMeetingNo } from '../meeting/api';
 import { describeMeetingError, type MeetingManager } from '../meeting/manager';
@@ -68,7 +68,6 @@ import type { WorkspaceStore } from '../workspace/store';
 
 export interface Controls {
   profile: string;
-  profileConfig: ProfileConfig;
   botOwnerId?: string;
   ownerRefreshState: OwnerRefreshState;
   ownerRefreshedAt?: number;
@@ -80,8 +79,8 @@ export interface Controls {
   exit(): Promise<void>;
   /** Path to the config file the bridge was started with. */
   configPath: string;
-  /** The current app config (snapshot at startChannel time). */
-  cfg: AppConfig;
+  /** Current normalized profile configuration. */
+  cfg: ProfileConfig;
   /** This process's short id in the registry. Used by /ps to highlight the
    * receiving process and by /exit to detect self-target. */
   processId: string;
@@ -191,7 +190,7 @@ export async function tryHandleCommand(ctx: CommandContext): Promise<boolean> {
   if (!h) return false;
   if (
     isAdminCommand(cmd) &&
-    !canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId).ok
+    !canRunAdminCommand(ctx.controls.cfg, ctx.controls, ctx.msg.senderId).ok
   ) {
     log.info('command', 'admin-deny', {
       cmd,
@@ -218,7 +217,7 @@ export async function runCommandHandler(
   if (!h) return false;
   if (
     isAdminCommand(name) &&
-    !canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId).ok
+    !canRunAdminCommand(ctx.controls.cfg, ctx.controls, ctx.msg.senderId).ok
   ) {
     log.info('command', 'admin-deny', {
       cmd: name,
@@ -563,7 +562,7 @@ function pruneResumeCandidates(now = Date.now()): void {
 }
 
 function effectiveWorkspaceCwd(ctx: CommandContext): string | undefined {
-  return ctx.workspaces.cwdFor(ctx.scope) ?? ctx.controls.profileConfig.workspaces.default;
+  return ctx.workspaces.cwdFor(ctx.scope) ?? ctx.controls.cfg.workspaces.default;
 }
 
 function selectedResumeCwd(ctx: CommandContext): string | undefined {
@@ -611,10 +610,7 @@ function formatOwnerState(ctx: CommandContext): string {
 
 async function handleStop(args: string, ctx: CommandContext): Promise<void> {
   const targetScope = args.trim();
-  if (
-    targetScope &&
-    !canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId).ok
-  ) {
+  if (targetScope && !canRunAdminCommand(ctx.controls.cfg, ctx.controls, ctx.msg.senderId).ok) {
     await reply(ctx, '❌ 指定 scope 停止任务仅管理员可用。');
     return;
   }
@@ -635,10 +631,7 @@ async function handleStop(args: string, ctx: CommandContext): Promise<void> {
 async function handleTimeout(args: string, ctx: CommandContext): Promise<void> {
   const trimmed = args.trim().toLowerCase();
   const parsed = parseTimeoutTarget(trimmed, ctx.scope);
-  if (
-    parsed.targeted &&
-    !canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId).ok
-  ) {
+  if (parsed.targeted && !canRunAdminCommand(ctx.controls.cfg, ctx.controls, ctx.msg.senderId).ok) {
     await reply(ctx, '❌ 指定 scope 设置 timeout 仅管理员可用。');
     return;
   }
@@ -879,7 +872,7 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
         },
         attachments: [],
         prompt: DOCTOR_ECHO_PROMPT,
-        access: canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId),
+        access: canRunAdminCommand(ctx.controls.cfg, ctx.controls, ctx.msg.senderId),
         nowait: true,
         ttlMs: 60_000,
         observability: { source: 'doctor', stage: 'agent-probe' },
@@ -1000,14 +993,14 @@ function buildDoctorReport(
   const runtimeAccess = runtimeAccessStatus();
   const access =
     ctx.msg.chatType === 'p2p'
-      ? canUseDm(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId)
-      : canUseGroup(ctx.controls.profileConfig, ctx.controls, ctx.msg.chatId, ctx.msg.senderId);
+      ? canUseDm(ctx.controls.cfg, ctx.controls, ctx.msg.senderId)
+      : canUseGroup(ctx.controls.cfg, ctx.controls, ctx.msg.chatId, ctx.msg.senderId);
   return [
     'self-check: ok',
     `profile: ${ctx.controls.profile}`,
     'engine: Oh My Pi (omp)',
     `workspace: ${cwd ?? '(未设置)'}`,
-    `workspace default: ${ctx.controls.profileConfig.workspaces.default ? 'set' : 'missing'}`,
+    `workspace default: ${ctx.controls.cfg.workspaces.default ? 'set' : 'missing'}`,
     `${runtimeAccess.label}: ${runtimeAccess.value}`,
     `access: ${access.ok ? 'ok' : 'denied'} (${access.reason})`,
     `owner API: ${formatOwnerState(ctx)}`,
@@ -1054,15 +1047,15 @@ async function showCurrent(ctx: CommandContext): Promise<void> {
   // so an inline card is sufficient (and avoids creating a managed card we'd
   // never re-touch).
   const card = accountCurrentCard({
-    appId: ctx.controls.cfg.accounts.app.id,
+    appId: ctx.controls.cfg.app.id,
     botName: ctx.channel.botIdentity?.name,
-    tenant: ctx.controls.cfg.accounts.app.tenant,
+    tenant: ctx.controls.cfg.app.tenant,
   });
   await ctx.channel.send(ctx.msg.chatId, { card }, commandReplyOptions(ctx));
 }
 
 async function showForm(ctx: CommandContext): Promise<void> {
-  const card = accountFormCard({ initialTenant: ctx.controls.cfg.accounts.app.tenant });
+  const card = accountFormCard({ initialTenant: ctx.controls.cfg.app.tenant });
   if (ctx.fromCardAction) {
     await recallMessage(ctx, ctx.msg.messageId);
   }
@@ -1153,17 +1146,9 @@ async function submitAccount(ctx: CommandContext): Promise<void> {
       return;
     }
 
-    // Store the plaintext secret in the encrypted keystore and persist an
-    // exec-provider SecretRef instead of raw secret material.
+    // Store plaintext in the encrypted keystore; config keeps only its key.
     try {
-      const appPaths = commandProfilePaths(ctx);
-      const newCfg = await buildEncryptedAccountConfig(
-        appId,
-        tenant,
-        ctx.controls.cfg.preferences,
-        appPaths,
-      );
-      await saveAccountConfig(ctx, newCfg, appSecret);
+      await saveAccountConfig(ctx, keystoreAppCredentials(appId, tenant), appSecret);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await finishFailure(`保存凭据失败：${msg}`);
@@ -1201,7 +1186,7 @@ async function handleInvite(args: string, ctx: CommandContext): Promise<void> {
     .map((token) => token.toLowerCase());
 
   if (tokens.includes('all') && tokens.includes('group')) {
-    const list = new Set(ctx.controls.profileConfig.access.allowedChats);
+    const list = new Set(ctx.controls.cfg.access.allowedChats);
     let knownChats = ctx.controls.knownChats ?? [];
     if (knownChats.length === 0) {
       knownChats = await fetchKnownChats(ctx.channel);
@@ -1432,14 +1417,14 @@ async function showConfigForm(ctx: CommandContext): Promise<void> {
   ]);
 
   const ms = getRunIdleTimeoutMs(ctx.controls.cfg);
-  const access = ctx.controls.profileConfig.access;
+  const access = ctx.controls.cfg.access;
   // Surface the local web console URL when the supervisor (`--web-ui`) is
   // running — read from the host sidecar and confirm the owning process is
   // alive so we don't advertise a stale address.
   const sidecar = await readUiSidecar(commandProfilePaths(ctx).hostUiFile).catch(() => undefined);
   const consoleUrl = sidecar && isAlive(sidecar.pid) ? sidecar.url : undefined;
   const card = configFormCard({
-    mode: ctx.controls.profileConfig.mode,
+    mode: ctx.controls.cfg.mode,
     model: normalizeModelSelection(ctx.controls.cfg.preferences?.model),
     maxConcurrentRuns: getMaxConcurrentRuns(ctx.controls.cfg),
     runIdleTimeoutMinutes: ms ? Math.round(ms / 60_000) : 0,
@@ -1527,10 +1512,10 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
   // Parse deployment mode. Empty / unexpected keeps current.
   const rawMode = String(fv.deploy_mode ?? '').trim();
   const mode: ProfileMode =
-    rawMode === 'team' || rawMode === 'personal' ? rawMode : ctx.controls.profileConfig.mode;
+    rawMode === 'team' || rawMode === 'personal' ? rawMode : ctx.controls.cfg.mode;
 
   const formMsgId = ctx.msg.messageId;
-  const access = ctx.controls.profileConfig.access;
+  const access = ctx.controls.cfg.access;
 
   // Detach: same reason as account submit — Lark's client locks the form
   // while the cardAction handler is running. Wait out FORM_SETTLE_MS *after*
@@ -1549,7 +1534,6 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
       model,
       maxConcurrentRuns,
       runIdleTimeoutMinutes,
-      requireMentionInGroup,
     };
 
     try {
@@ -1604,7 +1588,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
  * failure here is logged and swallowed (the saved-config card already showed).
  */
 async function promptGroupMsgScopeIfMissing(ctx: CommandContext): Promise<void> {
-  const appId = ctx.controls.cfg.accounts.app.id;
+  const appId = ctx.controls.cfg.app.id;
   // `false` = confirmed missing; `null` = lookup failed → don't nag.
   const has = await hasGroupMsgScope(ctx.channel, appId);
   if (has !== false) return;
@@ -1657,10 +1641,10 @@ function commandProfilePaths(ctx: CommandContext) {
 
 async function saveAccountConfig(
   ctx: CommandContext,
-  newCfg: AppConfig,
+  newApp: AppCredentials,
   plaintextSecret: string,
 ): Promise<void> {
-  return configOps.saveAccountConfig(ctx.controls, newCfg, plaintextSecret);
+  return configOps.saveAccountConfig(ctx.controls, newApp, plaintextSecret);
 }
 
 async function savePreferencesConfig(
@@ -1685,7 +1669,7 @@ async function handleMeeting(args: string, ctx: CommandContext): Promise<void> {
   const rest = parts.slice(1).join(' ');
   const manager = ctx.controls.meeting;
 
-  if (!ctx.controls.profileConfig.meeting.enabled) {
+  if (!ctx.controls.cfg.meeting.enabled) {
     await reply(
       ctx,
       '会议智能体未启用。在 `/config` 或 Web 控制台里开启「会议智能体」后重启 bot 即可。',
@@ -1713,7 +1697,7 @@ async function handleMeeting(args: string, ctx: CommandContext): Promise<void> {
         await reply(
           ctx,
           `✅ 已入会 **${session.topic ?? meetingNo}**\n` +
-            `会议号 ${session.meetingNo} · 会中发 \`${ctx.controls.profileConfig.meeting.trigger} 你的问题\` 可以问我\n` +
+            `会议号 ${session.meetingNo} · 会中发 \`${ctx.controls.cfg.meeting.trigger} 你的问题\` 可以问我\n` +
             '`/meeting notes` 总结 · `/meeting leave` 离会',
         );
       } catch (err) {

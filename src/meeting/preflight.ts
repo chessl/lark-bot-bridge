@@ -218,8 +218,8 @@ export async function checkMeetingPreflight(
         : {}),
       allowBootstrap: false,
     });
-    const appId = runtime.cfg.accounts.app.id;
-    const tenant = runtime.cfg.accounts.app.tenant;
+    const appId = runtime.cfg.app.id;
+    const tenant = runtime.cfg.app.tenant;
     const client = createClient({
       appId,
       appSecret: await resolveAppSecret(runtime.cfg, runtime.appPaths),

@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveAppPaths } from '../../../src/config/app-paths';
-import { runtimeLockMetaFile, withProfileAndAppLocks } from '../../../src/runtime/locks';
+import { runtimeLockMetaFile } from '../../../src/runtime/locks';
+import { withRuntimeLocks } from '../../helpers/runtime-locks';
 import {
   type ProcessEntry,
   readRegistry,
   register,
-  sameAppLiveOthers,
   unregisterSync,
 } from '../../../src/runtime/registry';
 
@@ -71,7 +71,7 @@ describe('registry and runtime lock integration', () => {
     await writeJson(registryFile, { entries: [lockedEntry] });
 
     const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'work' });
-    await withProfileAndAppLocks(lockedPaths, 'cli_existing', async () => {
+    await withRuntimeLocks(lockedPaths, 'cli_existing', async () => {
       const registered = await register({
         appId: 'cli_new',
         tenant: 'feishu',
@@ -103,7 +103,7 @@ describe('registry and runtime lock integration', () => {
     });
 
     const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'work' });
-    await withProfileAndAppLocks(lockedPaths, 'cli_existing', async () => {
+    await withRuntimeLocks(lockedPaths, 'cli_existing', async () => {
       const registered = await register({
         appId: 'cli_new',
         tenant: 'feishu',
@@ -120,28 +120,6 @@ describe('registry and runtime lock integration', () => {
     });
   });
 
-  it('filters stale same-app conflicts using runtime lock metadata', async () => {
-    const root = await makeRoot();
-    const registryFile = join(root, 'registry', 'processes.json');
-    await writeJson(registryFile, {
-      entries: [
-        entry({
-          id: 'stale-same-app',
-          pid: 999_999_992,
-          profileName: 'work',
-          appId: 'cli_existing',
-        }),
-      ],
-    });
-
-    const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'work' });
-    await withProfileAndAppLocks(lockedPaths, 'cli_existing', async () => {
-      await expect(sameAppLiveOthers('cli_existing', process.pid, registryFile)).resolves.toEqual(
-        [],
-      );
-    });
-  });
-
   it('fails closed instead of pruning when live lock metadata is unreadable', async () => {
     const root = await makeRoot();
     const registryFile = join(root, 'registry', 'processes.json');
@@ -154,7 +132,7 @@ describe('registry and runtime lock integration', () => {
     await writeJson(registryFile, { entries: [lockedEntry] });
 
     const lockedPaths = resolveAppPaths({ rootDir: root, profile: 'work' });
-    await withProfileAndAppLocks(lockedPaths, 'cli_existing', async () => {
+    await withRuntimeLocks(lockedPaths, 'cli_existing', async () => {
       await writeFile(runtimeLockMetaFile(lockedPaths.profileLockFile), 'not json', 'utf8');
 
       await expect(

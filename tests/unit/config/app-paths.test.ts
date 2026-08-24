@@ -80,7 +80,6 @@ describe('resolveAppPaths', () => {
     expect(paths.daemonStdoutFile).toBe(join(profileDir, 'logs', 'daemon', 'daemon-stdout.log'));
     expect(paths.daemonStderrFile).toBe(join(profileDir, 'logs', 'daemon', 'daemon-stderr.log'));
     expect(paths.uiFile).toBe(join(profileDir, 'ui.json'));
-    expect(paths.secretsGetterScript).toBe(join(root, 'secrets-getter'));
   });
 
   it('uses LARK_CHANNEL_HOME only for the root directory, not profile selection', async () => {

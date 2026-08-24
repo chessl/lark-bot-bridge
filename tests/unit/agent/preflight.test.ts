@@ -11,14 +11,14 @@ import {
 
 describe('agent preflight diagnostics', () => {
   afterEach(() => {
-    vi.doUnmock('../../../src/platform/spawn');
+    vi.doUnmock('node:child_process');
     vi.resetModules();
   });
 
   it('classifies version checks killed by a signal without exposing code null', async () => {
     vi.resetModules();
-    vi.doMock('../../../src/platform/spawn', () => ({
-      spawnProcess: vi.fn(() => fakeSignaledChild()),
+    vi.doMock('node:child_process', () => ({
+      spawn: vi.fn(() => fakeSignaledChild()),
     }));
     const { checkAgentVersion } = await import('../../../src/agent/preflight.js');
 

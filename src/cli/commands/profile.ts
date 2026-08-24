@@ -208,7 +208,7 @@ export async function runProfileExport(
 
   const profile = cloneJson(selected);
   if (opts.includeSecrets) {
-    profile.accounts.app.secret = await resolveAppSecret(
+    profile.app.secret = await resolveAppSecret(
       runtimeProfileConfig(root, name),
       resolveAppPaths({ rootDir, profile: name }),
     );
@@ -216,14 +216,12 @@ export async function runProfileExport(
   const exported: RootConfig = {
     schemaVersion: 2,
     activeProfile: name,
-    ...(opts.includeSecrets && root.secrets ? { secrets: cloneJson(root.secrets) } : {}),
     profiles: {
       [name]: profile,
     },
   };
   if (!opts.includeSecrets) {
-    delete profile.secrets;
-    profile.accounts.app.secret = '[REDACTED]';
+    profile.app.secret = '[REDACTED]';
   }
   const body = formatRootConfig(exported);
 

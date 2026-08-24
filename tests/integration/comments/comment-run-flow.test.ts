@@ -290,7 +290,6 @@ async function createHarness(
       scopedRuns,
       controls: {
         profile: 'work',
-        profileConfig,
         botOwnerId: 'ou-owner',
         ownerRefreshState: 'ok',
         async refreshOwner() {},
@@ -306,7 +305,7 @@ async function createHarness(
 
 function profile(defaultWorkspace: string): ProfileConfig {
   const config = createDefaultProfileConfig({
-    accounts: { app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' } },
+    app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' },
     access: { allowedUsers: ['ou-user'] },
   });
   config.workspaces.default = defaultWorkspace;

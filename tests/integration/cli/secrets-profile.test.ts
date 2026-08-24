@@ -1,12 +1,8 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  removeAppSecret,
-  resolveSecretAcrossProfiles,
-  setAppSecret,
-} from '../../../src/cli/commands/secrets';
+import { afterEach, describe, expect, it } from 'vitest';
+import { removeAppSecret, setAppSecret } from '../../../src/cli/commands/secrets';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import {
   clearKeystoreDerivedKeyCache,
@@ -26,42 +22,11 @@ async function makeRoot(): Promise<string> {
 }
 
 afterEach(async () => {
-  vi.restoreAllMocks();
   clearKeystoreDerivedKeyCache();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe('profile-aware secrets commands', () => {
-  it('resolves secrets active-first, then by profile name, and warns on duplicates', async () => {
-    const root = await makeRoot();
-    await writeProfiles(root, 'codex-dev', ['alpha', 'codex-dev', 'zeta']);
-    const duplicate = secretKeyForApp('cli_duplicate');
-    await setSecret(
-      duplicate,
-      'from-active',
-      resolveAppPaths({ rootDir: root, profile: 'codex-dev' }),
-    );
-    await setSecret(duplicate, 'from-alpha', resolveAppPaths({ rootDir: root, profile: 'alpha' }));
-    const fallback = secretKeyForApp('cli_fallback');
-    await setSecret(fallback, 'from-zeta', resolveAppPaths({ rootDir: root, profile: 'zeta' }));
-    await setSecret(fallback, 'from-alpha', resolveAppPaths({ rootDir: root, profile: 'alpha' }));
-    const warnings: string[] = [];
-
-    await expect(
-      resolveSecretAcrossProfiles(duplicate, root, (msg) => warnings.push(msg)),
-    ).resolves.toBe('from-active');
-    await expect(
-      resolveSecretAcrossProfiles(fallback, root, (msg) => warnings.push(msg)),
-    ).resolves.toBe('from-alpha');
-
-    expect(warnings).toEqual([
-      expect.stringContaining(
-        'secret app-cli_duplicate exists in multiple profiles; using codex-dev',
-      ),
-      expect.stringContaining('secret app-cli_fallback exists in multiple profiles; using alpha'),
-    ]);
-  });
-
   it('sets and removes secrets in an explicit profile or the active profile', async () => {
     const root = await makeRoot();
     await writeProfiles(root, 'codex-dev', ['alpha', 'codex-dev']);
@@ -87,25 +52,6 @@ describe('profile-aware secrets commands', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('uses LARK_CHANNEL_PROFILE to resolve duplicate secret ids within one profile', async () => {
-    const root = await makeRoot();
-    await writeProfiles(root, 'codex-dev', ['alpha', 'codex-dev']);
-    const duplicate = secretKeyForApp('cli_duplicate');
-    await setSecret(
-      duplicate,
-      'from-codex',
-      resolveAppPaths({ rootDir: root, profile: 'codex-dev' }),
-    );
-    await setSecret(duplicate, 'from-alpha', resolveAppPaths({ rootDir: root, profile: 'alpha' }));
-    const warnings: string[] = [];
-
-    await expect(
-      resolveSecretAcrossProfiles(duplicate, root, (msg) => warnings.push(msg), 'alpha'),
-    ).resolves.toBe('from-alpha');
-
-    expect(warnings).toEqual([]);
-  });
-
   it('caches the derived keystore key within one secrets process', async () => {
     const root = await makeRoot();
     await writeProfiles(root, 'claude', ['claude']);
@@ -125,12 +71,10 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
   const profiles: RootConfig['profiles'] = {};
   for (const name of names) {
     profiles[name] = createDefaultProfileConfig({
-      accounts: {
-        app: {
-          id: `cli_${name.replace(/[^A-Za-z0-9]/g, '_')}`,
-          secret: '${APP_SECRET}',
-          tenant: 'feishu',
-        },
+      app: {
+        id: `cli_${name.replace(/[^A-Za-z0-9]/g, '_')}`,
+        secret: '${APP_SECRET}',
+        tenant: 'feishu',
       },
       omp: { binaryPath: '/usr/local/bin/omp' },
     });

@@ -107,12 +107,10 @@ describe('profile-aware service commands', () => {
         appLockFile: (appId: string) => `/tmp/lark-channel-home/registry/locks/app/${appId}.lock`,
       },
       cfg: {
-        accounts: {
-          app: {
-            id: 'cli_codex',
-            secret: '${APP_SECRET}',
-            tenant: 'feishu',
-          },
+        app: {
+          id: 'cli_codex',
+          secret: '${APP_SECRET}',
+          tenant: 'feishu',
         },
       },
     });
@@ -315,12 +313,10 @@ describe('profile-aware service commands', () => {
         appLockFile: (appId: string) => `/tmp/lark-channel-home/registry/locks/app/${appId}.lock`,
       },
       cfg: {
-        accounts: {
-          app: {
-            id: 'cli_claude',
-            secret: '${APP_SECRET}',
-            tenant: 'feishu',
-          },
+        app: {
+          id: 'cli_claude',
+          secret: '${APP_SECRET}',
+          tenant: 'feishu',
         },
       },
     });

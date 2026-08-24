@@ -104,7 +104,6 @@ async function createHarness(): Promise<{
   const { tryHandleCommand } = await import('../../../src/commands/index.js');
   const controls = {
     profile: 'claude',
-    profileConfig,
     botOwnerId: 'ou-owner',
     ownerRefreshState: 'ok',
     async refreshOwner() {},
@@ -136,7 +135,7 @@ async function createHarness(): Promise<{
           agent,
           activeRuns,
           workspaces,
-          profileConfig: () => controls.profileConfig,
+          profileConfig: () => controls.cfg,
         }),
         controls,
       }),
@@ -145,7 +144,7 @@ async function createHarness(): Promise<{
 
 function appConfig(defaultWorkspace: string): ProfileConfig {
   const config = createDefaultProfileConfig({
-    accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
+    app: { id: 'app-id', secret: 'secret', tenant: 'feishu' },
     access: { admins: ['ou-admin'] },
   });
   config.workspaces.default = defaultWorkspace;

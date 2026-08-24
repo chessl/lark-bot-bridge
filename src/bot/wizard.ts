@@ -1,6 +1,6 @@
 import { registerApp } from '@larksuite/channel';
 import qrcode from 'qrcode-terminal';
-import type { AppConfig, TenantBrand } from '../config/schema';
+import type { AppCredentials, TenantBrand } from '../config/schema';
 
 export interface ScopeGrantLink {
   /** Authorization URL — opening it lands on the confirm page with the new
@@ -54,7 +54,7 @@ export async function requestScopeGrantLink(opts: {
   });
 }
 
-export async function runRegistrationWizard(): Promise<AppConfig> {
+export async function runRegistrationWizard(): Promise<{ app: AppCredentials }> {
   console.log('\n未检测到飞书应用配置，进入扫码创建向导。\n');
 
   const result = await registerApp({
@@ -101,13 +101,11 @@ export async function runRegistrationWizard(): Promise<AppConfig> {
     );
   }
 
-  const cfg: AppConfig = {
-    accounts: {
-      app: {
-        id: result.client_id,
-        secret: result.client_secret,
-        tenant,
-      },
+  const cfg: { app: AppCredentials } = {
+    app: {
+      id: result.client_id,
+      secret: result.client_secret,
+      tenant,
     },
   };
 

@@ -39,9 +39,9 @@ describe('writeNewProfile', () => {
 
     expect((await writeNewProfile({ ...base, appId: 'cli_a' }, root)).profile).toBe('personal');
     await expect(writeNewProfile({ ...base, appId: 'cli_b' }, root)).rejects.toThrow(/已存在/);
-    expect(
-      (await loadRootConfig(join(root, 'config.json')))?.profiles.personal?.accounts.app.id,
-    ).toBe('cli_a');
+    expect((await loadRootConfig(join(root, 'config.json')))?.profiles.personal?.app.id).toBe(
+      'cli_a',
+    );
 
     expect(
       (await writeNewProfile({ ...base, profile: 'work', appId: 'cli_b' }, root)).profile,
@@ -64,7 +64,7 @@ describe('writeNewProfile', () => {
       root,
     );
     expect(created.profile).toBe('助手');
-    expect((await loadRootConfig(join(root, 'config.json')))?.profiles.助手?.accounts.app.id).toBe(
+    expect((await loadRootConfig(join(root, 'config.json')))?.profiles.助手?.app.id).toBe(
       'cli_nimo',
     );
   });

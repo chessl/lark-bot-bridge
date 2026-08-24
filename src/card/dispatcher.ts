@@ -69,8 +69,8 @@ export async function handleCardAction(deps: CardDispatchDeps): Promise<void> {
 
   const accessDecision =
     mode === 'p2p'
-      ? canUseDm(deps.controls.profileConfig, deps.controls, operatorId)
-      : canUseGroup(deps.controls.profileConfig, deps.controls, chatId, operatorId);
+      ? canUseDm(deps.controls.cfg, deps.controls, operatorId)
+      : canUseGroup(deps.controls.cfg, deps.controls, chatId, operatorId);
   if (!accessDecision.ok) {
     log.info('cardAction', 'skip-not-allowed-user', {
       operator: operatorId.slice(-6),

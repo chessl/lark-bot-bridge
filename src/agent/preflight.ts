@@ -1,4 +1,4 @@
-import { spawnProcess } from '../platform/spawn';
+import { spawn } from 'node:child_process';
 
 export type LocalAgentId = 'omp';
 
@@ -99,7 +99,7 @@ export async function checkAgentVersion(input: CheckAgentVersionInput): Promise<
 
     const child = (() => {
       try {
-        return spawnProcess(executable, [...args], {
+        return spawn(executable, [...args], {
           stdio: ['ignore', 'pipe', 'pipe'],
         });
       } catch (err) {

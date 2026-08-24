@@ -13,6 +13,7 @@ import {
 import { checkRuntimeLock, type RuntimeLockMeta } from '../../runtime/locks';
 import {
   materializeEnvSecretForService,
+  type ProfileRuntime,
   resolveProfileRuntime,
 } from '../../runtime/profile-runtime';
 import { type ProcessEntry, readRegistry } from '../../runtime/registry';
@@ -82,7 +83,7 @@ function serviceFileExists(serviceId: string): boolean {
 /** Find the live registry entry (with botName) for a classic profile, if any. */
 async function lookupProfileEntry(profile: string): Promise<ProcessEntry | undefined> {
   const runtime = await maybeResolveProfileRuntime(profile);
-  const appId = runtime?.cfg.accounts?.app?.id;
+  const appId = runtime?.cfg.app?.id;
   if (!appId) return undefined;
   return readRegistry().find(
     (e) => e.appId === appId && e.profileName === profile && Boolean(e.botName),
@@ -146,13 +147,8 @@ function printServiceFailure(verb: 'started' | 'restarted', stderr: string): voi
 
 async function ensureBridgeConfigured(
   opts: ServiceStartOptions,
-): Promise<
-  Pick<
-    Awaited<ReturnType<typeof resolveProfileRuntime>>,
-    'profile' | 'cfg' | 'profileConfig' | 'appPaths' | 'configPath'
-  >
-> {
-  const { cfg, profile, profileConfig, appPaths, configPath } = await resolveProfileRuntime({
+): Promise<Pick<ProfileRuntime, 'profile' | 'cfg' | 'appPaths' | 'configPath'>> {
+  const { cfg, profile, appPaths, configPath } = await resolveProfileRuntime({
     profile: opts.profile,
     workspace: opts.workspace,
     appId: opts.appId,
@@ -165,7 +161,7 @@ async function ensureBridgeConfigured(
     console.error('请重新运行 `start` 完成首次扫码向导或传入已有应用信息。');
     process.exit(1);
   }
-  return { profile, cfg, profileConfig, appPaths, configPath };
+  return { profile, cfg, appPaths, configPath };
 }
 
 async function assertLockNotHeldByAnotherRuntime(
@@ -278,7 +274,7 @@ async function reportConnectAfter(
   adapter: ServiceAdapter,
 ): Promise<void> {
   const { cfg } = await resolveProfileRuntime({ profile, allowBootstrap: false });
-  const appId = cfg.accounts?.app?.id ?? '';
+  const appId = cfg.app?.id ?? '';
   const beforePids = new Set(
     readRegistry()
       .filter((e) => e.appId === appId && e.profileName === profile)
@@ -359,12 +355,7 @@ export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<v
   const { profile, cfg, appPaths } = await ensureBridgeConfigured(opts);
   const adapter = requireAdapter('start', profile, classicRunArgs(profile));
   await assertLockNotHeldByAnotherRuntime('profile', appPaths.profileLockFile, adapter, opts);
-  await assertLockNotHeldByAnotherRuntime(
-    'app',
-    appPaths.appLockFile(cfg.accounts.app.id),
-    adapter,
-    opts,
-  );
+  await assertLockNotHeldByAnotherRuntime('app', appPaths.appLockFile(cfg.app.id), adapter, opts);
   await materializeEnvSecretForService({ profile });
   await reportConnectAfter('start', 'bot', profile, adapter);
 }

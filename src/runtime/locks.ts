@@ -33,36 +33,6 @@ export class RuntimeLockConflictError extends Error {
   }
 }
 
-export async function withProfileAndAppLocks<T>(
-  paths: Pick<AppPaths, 'profile' | 'profileLockFile' | 'appLockFile'>,
-  appId: string,
-  fn: (locks: AcquiredRuntimeLock[]) => Promise<T> | T,
-): Promise<T> {
-  const acquired: AcquiredRuntimeLock[] = [];
-  try {
-    acquired.push(
-      await acquireRuntimeLock({
-        kind: 'profile',
-        target: paths.profileLockFile,
-        profile: paths.profile,
-      }),
-    );
-    acquired.push(
-      await acquireRuntimeLock({
-        kind: 'app',
-        target: paths.appLockFile(appId),
-        profile: paths.profile,
-        appId,
-      }),
-    );
-    return await fn([...acquired]);
-  } finally {
-    for (const lock of acquired.reverse()) {
-      await lock.release().catch(() => {});
-    }
-  }
-}
-
 export async function acquireAppRuntimeLock(
   paths: Pick<AppPaths, 'profile' | 'appLockFile'>,
   appId: string,

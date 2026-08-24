@@ -71,20 +71,18 @@ describe('profile-aware account and config commands', () => {
 
     const root = await waitForRoot(
       h.rootDir,
-      (candidate) => candidate.profiles.claude?.accounts.app.id === 'cli_new',
+      (candidate) => candidate.profiles.claude?.app.id === 'cli_new',
     );
     expect(root.schemaVersion).toBe(2);
     expect(root.profiles['codex-dev']).toBeDefined();
-    expect(root.profiles.claude?.accounts.app).toMatchObject({
+    expect(root.profiles.claude?.app).toMatchObject({
       id: 'cli_new',
       tenant: 'lark',
       secret: {
-        source: 'exec',
-        provider: 'bridge',
+        source: 'keystore',
         id: secretKeyForApp('cli_new'),
       },
     });
-    expect(root.secrets?.providers?.bridge?.command).toContain('secrets-getter');
     expect((root as unknown as { accounts?: unknown }).accounts).toBeUndefined();
     await expect(
       getSecret(
@@ -111,14 +109,12 @@ async function createHarness(
   const workspace = join(rootDir, 'workspace');
   await mkdir(workspace, { recursive: true });
   const root = await writeRoot(rootDir, workspace, options.preferences);
-  const profileConfig = root.profiles.claude!;
   const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
   const channel = createFakeChannel();
   const sessions = new SessionStore(appPaths.sessionsFile);
   const workspaces = new WorkspaceStore(appPaths.workspacesFile);
   const controls = {
     profile: 'claude',
-    profileConfig,
     botOwnerId: 'ou-admin',
     ownerRefreshState: 'ok',
     async refreshOwner() {},
@@ -134,7 +130,7 @@ async function createHarness(
     agent,
     activeRuns,
     workspaces,
-    profileConfig: () => controls.profileConfig,
+    profileConfig: () => controls.cfg,
   });
 
   return {
@@ -167,15 +163,11 @@ async function writeRoot(
     activeProfile: 'claude',
     profiles: {
       claude: createDefaultProfileConfig({
-        accounts: {
-          app: { id: 'cli_old', secret: '${APP_SECRET}', tenant: 'feishu' },
-        },
+        app: { id: 'cli_old', secret: '${APP_SECRET}', tenant: 'feishu' },
         access: { admins: ['ou-admin'] },
       }),
       'codex-dev': createDefaultProfileConfig({
-        accounts: {
-          app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' },
-        },
+        app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' },
         omp: { binaryPath: '/usr/local/bin/omp' },
       }),
     },

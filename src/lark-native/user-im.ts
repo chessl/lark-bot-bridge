@@ -347,23 +347,23 @@ async function resolveNativeContext(ctx: UserImContext): Promise<NativeContext> 
     allowBootstrap: false,
   });
   const appSecret = await resolveAppSecret(runtime.cfg, runtime.appPaths);
-  const tenant = runtime.cfg.accounts.app.tenant;
+  const tenant = runtime.cfg.app.tenant;
   const domain = tenant === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn';
   return {
     profile: runtime.appPaths.profile,
     tenant,
-    appId: runtime.cfg.accounts.app.id,
+    appId: runtime.cfg.app.id,
     appSecret,
     client:
       ctx.client ??
       new Client({
-        appId: runtime.cfg.accounts.app.id,
+        appId: runtime.cfg.app.id,
         appSecret,
         domain,
         source: 'lark-bot-bridge',
       }),
     authFile: runtime.appPaths.userAuthFile,
-    authLockTarget: runtime.appPaths.userAuthLockTarget(runtime.cfg.accounts.app.id),
+    authLockTarget: runtime.appPaths.userAuthLockTarget(runtime.cfg.app.id),
     credentialStore: ctx.credentialStore ?? new OsKeychain(),
   };
 }

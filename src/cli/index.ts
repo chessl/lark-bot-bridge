@@ -9,7 +9,7 @@ import {
   runProfileUse,
 } from './commands/profile';
 import { runKillCli, runPs } from './commands/ps';
-import { runSecretsGet, runSecretsList, runSecretsRemove, runSecretsSet } from './commands/secrets';
+import { runSecretsList, runSecretsRemove, runSecretsSet } from './commands/secrets';
 import {
   runServiceRestart,
   runServiceStart,
@@ -230,13 +230,6 @@ program
 const secrets = program
   .command('secrets')
   .description("Manage the bridge's encrypted secret keystore (~/.lark-bot-bridge/secrets.enc)");
-
-secrets
-  .command('get')
-  .description('Exec-provider protocol: read a JSON request from stdin and write JSON to stdout.')
-  .action(async () => {
-    await runSecretsGet();
-  });
 
 secrets
   .command('set')

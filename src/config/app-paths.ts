@@ -20,7 +20,6 @@ export interface AppPaths {
   secretsFile: string;
   keystoreSaltFile: string;
   userAuthFile: string;
-  secretsGetterScript: string;
   mediaDir: string;
   callbackNoncesFile: string;
   activeDeliveriesFile: string;
@@ -73,7 +72,6 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
     secretsFile: join(profileDir, 'secrets.enc'),
     keystoreSaltFile: join(profileDir, '.keystore.salt'),
     userAuthFile: join(profileDir, 'user-auth.json'),
-    secretsGetterScript: join(rootDir, 'secrets-getter'),
     callbackNoncesFile: join(profileDir, 'callback-nonces.json'),
     activeDeliveriesFile: join(profileDir, 'active-deliveries.json'),
     mediaDir: join(profileDir, 'media'),

@@ -9,22 +9,16 @@ import {
   saveRootConfig,
   withConfigFileLock,
 } from './profile-store';
-import { type AppConfig, type AppPreferences, secretKeyForApp } from './schema';
+import { type AppCredentials, type AppPreferences, secretKeyForApp } from './schema';
 
 /**
- * The mutable per-profile runtime state these ops read and keep in sync. The
- * running bridge's `Controls` object structurally satisfies this, so both the
- * chat `/config` handlers and the local web UI's REST layer drive config
- * changes through the exact same disk-write + in-memory-refresh logic (no
- * divergent second implementation). `cfg` / `profileConfig` are reassigned in
- * place after a successful save so the live process picks up changes without a
- * restart — mirroring how the chat form already applies preferences/access.
+ * The running bridge's `Controls` object satisfies this state. Chat commands
+ * and the local UI therefore share disk writes and live in-memory refreshes.
  */
 export interface MutableProfileState {
   configPath: string;
   profile: string;
-  cfg: AppConfig;
-  profileConfig: ProfileConfig;
+  cfg: ProfileConfig;
 }
 
 /** App paths for a profile, derived from its config path. */
@@ -56,7 +50,6 @@ export async function saveAccessConfig(
       access,
     };
     await saveRootConfig(root, state.configPath);
-    state.profileConfig = root.profiles[state.profile]!;
     state.cfg = runtimeProfileConfig(root, state.profile);
     log.info('config-ops', 'access-mutated', {
       allowedUsers: access.allowedUsers.length,
@@ -75,11 +68,11 @@ export async function saveAccessConfig(
  */
 export async function saveAccountConfig(
   state: MutableProfileState,
-  newCfg: AppConfig,
+  newApp: AppCredentials,
   plaintextSecret: string,
 ): Promise<void> {
   const appPaths = profileAppPaths(state);
-  await setSecret(secretKeyForApp(newCfg.accounts.app.id), plaintextSecret, appPaths);
+  await setSecret(secretKeyForApp(newApp.id), plaintextSecret, appPaths);
 
   const root = await loadRootConfig(state.configPath);
   if (!root) throw new Error('config not initialized');
@@ -88,11 +81,9 @@ export async function saveAccountConfig(
   if (!profile) throw new Error(`profile not found: ${state.profile}`);
   root.profiles[state.profile] = {
     ...profile,
-    accounts: newCfg.accounts,
+    app: newApp,
   };
-  if (newCfg.secrets) root.secrets = newCfg.secrets;
   await saveRootConfig(root, state.configPath);
-  state.profileConfig = root.profiles[state.profile]!;
   state.cfg = runtimeProfileConfig(root, state.profile);
 }
 
@@ -111,17 +102,12 @@ export async function savePreferencesConfig(
 
     const profile = root.profiles[state.profile];
     if (!profile) throw new Error(`profile not found: ${state.profile}`);
-    const {
-      requireMentionInGroup: _requireMention,
-      access: _access,
-      ...profilePreferences
-    } = preferences;
     root.profiles[state.profile] = {
       ...profile,
       mode,
       preferences: {
         ...profile.preferences,
-        ...profilePreferences,
+        ...preferences,
       },
       access: {
         ...profile.access,
@@ -130,7 +116,6 @@ export async function savePreferencesConfig(
       ...(meeting ? { meeting } : {}),
     };
     await saveRootConfig(root, state.configPath);
-    state.profileConfig = root.profiles[state.profile]!;
     state.cfg = runtimeProfileConfig(root, state.profile);
   });
 }

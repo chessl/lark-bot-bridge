@@ -278,7 +278,6 @@ async function createHarness(): Promise<Harness> {
   await saveRootConfig(createRootConfig('claude', profileConfig), configPath);
   const controls = {
     profile: 'claude',
-    profileConfig,
     botOwnerId: 'ou-owner',
     ownerRefreshState: 'ok',
     ownerRefreshedAt: 1_700_000_000_000,
@@ -311,7 +310,7 @@ async function createHarness(): Promise<Harness> {
         agent,
         activeRuns,
         workspaces,
-        profileConfig: () => controls.profileConfig,
+        profileConfig: () => controls.cfg,
       }),
       controls,
     });
@@ -327,7 +326,7 @@ async function createHarness(): Promise<Harness> {
 
 function appConfig(defaultWorkspace: string): ProfileConfig {
   const config = createDefaultProfileConfig({
-    accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
+    app: { id: 'app-id', secret: 'secret', tenant: 'feishu' },
     access: { admins: ['ou-admin'] },
     preferences: { maxConcurrentRuns: 2 },
   });

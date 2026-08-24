@@ -4,7 +4,11 @@ import * as lockfile from 'proper-lockfile';
 import { writeFileAtomic } from '../platform/atomic-write';
 import { resolveAppPaths } from './app-paths';
 import { normalizeProfileConfig, type ProfileConfig, type RootConfig } from './profile-schema';
-import type { AppConfig } from './schema';
+interface RawRootConfig {
+  schemaVersion: 2;
+  activeProfile: string;
+  profiles: Record<string, unknown>;
+}
 
 export async function loadRootConfig(path: string): Promise<RootConfig | undefined> {
   try {
@@ -16,7 +20,7 @@ export async function loadRootConfig(path: string): Promise<RootConfig | undefin
   }
 }
 
-function normalizeRootConfig(root: RootConfig): RootConfig {
+function normalizeRootConfig(root: RawRootConfig): RootConfig {
   const profiles: RootConfig['profiles'] = {};
   for (const [name, profile] of Object.entries(root.profiles)) {
     profiles[name] = normalizeProfileConfig(profile);
@@ -24,7 +28,6 @@ function normalizeRootConfig(root: RootConfig): RootConfig {
   return {
     schemaVersion: 2,
     activeProfile: root.activeProfile,
-    ...(root.secrets ? { secrets: root.secrets } : {}),
     profiles,
   };
 }
@@ -34,51 +37,7 @@ export async function saveRootConfig(root: RootConfig, path: string): Promise<vo
 }
 
 export function formatRootConfig(root: RootConfig): string {
-  return `${JSON.stringify(serializeRootConfig(root), null, 2)}\n`;
-}
-
-type StoredProfileConfig = Pick<
-  ProfileConfig,
-  | 'mode'
-  | 'accounts'
-  | 'secrets'
-  | 'preferences'
-  | 'access'
-  | 'workspaces'
-  | 'omp'
-  | 'attachments'
-  | 'meeting'
->;
-
-type StoredRootConfig = Omit<RootConfig, 'profiles'> & {
-  profiles: Record<string, StoredProfileConfig>;
-};
-
-function serializeRootConfig(root: RootConfig): StoredRootConfig {
-  const profiles: StoredRootConfig['profiles'] = {};
-  for (const [name, profile] of Object.entries(root.profiles)) {
-    profiles[name] = serializeProfileConfig(profile);
-  }
-  return {
-    schemaVersion: 2,
-    activeProfile: root.activeProfile,
-    ...(root.secrets ? { secrets: root.secrets } : {}),
-    profiles,
-  };
-}
-
-function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
-  return {
-    mode: profile.mode,
-    accounts: profile.accounts,
-    ...(profile.secrets ? { secrets: profile.secrets } : {}),
-    preferences: profile.preferences,
-    access: profile.access,
-    workspaces: profile.workspaces,
-    omp: profile.omp,
-    attachments: profile.attachments,
-    meeting: profile.meeting,
-  };
+  return `${JSON.stringify(root, null, 2)}\n`;
 }
 
 export async function withConfigFileLock<T>(configPath: string, fn: () => Promise<T>): Promise<T> {
@@ -108,38 +67,23 @@ export async function readActiveProfile(rootDir?: string): Promise<string | unde
   return root?.activeProfile || undefined;
 }
 
-export function runtimeProfileConfig(root: RootConfig, profile: string): AppConfig & ProfileConfig {
+export function runtimeProfileConfig(root: RootConfig, profile: string): ProfileConfig {
   const cfg = root.profiles[profile];
-  if (!cfg) {
-    throw new Error(`profile not found: ${profile}`);
-  }
-  return {
-    ...cfg,
-    ...((cfg.secrets ?? root.secrets) ? { secrets: cfg.secrets ?? root.secrets } : {}),
-  };
+  if (!cfg) throw new Error(`profile not found: ${profile}`);
+  return cfg;
 }
 
-export function createRootConfig(
-  profile: string,
-  cfg: ProfileConfig,
-  secrets = cfg.secrets,
-): RootConfig {
+export function createRootConfig(profile: string, cfg: ProfileConfig): RootConfig {
   return {
     schemaVersion: 2,
     activeProfile: profile,
-    ...(secrets ? { secrets } : {}),
-    profiles: {
-      [profile]: {
-        ...cfg,
-        secrets: undefined,
-      },
-    },
+    profiles: { [profile]: cfg },
   };
 }
 
-export function isRootConfig(value: unknown): value is RootConfig {
+export function isRootConfig(value: unknown): value is RawRootConfig {
   if (!value || typeof value !== 'object') return false;
-  const root = value as Partial<RootConfig>;
+  const root = value as Partial<RawRootConfig>;
   return root.schemaVersion === 2 && Boolean(root.profiles && typeof root.profiles === 'object');
 }
 

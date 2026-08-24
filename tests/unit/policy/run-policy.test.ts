@@ -3,7 +3,7 @@ import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { evaluateRunPolicy, type RunPolicyInput } from '../../../src/policy/run-policy';
 
 const profileConfig = createDefaultProfileConfig({
-  accounts: { app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' } },
+  app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' },
   omp: { binaryPath: '/usr/local/bin/omp' },
 });
 

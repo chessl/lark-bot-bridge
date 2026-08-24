@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import type { RuntimeLockConflictError } from '../../../src/runtime/locks';
-import { withProfileAndAppLocks } from '../../../src/runtime/locks';
+import { withRuntimeLocks } from '../../helpers/runtime-locks';
 
 const roots: string[] = [];
 
@@ -21,7 +21,7 @@ async function makeRoot(): Promise<string> {
 describe('runtime locks', () => {
   it('acquires profile then app locks and writes OMP-neutral metadata', async () => {
     const paths = resolveAppPaths({ rootDir: await makeRoot(), profile: 'work' });
-    await withProfileAndAppLocks(paths, 'cli_test', async (locks) => {
+    await withRuntimeLocks(paths, 'cli_test', async (locks) => {
       expect(locks.map((lock) => lock.kind)).toEqual(['profile', 'app']);
       for (const lock of locks) {
         expect((await stat(lock.target)).mode & 0o777).toBe(0o600);
@@ -37,22 +37,18 @@ describe('runtime locks', () => {
     const work = resolveAppPaths({ rootDir: root, profile: 'work' });
     const personal = resolveAppPaths({ rootDir: root, profile: 'personal' });
 
-    await withProfileAndAppLocks(work, 'cli_test', async () => {
-      await expect(withProfileAndAppLocks(work, 'cli_other', async () => {})).rejects.toMatchObject(
-        {
+    await withRuntimeLocks(work, 'cli_test', async () => {
+      await expect(withRuntimeLocks(work, 'cli_other', async () => {})).rejects.toMatchObject({
+        kind: 'profile',
+        meta: {
           kind: 'profile',
-          meta: {
-            kind: 'profile',
-            target: work.profileLockFile,
-            profile: 'work',
-            pid: process.pid,
-            startedAt: expect.any(String),
-          },
-        } satisfies Partial<RuntimeLockConflictError>,
-      );
-      await expect(
-        withProfileAndAppLocks(personal, 'cli_test', async () => {}),
-      ).rejects.toMatchObject({
+          target: work.profileLockFile,
+          profile: 'work',
+          pid: process.pid,
+          startedAt: expect.any(String),
+        },
+      } satisfies Partial<RuntimeLockConflictError>);
+      await expect(withRuntimeLocks(personal, 'cli_test', async () => {})).rejects.toMatchObject({
         kind: 'app',
         meta: {
           kind: 'app',

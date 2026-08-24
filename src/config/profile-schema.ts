@@ -1,4 +1,4 @@
-import type { AppCredentials, AppPreferences, SecretsConfig } from './schema';
+import type { AppCredentials, AppPreferences, SecretInput } from './schema';
 
 export interface ProfileAccess {
   allowedUsers: string[];
@@ -85,11 +85,8 @@ export type ProfileMode = 'personal' | 'team';
 export interface ProfileConfig {
   /** Deployment mode switch. Default 'personal'. See {@link ProfileMode}. */
   mode: ProfileMode;
-  accounts: {
-    app: AppCredentials;
-  };
-  secrets?: SecretsConfig;
-  preferences: Omit<AppPreferences, 'access' | 'requireMentionInGroup'>;
+  app: AppCredentials;
+  preferences: AppPreferences;
   access: ProfileAccess;
   workspaces: {
     default?: string;
@@ -103,19 +100,15 @@ export interface ProfileConfig {
 export interface RootConfig {
   schemaVersion: 2;
   activeProfile: string;
-  secrets?: SecretsConfig;
   profiles: Record<string, ProfileConfig>;
 }
 
 export interface CreateDefaultProfileConfigInput {
   /** Deployment mode. Default 'personal'. */
   mode?: ProfileMode;
-  accounts: {
-    app: AppCredentials;
-  };
+  app: AppCredentials;
   preferences?: AppPreferences;
   access?: Partial<ProfileAccess>;
-  secrets?: SecretsConfig;
   omp?: OmpConfig;
 }
 
@@ -132,8 +125,9 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   }
   const raw = input as {
     mode?: unknown;
-    accounts?: unknown;
-    secrets?: SecretsConfig;
+    app?: unknown;
+    /** Legacy v2 shape, accepted once and omitted on the next save. */
+    accounts?: { app?: unknown };
     preferences?: AppPreferences;
     access?: Partial<ProfileAccess>;
     workspaces?: {
@@ -144,7 +138,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     meeting?: unknown;
   };
 
-  const accounts = normalizeAccounts(raw.accounts);
+  const app = normalizeApp(raw.app ?? raw.accounts?.app);
   if (!raw.omp) {
     throw new Error('omp profile requires omp configuration');
   }
@@ -156,8 +150,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
 
   return {
     mode: raw.mode === 'team' ? 'team' : 'personal',
-    accounts,
-    ...(raw.secrets ? { secrets: raw.secrets } : {}),
+    app,
     preferences,
     access,
     workspaces,
@@ -174,22 +167,32 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   };
 }
 
-function normalizeAccounts(input: unknown): ProfileConfig['accounts'] {
+function normalizeApp(input: unknown): AppCredentials {
   if (!input || typeof input !== 'object') {
-    throw new Error('accounts.app is required');
+    throw new Error('app credentials are required');
   }
-  const accounts = input as { app?: Partial<AppCredentials> };
-  const app = accounts.app;
-  if (!app?.id || !app.secret || (app.tenant !== 'feishu' && app.tenant !== 'lark')) {
-    throw new Error('accounts.app is incomplete');
+  const app = input as { id?: unknown; secret?: unknown; tenant?: unknown };
+  if (typeof app.id !== 'string' || !app.id || (app.tenant !== 'feishu' && app.tenant !== 'lark')) {
+    throw new Error('app credentials are incomplete');
   }
   return {
-    app: {
-      id: app.id,
-      secret: app.secret,
-      tenant: app.tenant,
-    },
+    id: app.id,
+    secret: normalizeSecret(app.secret),
+    tenant: app.tenant,
   };
+}
+
+function normalizeSecret(input: unknown): SecretInput {
+  if (typeof input === 'string' && input) return input;
+  if (!input || typeof input !== 'object') throw new Error('app secret is missing');
+  const ref = input as { source?: unknown; provider?: unknown; id?: unknown };
+  if (typeof ref.id !== 'string' || !ref.id) throw new Error('app secret reference is incomplete');
+  if (ref.source === 'keystore') return { source: 'keystore', id: ref.id };
+  if (ref.source === 'exec' && ref.provider === 'bridge') {
+    return { source: 'keystore', id: ref.id };
+  }
+  if (ref.source === 'env') return `\${${ref.id}}`;
+  throw new Error(`unsupported app secret source: ${String(ref.source)}`);
 }
 
 function normalizePreferences(

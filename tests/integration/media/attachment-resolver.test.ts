@@ -1,10 +1,10 @@
-import { readFile, readdir, rm, stat, utimes } from 'node:fs/promises';
+import { readFile, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
-import { gcMediaCache, MediaCache } from '../../../src/media/cache.js';
+import { MediaCache } from '../../../src/media/cache.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -43,22 +43,6 @@ describe('hash media attachment resolver', () => {
     expect(attachment?.absPath).not.toContain('img_secret_key');
     expect(attachment?.absPath).not.toContain('private');
     expect(await readFile(attachment!.absPath, 'utf8')).toBe('image-bytes');
-  });
-
-  it('garbage-collects old cache files by TTL', async () => {
-    const root = await tempDir();
-    const oldPath = join(root, 'old.bin');
-    const freshPath = join(root, 'fresh.bin');
-    await writeFile(oldPath, 'old');
-    await writeFile(freshPath, 'fresh');
-    const oldTime = new Date(Date.now() - 10_000);
-    await utimes(oldPath, oldTime, oldTime);
-
-    await gcMediaCache(1_000, root);
-
-    const files = await readdir(root);
-    expect(files).toEqual(['fresh.bin']);
-    expect((await stat(freshPath)).isFile()).toBe(true);
   });
 
   it('enforces cacheMaxBytes without deleting files from the current resolution', async () => {

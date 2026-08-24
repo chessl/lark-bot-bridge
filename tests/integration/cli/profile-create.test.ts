@@ -108,9 +108,7 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
   const profiles: RootConfig['profiles'] = {};
   for (const name of names) {
     profiles[name] = createDefaultProfileConfig({
-      accounts: {
-        app: { id: `cli_${name}`, secret: 'secret', tenant: 'feishu' },
-      },
+      app: { id: `cli_${name}`, secret: 'secret', tenant: 'feishu' },
       omp: { binaryPath: '/usr/local/bin/omp' },
     });
     await mkdir(join(root, 'profiles', name), { recursive: true });

@@ -66,12 +66,10 @@ async function createHarness(): Promise<{
     events: [{ type: 'done', terminationReason: 'normal' }],
   });
   const profileConfig = createDefaultProfileConfig({
-    accounts: {
-      app: {
-        id: 'cli_test',
-        secret: '${APP_SECRET}',
-        tenant: 'feishu',
-      },
+    app: {
+      id: 'cli_test',
+      secret: '${APP_SECRET}',
+      tenant: 'feishu',
     },
     omp: { binaryPath: '/usr/local/bin/omp' },
   });

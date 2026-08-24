@@ -3,7 +3,6 @@ import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import {
   accessPolicyDigest,
   attachmentPolicyConfigDigest,
-  attachmentPolicyShapeDigest,
   digestCanonical,
   policyFingerprint,
   resourceScopeDigest,
@@ -30,7 +29,7 @@ describe('policy fingerprint', () => {
 
   it('normalizes set-like access and resource fields', () => {
     const profile = createDefaultProfileConfig({
-      accounts: { app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' } },
+      app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' },
       omp: { binaryPath: '/usr/local/bin/omp' },
       access: { allowedUsers: ['b', 'a'], allowedChats: ['y', 'x'], admins: ['d', 'c'] },
     });
@@ -47,21 +46,9 @@ describe('policy fingerprint', () => {
     );
   });
 
-  it('fingerprints attachment decisions without local file details', () => {
-    expect(
-      attachmentPolicyShapeDigest([
-        { kind: 'file', requiredness: 'required', decision: 'accepted', path: '/tmp/a' },
-      ]),
-    ).toBe(
-      attachmentPolicyShapeDigest([
-        { kind: 'file', requiredness: 'required', decision: 'accepted', path: '/tmp/b' },
-      ]),
-    );
-  });
-
   it('includes executable attachment limits but excludes cache details', () => {
     const profile = createDefaultProfileConfig({
-      accounts: { app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' } },
+      app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' },
       omp: { binaryPath: '/usr/local/bin/omp' },
     });
     const baseline = attachmentPolicyConfigDigest(profile.attachments);

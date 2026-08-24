@@ -4,23 +4,21 @@ import { createBootstrapProfileConfig } from '../cli/profile-bootstrap';
 import { promptPassword } from '../cli/prompt';
 import { type AppPaths, defaultAppPaths, resolveAppPaths } from '../config/app-paths';
 import { setSecret } from '../config/keystore';
-import {
-  type CreateDefaultProfileConfigInput,
-  createDefaultProfileConfig,
-  type ProfileConfig,
-  type RootConfig,
-} from '../config/profile-schema';
+import type { ProfileConfig, RootConfig } from '../config/profile-schema';
 import {
   createRootConfig,
   loadRootConfig,
   readActiveProfile,
-  runtimeProfileConfig,
   saveRootConfig,
 } from '../config/profile-store';
-import type { AppConfig, SecretInput, TenantBrand } from '../config/schema';
-import { isSecretRef, secretKeyForApp } from '../config/schema';
+import {
+  type AppCredentials,
+  type AppPreferences,
+  keystoreAppCredentials,
+  secretKeyForApp,
+  type TenantBrand,
+} from '../config/schema';
 import { resolveAppSecret } from '../config/secret-resolver';
-import { buildEncryptedAccountConfig } from '../config/store';
 import { validateAppCredentials } from '../utils/feishu-auth';
 
 export interface ResolveProfileRuntimeOptions {
@@ -34,8 +32,7 @@ export interface ResolveProfileRuntimeOptions {
 }
 
 export interface ProfileRuntime {
-  cfg: AppConfig & ProfileConfig;
-  profileConfig: ProfileConfig;
+  cfg: ProfileConfig;
   configPath: string;
   appPaths: AppPaths;
   profile: string;
@@ -46,11 +43,12 @@ export interface MaterializeEnvSecretForServiceOptions {
   profile?: string;
 }
 
-const ENV_SECRET_TEMPLATE_RE = /^\$\{[A-Z][A-Z0-9_]{0,127}\}$/;
-
-export function createRuntimeProfileConfig(input: CreateDefaultProfileConfigInput): ProfileConfig {
-  return createDefaultProfileConfig(input);
+interface BootstrapAppConfig {
+  app: AppCredentials;
+  preferences?: AppPreferences;
 }
+
+const ENV_SECRET_TEMPLATE_RE = /^\$\{[A-Z][A-Z0-9_]{0,127}\}$/;
 
 export async function resolveProfileRuntime(
   opts: ResolveProfileRuntimeOptions,
@@ -68,8 +66,8 @@ export async function resolveProfileRuntime(
       profile = rootConfig.activeProfile;
       appPaths = resolveAppPaths({ rootDir, profile });
     }
-    const profileConfig = rootConfig.profiles[profile];
-    if (!profileConfig) {
+    const cfg = rootConfig.profiles[profile];
+    if (!cfg) {
       if (opts.allowBootstrap && explicitProfile) {
         return bootstrapProfileIntoExistingRoot({
           rootConfig,
@@ -81,25 +79,22 @@ export async function resolveProfileRuntime(
       }
       throw new Error(`profile not found: ${profile}`);
     }
-    assertBootstrapAppMatchesExistingProfile(opts, profile, profileConfig);
-    const cfg = runtimeProfileConfig(rootConfig, profile);
-    return { cfg, profileConfig, configPath, appPaths, profile };
+    assertBootstrapAppMatchesExistingProfile(opts, profile, cfg);
+    return { cfg, configPath, appPaths, profile };
   }
 
   if (!opts.allowBootstrap) throw new Error('config not initialized');
   const fresh = await resolveBootstrapAppConfig(opts);
-  const encrypted = await encryptedConfigForProfile(fresh, appPaths);
-  const profileConfig = await createBootstrapProfileConfig({
-    accounts: encrypted.accounts,
+  const encrypted = await encryptBootstrapAppConfig(fresh, appPaths);
+  const cfg = await createBootstrapProfileConfig({
+    app: encrypted.app,
     preferences: encrypted.preferences,
-    secrets: encrypted.secrets,
     workspace: opts.workspace,
     defaultWorkspace: appPaths.defaultWorkspaceDir,
   });
-  const root = createRootConfig(profile, profileConfig, encrypted.secrets);
-  await saveRootConfig(root, configPath);
+  await saveRootConfig(createRootConfig(profile, cfg), configPath);
   console.log(`配置已保存到 ${configPath}\n`);
-  return { cfg: runtimeProfileConfig(root, profile), profileConfig, configPath, appPaths, profile };
+  return { cfg, configPath, appPaths, profile };
 }
 
 async function bootstrapProfileIntoExistingRoot(args: {
@@ -111,36 +106,22 @@ async function bootstrapProfileIntoExistingRoot(args: {
 }): Promise<ProfileRuntime> {
   const { rootConfig, profile, opts, appPaths, configPath } = args;
   const fresh = await resolveBootstrapAppConfig(opts);
-  const encrypted = await encryptedConfigForProfile(fresh, appPaths);
-  const profileConfig = await createBootstrapProfileConfig({
-    accounts: encrypted.accounts,
+  const encrypted = await encryptBootstrapAppConfig(fresh, appPaths);
+  const cfg = await createBootstrapProfileConfig({
+    app: encrypted.app,
     preferences: encrypted.preferences,
-    secrets: encrypted.secrets,
     workspace: opts.workspace,
     defaultWorkspace: appPaths.defaultWorkspaceDir,
   });
-  const nextRoot: RootConfig = {
-    ...rootConfig,
-    ...((rootConfig.secrets ?? encrypted.secrets)
-      ? { secrets: rootConfig.secrets ?? encrypted.secrets }
-      : {}),
-    profiles: {
-      ...rootConfig.profiles,
-      [profile]: { ...profileConfig, secrets: undefined },
-    },
-  };
-  await saveRootConfig(nextRoot, configPath);
+  rootConfig.profiles[profile] = cfg;
+  await saveRootConfig(rootConfig, configPath);
   console.log(`配置已保存到 ${configPath}\n`);
-  return {
-    cfg: runtimeProfileConfig(nextRoot, profile),
-    profileConfig,
-    configPath,
-    appPaths,
-    profile,
-  };
+  return { cfg, configPath, appPaths, profile };
 }
 
-async function resolveBootstrapAppConfig(opts: ResolveProfileRuntimeOptions): Promise<AppConfig> {
+async function resolveBootstrapAppConfig(
+  opts: ResolveProfileRuntimeOptions,
+): Promise<BootstrapAppConfig> {
   if (!opts.appId) {
     if (!isInteractiveTerminal()) {
       throw new Error(
@@ -168,15 +149,7 @@ async function resolveBootstrapAppConfig(opts: ResolveProfileRuntimeOptions): Pr
     throw new Error(`app credentials validation failed: ${result.reason ?? 'unknown'}`);
   }
   console.log(result.botName ? `✓ 应用凭证校验通过: ${result.botName}` : '✓ 应用凭证校验通过');
-  return {
-    accounts: {
-      app: {
-        id: opts.appId,
-        secret: appSecret,
-        tenant,
-      },
-    },
-  };
+  return { app: { id: opts.appId, secret: appSecret, tenant } };
 }
 
 function isInteractiveTerminal(): boolean {
@@ -192,11 +165,11 @@ function tenantBrandFromString(value: string | undefined): TenantBrand {
 function assertBootstrapAppMatchesExistingProfile(
   opts: ResolveProfileRuntimeOptions,
   profile: string,
-  profileConfig: ProfileConfig,
+  cfg: ProfileConfig,
 ): void {
-  if (!opts.appId || opts.appId === profileConfig.accounts.app.id) return;
+  if (!opts.appId || opts.appId === cfg.app.id) return;
   throw new Error(
-    `profile already exists: ${profile}; it uses app ${profileConfig.accounts.app.id}. ` +
+    `profile already exists: ${profile}; it uses app ${cfg.app.id}. ` +
       'omit --app-id or create another profile',
   );
 }
@@ -217,54 +190,33 @@ export async function materializeEnvSecretForService(
     profile = rootConfig.activeProfile;
     appPaths = resolveAppPaths({ rootDir, profile });
   }
-  const profileConfig = rootConfig.profiles[profile];
-  if (!profileConfig) throw new Error(`profile not found: ${profile}`);
-  const cfg = runtimeProfileConfig(rootConfig, profile);
-  if (!isEnvBackedSecret(cfg.accounts.app.secret)) return false;
+  const cfg = rootConfig.profiles[profile];
+  if (!cfg) throw new Error(`profile not found: ${profile}`);
+  if (typeof cfg.app.secret !== 'string' || !ENV_SECRET_TEMPLATE_RE.test(cfg.app.secret)) {
+    return false;
+  }
 
-  const encrypted = await encryptedConfigForResolvedSecret(
-    cfg,
-    await resolveAppSecret(cfg, appPaths),
-    appPaths,
-  );
-  rootConfig.profiles[profile] = { ...profileConfig, accounts: encrypted.accounts };
-  if (encrypted.secrets) rootConfig.secrets = encrypted.secrets;
+  rootConfig.profiles[profile] = {
+    ...cfg,
+    app: await storeAppSecret(cfg.app, await resolveAppSecret(cfg, appPaths), appPaths),
+  };
   await saveRootConfig(rootConfig, configPath);
   return true;
 }
 
-async function encryptedConfigForProfile(
-  cfg: AppConfig,
-  appPaths: Pick<AppPaths, 'secretsGetterScript' | 'secretsFile' | 'keystoreSaltFile'>,
-): Promise<AppConfig> {
-  const secret = cfg.accounts.app.secret;
-  if (typeof secret !== 'string') return cfg;
-  const next = await buildEncryptedAccountConfig(
-    cfg.accounts.app.id,
-    cfg.accounts.app.tenant,
-    cfg.preferences,
-    appPaths,
-  );
-  await setSecret(secretKeyForApp(cfg.accounts.app.id), secret, appPaths);
-  return next;
+async function encryptBootstrapAppConfig(
+  cfg: BootstrapAppConfig,
+  appPaths: Pick<AppPaths, 'secretsFile' | 'keystoreSaltFile'>,
+): Promise<BootstrapAppConfig> {
+  if (typeof cfg.app.secret !== 'string') return cfg;
+  return { ...cfg, app: await storeAppSecret(cfg.app, cfg.app.secret, appPaths) };
 }
 
-async function encryptedConfigForResolvedSecret(
-  cfg: AppConfig,
+async function storeAppSecret(
+  app: AppCredentials,
   plaintext: string,
-  appPaths: Pick<AppPaths, 'secretsGetterScript' | 'secretsFile' | 'keystoreSaltFile'>,
-): Promise<AppConfig> {
-  const next = await buildEncryptedAccountConfig(
-    cfg.accounts.app.id,
-    cfg.accounts.app.tenant,
-    cfg.preferences,
-    appPaths,
-  );
-  await setSecret(secretKeyForApp(cfg.accounts.app.id), plaintext, appPaths);
-  return next;
-}
-
-function isEnvBackedSecret(secret: SecretInput): boolean {
-  if (typeof secret === 'string') return ENV_SECRET_TEMPLATE_RE.test(secret);
-  return isSecretRef(secret) && secret.source === 'env';
+  appPaths: Pick<AppPaths, 'secretsFile' | 'keystoreSaltFile'>,
+): Promise<AppCredentials> {
+  await setSecret(secretKeyForApp(app.id), plaintext, appPaths);
+  return keystoreAppCredentials(app.id, app.tenant);
 }

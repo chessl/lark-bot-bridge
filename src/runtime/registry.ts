@@ -206,33 +206,6 @@ export function cleanupTmpFiles(registryFile: string = defaultAppPaths.userRegis
 }
 
 /**
- * Find registry entries with the same appId, excluding `excludePid` (typically
- * the caller's own pid) so a process doesn't flag itself as a conflict.
- */
-export function sameAppOthers(
-  appId: string,
-  excludePid = process.pid,
-  registryFile: string = defaultAppPaths.userRegistryFile,
-): ProcessEntry[] {
-  return readRegistry(registryFile).filter((e) => e.appId === appId && e.pid !== excludePid);
-}
-
-export async function sameAppLiveOthers(
-  appId: string,
-  excludePid = process.pid,
-  registryFile: string = defaultAppPaths.userRegistryFile,
-): Promise<ProcessEntry[]> {
-  const candidates = sameAppOthers(appId, excludePid, registryFile);
-  const checks = await Promise.all(
-    candidates.map(async (entry) => ({
-      entry,
-      stale: await isEntryStale(entry, registryFile),
-    })),
-  );
-  return checks.filter(({ stale }) => !stale).map(({ entry }) => entry);
-}
-
-/**
  * Resolve `target` (short id OR 1-based index in the current `ps` view) to
  * an entry. Index lookup uses the same read-only order as `readRegistry()`.
  */

@@ -16,7 +16,7 @@ export async function commandSessionCatalogIdentity(input: {
   access: AccessDecision;
 }): Promise<SessionCatalogIdentity | undefined> {
   const requestedCwd =
-    input.workspaces.cwdFor(input.scope) ?? input.controls.profileConfig.workspaces.default;
+    input.workspaces.cwdFor(input.scope) ?? input.controls.cfg.workspaces.default;
   if (!requestedCwd) return undefined;
   const workspace = await resolveWorkingDirectory(requestedCwd);
   if (!workspace.ok) return undefined;
@@ -32,7 +32,7 @@ export async function commandSessionCatalogIdentity(input: {
     requestedCwd,
     cwdRealpath: workspace.cwdRealpath,
     access: input.access,
-    profileConfig: input.controls.profileConfig,
+    profileConfig: input.controls.cfg,
     now: Date.now(),
   });
   if (!policy.ok) return undefined;

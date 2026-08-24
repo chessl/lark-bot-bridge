@@ -67,12 +67,10 @@ async function createHarness(): Promise<{
     events: [{ type: 'done', terminationReason: 'normal' }],
   });
   const base = createDefaultProfileConfig({
-    accounts: {
-      app: {
-        id: 'cli_test',
-        secret: '${APP_SECRET}',
-        tenant: 'feishu',
-      },
+    app: {
+      id: 'cli_test',
+      secret: '${APP_SECRET}',
+      tenant: 'feishu',
     },
   });
   const profileConfig = {

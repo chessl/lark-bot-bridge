@@ -88,7 +88,7 @@ describe('checkMeetingPreflight', () => {
         activeProfile: 'work',
         profiles: {
           work: createDefaultProfileConfig({
-            accounts: { app: { id: 'cli_test', secret: 'app-secret', tenant: 'feishu' } },
+            app: { id: 'cli_test', secret: 'app-secret', tenant: 'feishu' },
           }),
         },
       },

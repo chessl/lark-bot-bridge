@@ -328,7 +328,7 @@ async function createHarness(options: FixtureOptions = {}): Promise<{
   const tmp = await createTmpProfile('p2p-reply-fallback-');
   const workspace = await realpath(tmp.workspace);
   const baseProfileConfig = createDefaultProfileConfig({
-    accounts: { app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' } },
+    app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' },
     access: { allowedUsers: ['ou_user'] },
     omp: { binaryPath: '/usr/local/bin/omp' },
   });
@@ -479,7 +479,6 @@ function createFakeLarkChannel(options: FixtureOptions): FakeLarkChannel {
 function createControls(profileConfig: ProfileConfig): Controls {
   return {
     profile: 'test',
-    profileConfig,
     ownerRefreshState: 'unknown',
     async refreshOwner() {},
     async restart() {},

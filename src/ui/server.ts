@@ -283,8 +283,8 @@ async function route(
     // Falls back to disk config so a stopped profile still reports why it's
     // unavailable rather than looking broken.
     const enabled = controls
-      ? controls.profileConfig.meeting.enabled
-      : (await loadProfileState(profile, deps.rootDir)).profileConfig.meeting.enabled;
+      ? controls.cfg.meeting.enabled
+      : (await loadProfileState(profile, deps.rootDir)).cfg.meeting.enabled;
     sendJson(res, 200, meetingsView(controls?.meeting, enabled));
     return;
   }

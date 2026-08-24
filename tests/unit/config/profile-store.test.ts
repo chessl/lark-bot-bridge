@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDefaultProfileConfig, type RootConfig } from '../../../src/config/profile-schema';
+import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { loadRootConfig, saveRootConfig } from '../../../src/config/profile-store';
 
 const roots: string[] = [];
@@ -20,18 +20,17 @@ async function tmpRoot(): Promise<string> {
 }
 
 describe('OMP profile store', () => {
-  it('saves only canonical root and profile fields', async () => {
+  it('saves canonical root and profile fields', async () => {
     const root = await tmpRoot();
     const configPath = join(root, 'config.json');
     const profile = {
       ...createDefaultProfileConfig({
-        accounts: { app },
+        app,
         omp,
         preferences: { model: 'custom-model', maxConcurrentRuns: 4 },
         access: { allowedUsers: ['ou_user'], requireMentionInGroup: false },
       }),
       workspaces: { default: '/repo' },
-      runtimeOnlyFutureField: true,
     };
 
     await saveRootConfig(
@@ -39,18 +38,13 @@ describe('OMP profile store', () => {
         schemaVersion: 2,
         activeProfile: 'work',
         profiles: { work: profile },
-        extra: true,
-      } as unknown as RootConfig & { extra: true },
+      },
       configPath,
     );
 
     const saved = JSON.parse(await readFile(configPath, 'utf8'));
-    expect(saved).not.toHaveProperty('extra');
     expect(saved.profiles.work.omp).toEqual(omp);
     expect(saved.profiles.work.workspaces).toEqual({ default: '/repo' });
-    expect(saved.profiles.work).not.toHaveProperty('runtimeOnlyFutureField');
-    expect(saved.profiles.work).not.toHaveProperty('agentKind');
-    expect(saved.profiles.work).not.toHaveProperty('permissions');
   });
 
   it('requires OMP configuration when loading', async () => {
@@ -71,7 +65,7 @@ describe('OMP profile store', () => {
   it('persists deployment, access, and meeting settings across save and load', async () => {
     const root = await tmpRoot();
     const configPath = join(root, 'config.json');
-    const profile = createDefaultProfileConfig({ mode: 'team', accounts: { app }, omp });
+    const profile = createDefaultProfileConfig({ mode: 'team', app, omp });
     profile.access.chatRequireMention = { oc_open: false, oc_strict: true };
     profile.meeting = { ...profile.meeting, enabled: true, respondIn: 'both' };
 
