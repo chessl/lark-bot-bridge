@@ -134,10 +134,20 @@ describe('Supervisor', () => {
     await seeded.load();
     await seeded.put({
       runId: 'run_before_restart',
-      target: {
-        chatId: 'oc_restart',
-        messageId: 'om_trigger',
-        replyInThread: false,
+      replyPolicy: {
+        invocationKind: 'ordinary',
+        scope: {
+          kind: 'chat',
+          id: 'oc_restart',
+          chatId: 'oc_restart',
+          mode: 'group',
+        },
+        target: {
+          chatId: 'oc_restart',
+          messageId: 'om_trigger',
+          replyInThread: false,
+        },
+        senderOwnership: { kind: 'none', reason: 'verified-bot-sender' },
       },
       messageId: 'om_existing',
       transport: 'inline',
