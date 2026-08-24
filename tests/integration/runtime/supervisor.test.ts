@@ -151,8 +151,12 @@ describe('Supervisor', () => {
 
     expect(deliveryJournals).toHaveLength(2);
     expect(deliveryJournals[1]).toBe(deliveryJournals[0]);
-    expect(deliveryJournals[0]?.get('run_before_restart')).toBeDefined();
-    expect(deliveryJournals[1]?.get('run_before_restart')).toBeDefined();
+    expect(
+      deliveryJournals[0]?.entries().find((entry) => entry.runId === 'run_before_restart'),
+    ).toBeDefined();
+    expect(
+      deliveryJournals[1]?.entries().find((entry) => entry.runId === 'run_before_restart'),
+    ).toBeDefined();
     expect(lifecycle).toEqual(['start:1:active', 'start:2:deferred', 'disconnect:1', 'activate:2']);
   });
 

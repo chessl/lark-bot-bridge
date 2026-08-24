@@ -836,7 +836,9 @@ async function attemptDurableOperation(
       if ((code === undefined || code === 0) && typeof messageId === 'string' && messageId.trim()) {
         return { result: 'success', messageId };
       }
-      if (code === CARD_ALREADY_BOUND && exactRetry) return { result: 'success' };
+      if (code === CARD_ALREADY_BOUND) {
+        return { result: exactRetry ? 'success' : 'unknown' };
+      }
       return {
         result: typeof code === 'number' && code !== 0 ? 'rejected' : 'unknown',
       };
