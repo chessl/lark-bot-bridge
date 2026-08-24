@@ -659,9 +659,14 @@ describe('P2P OMP Reply', () => {
 
     expect(channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
     expect(channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce();
-    expect(updateCardData(channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0])).toContain(
-      '<at id="ou_sender"></at>',
+    const rendered: object = JSON.parse(
+      updateCardData(channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0]) ?? '{}',
     );
+    expect(
+      cardElements(rendered).find(
+        (element) => 'element_id' in element && element.element_id === 'answer',
+      ),
+    ).toMatchObject({ content: '<at id="ou_sender"></at>\n\nanswer' });
     expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledOnce();
     const patch = JSON.stringify(channel.rawClient.im.v1.message.patch.mock.calls[0]?.[0]);
     expect(patch).toContain('om_reply_1');
