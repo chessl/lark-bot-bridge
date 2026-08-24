@@ -280,6 +280,9 @@ async function createHarness(
   const root = await writeRoot(rootDir, workspace, options.preferences);
   const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
   const channel = createFakeChannel();
+  Object.assign(channel, {
+    recallMessage: vi.fn(async () => {}),
+  });
   const sessions = new SessionStore(appPaths.sessionsFile);
   const workspaces = new WorkspaceStore(appPaths.workspacesFile);
   const controls = {
