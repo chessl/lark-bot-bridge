@@ -258,17 +258,22 @@ export function normalizePersonalSubstitution(input: unknown): PersonalSubstitut
   ) {
     throw new Error('collaboration personalSubstitution is invalid');
   }
-  if (input.targetOpenIds.length > 1) {
-    throw new Error('personal substitution target count must be between 0 and 1');
+  if (input.targetOpenIds.length > 10) {
+    throw new Error('personal substitution target count must be between 0 and 10');
   }
+  const openIds = new Set<string>();
   const targetOpenIds = input.targetOpenIds.map((value) => {
     if (typeof value !== 'string' || !APP_SCOPED_OPEN_ID.test(value)) {
       throw new Error('personal substitution target open ID is invalid');
     }
+    if (openIds.has(value)) {
+      throw new Error('personal substitution target open ID is duplicated');
+    }
+    openIds.add(value);
     return value;
   });
-  if (input.enabled && targetOpenIds.length !== 1) {
-    throw new Error('enabled personal substitution requires one target');
+  if (input.enabled && targetOpenIds.length === 0) {
+    throw new Error('enabled personal substitution requires at least one target');
   }
   return { enabled: input.enabled, targetOpenIds };
 }

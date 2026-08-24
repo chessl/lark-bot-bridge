@@ -461,6 +461,43 @@ describe('personal substitution intake', () => {
     expect(h.agent.runOptions[1]?.prompt).not.toContain('old target');
   });
 
+
+  it('sends one Mention-free Topic control Reply and no Run when every target is invalid', async () => {
+    const h = await createHarness();
+    h.profileConfig.collaboration.personalSubstitution = {
+      enabled: true,
+      targetOpenIds: ['ou_target'],
+    };
+    const send = vi.spyOn(h.channel, 'send');
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_all_invalid',
+        content: '@Private invalid targets',
+        rawSenderType: 'user',
+        mentionedBot: false,
+        threadId: 'omt_topic',
+        mentions: [
+          { key: '@_user_1', openId: 'ou_user', name: 'Self secret', isBot: false },
+          { key: '@_user_2', openId: 'ou_unknown', name: 'Unknown secret', isBot: false },
+        ],
+        rawMentions: [
+          { key: '@_user_1', id: { open_id: 'ou_user' }, name: 'Self secret' },
+          { key: '@_user_2', id: { open_id: 'ou_unknown' }, name: 'Unknown secret' },
+        ],
+      }),
+    );
+
+    expect(h.agent.runOptions).toHaveLength(0);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(
+      'oc_chat',
+      { text: '无法确认这 2 个代答对象的身份，未启动代答。' },
+      { replyTo: 'om_all_invalid', replyInThread: true },
+    );
+    expect(JSON.stringify(send.mock.calls)).not.toMatch(/ou_|secret|<at/i);
+  });
   it('keeps substitution isolated from ordinary batching and preserves Topic scope', async () => {
     const h = await createHarness();
     h.profileConfig.collaboration.personalSubstitution = {

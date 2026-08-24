@@ -708,7 +708,9 @@ describe('P2P OMP Reply', () => {
       },
       target,
       senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-      substitutionTargetOpenIds: ['ou_target'],
+      substitutionTargetOpenIds: ['ou_target', 'ou_second'],
+      substitutionTargetLabels: ['Target', 'Second'],
+      invalidTargetCount: 2,
     };
     const channel = createFakeLarkChannel({
       update: async () => ({ code: 230001, msg: 'mention rejected' }),
@@ -732,15 +734,18 @@ describe('P2P OMP Reply', () => {
     const update = JSON.stringify(channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0]);
     expect(update.match(/ou_sender/g)).toHaveLength(1);
     expect(update.match(/ou_target/g)).toHaveLength(1);
+    expect(update.match(/ou_second/g)).toHaveLength(1);
     expect(update).toContain('AI 代');
     expect(update).toContain('回答（已在本回复中点名）');
+    expect(update).toContain('另有 2 个对象身份无法确认');
     expect(channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
     expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledOnce();
     const patch = JSON.stringify(channel.rawClient.im.v1.message.patch.mock.calls[0]?.[0]);
     expect(patch).toContain('\\\\@请求者');
-    expect(patch).toContain('\\\\@目标');
+    expect(patch).toContain('\\\\@Target');
+    expect(patch).toContain('\\\\@Second');
     expect(patch).toContain('Mention 不可用');
-    expect(patch).not.toMatch(/ou_sender|ou_target|<at/);
+    expect(patch).not.toMatch(/ou_sender|ou_target|ou_second|<at/);
     expect(channel.sent).toEqual([]);
   });
 

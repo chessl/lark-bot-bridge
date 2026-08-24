@@ -57,7 +57,13 @@ const ReplyPolicySchema = z.discriminatedUnion('invocationKind', [
   ReplyPolicyBaseSchema.extend({ invocationKind: z.literal('peer') }),
   ReplyPolicyBaseSchema.extend({
     invocationKind: z.literal('substitution'),
-    substitutionTargetOpenIds: z.tuple([z.string().min(1)]),
+    substitutionTargetOpenIds: z
+      .tuple([z.string().min(1)], z.string().min(1))
+      .refine((targets) => targets.length <= 10),
+    substitutionTargetLabels: z
+      .tuple([z.string().min(1)], z.string().min(1))
+      .refine((labels) => labels.length <= 10),
+    invalidTargetCount: z.number().int().nonnegative(),
   }),
 ]) satisfies z.ZodType<ImReplyPolicy>;
 const DeliveryStateSchema = z.enum([

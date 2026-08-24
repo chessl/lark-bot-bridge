@@ -1270,7 +1270,11 @@ function validateFinalPlan(plan: ImReplyPlan, progressPolicy: ImReplyPolicy): vo
       target: plan.target,
       senderOwnership: plan.senderOwnership,
       ...(plan.invocationKind === 'substitution'
-        ? { substitutionTargetOpenIds: plan.substitutionTargetOpenIds }
+        ? {
+            substitutionTargetOpenIds: plan.substitutionTargetOpenIds,
+            substitutionTargetLabels: plan.substitutionTargetLabels,
+            invalidTargetCount: plan.invalidTargetCount,
+          }
         : {}),
     }) !== JSON.stringify(progressPolicy)
   ) {

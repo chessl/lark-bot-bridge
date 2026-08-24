@@ -72,7 +72,7 @@ function chatList(chatIds: string[], knownChats: KnownChat[]): string {
 function trustedPeerPanel(opts: ConfigFormOpts): object {
   const peers = opts.trustedPeerBots ?? [];
   const substitution = opts.personalSubstitution ?? { enabled: false, targetOpenIds: [] };
-  const substitutionTarget = substitution.targetOpenIds[0] ?? '';
+  const substitutionTargets = substitution.targetOpenIds;
   const rows = peers.flatMap((peer, index) => [
     {
       tag: 'column_set',
@@ -119,7 +119,61 @@ function trustedPeerPanel(opts: ConfigFormOpts): object {
               text: { tag: 'plain_text', content: '删除' },
               form_action_type: 'submit',
               behaviors: [
-                { type: 'callback', value: { cmd: 'config.peer-delete', arg: String(index) } },
+                {
+                  type: 'callback',
+                  value: {
+                    cmd: 'config.peer-delete',
+                    arg: `${peers.length},${substitutionTargets.length},${index}`,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    { tag: 'hr' },
+  ]);
+  const substitutionRows = substitutionTargets.flatMap((target, index) => [
+    {
+      tag: 'column_set',
+      flex_mode: 'flow',
+      horizontal_spacing: 'small',
+      columns: [
+        {
+          tag: 'column',
+          width: 'weighted',
+          weight: 1,
+          elements: [
+            {
+              tag: 'input',
+              name: `personal_substitution_target_${index}`,
+              default_value:
+                opts.maskPersonalSubstitutionIds === false || !target.startsWith('ou_')
+                  ? target
+                  : `…${target.slice(-6)}`,
+              placeholder: { tag: 'plain_text', content: 'name@example.com' },
+              input_type: 'text',
+            },
+          ],
+        },
+        {
+          tag: 'column',
+          width: 'auto',
+          elements: [
+            {
+              tag: 'button',
+              name: `personal_substitution_delete_${index}`,
+              text: { tag: 'plain_text', content: '删除' },
+              form_action_type: 'submit',
+              behaviors: [
+                {
+                  type: 'callback',
+                  value: {
+                    cmd: 'config.substitution-delete',
+                    arg: `${peers.length},${substitutionTargets.length},${index}`,
+                  },
+                },
               ],
             },
           ],
@@ -147,7 +201,15 @@ function trustedPeerPanel(opts: ConfigFormOpts): object {
               name: 'trusted_peer_add',
               text: { tag: 'plain_text', content: '添加 trusted peer' },
               form_action_type: 'submit',
-              behaviors: [{ type: 'callback', value: { cmd: 'config.peer-add' } }],
+              behaviors: [
+                {
+                  type: 'callback',
+                  value: {
+                    cmd: 'config.peer-add',
+                    arg: `${peers.length},${substitutionTargets.length}`,
+                  },
+                },
+              ],
             },
           ]
         : [{ tag: 'markdown', content: '_已达到 10 个 trusted peer 上限。_' }]),
@@ -166,16 +228,26 @@ function trustedPeerPanel(opts: ConfigFormOpts): object {
           { text: { tag: 'plain_text', content: '禁用' }, value: 'no' },
         ],
       },
-      {
-        tag: 'input',
-        name: 'personal_substitution_target',
-        default_value:
-          opts.maskPersonalSubstitutionIds === false || !substitutionTarget.startsWith('ou_')
-            ? substitutionTarget
-            : `…${substitutionTarget.slice(-6)}`,
-        placeholder: { tag: 'plain_text', content: 'name@example.com' },
-        input_type: 'text',
-      },
+      ...substitutionRows,
+      ...(substitutionTargets.length < 10
+        ? [
+            {
+              tag: 'button',
+              name: 'personal_substitution_add',
+              text: { tag: 'plain_text', content: '添加代答对象' },
+              form_action_type: 'submit',
+              behaviors: [
+                {
+                  type: 'callback',
+                  value: {
+                    cmd: 'config.substitution-add',
+                    arg: `${peers.length},${substitutionTargets.length}`,
+                  },
+                },
+              ],
+            },
+          ]
+        : [{ tag: 'markdown', content: '_已达到 10 个 personal substitution target 上限。_' }]),
     ],
     opts.collaborationExpanded ?? false,
   );
@@ -372,7 +444,7 @@ export function configFormCard(opts: ConfigFormOpts): object {
                           type: 'callback',
                           value: {
                             cmd: 'config.submit',
-                            arg: String((opts.trustedPeerBots ?? []).length),
+                            arg: `${(opts.trustedPeerBots ?? []).length},${(opts.personalSubstitution?.targetOpenIds ?? []).length}`,
                           },
                         },
                       ],

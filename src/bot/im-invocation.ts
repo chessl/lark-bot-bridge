@@ -56,6 +56,7 @@ export type ImRouteReason =
   | 'untrusted-bot'
   | 'trusted-peer'
   | 'personal-substitution'
+  | 'personal-substitution-invalid-targets'
   | 'ordinary-message';
 
 export type ImPromptReason =
@@ -105,6 +106,7 @@ export interface PlanImMessageInput {
 export type ImMessagePlan =
   | ImDroppedMessagePlan
   | ImCommandPlan
+  | ImControlMessagePlan
   | ImOrdinaryMessagePlan
   | ImPeerMessagePlan
   | ImSubstitutionMessagePlan;
@@ -132,6 +134,14 @@ export type ImCommandPlan = Readonly<{
   source: ImSourceMessage;
 }>;
 
+export type ImControlMessagePlan = Readonly<{
+  lane: 'control';
+  reason: 'personal-substitution-invalid-targets';
+  scope: ImConversationScope;
+  source: ImSourceMessage;
+  invalidTargetCount: number;
+}>;
+
 export type ImOrdinaryMessagePlan = Readonly<{
   lane: 'ordinary';
   reason: 'ordinary-message';
@@ -154,7 +164,8 @@ export type ImSubstitutionMessagePlan = Readonly<{
   reason: 'personal-substitution';
   scope: ImConversationScope;
   source: ImSourceMessage;
-  targets: readonly [ImSubstitutionTarget];
+  targets: readonly [ImSubstitutionTarget, ...ImSubstitutionTarget[]];
+  invalidTargetCount: number;
 }>;
 
 export type ImSourceMessage = Readonly<{
@@ -212,7 +223,8 @@ export type ImPromptPolicy =
       kind: 'substitution';
       reason: Extract<ImPromptReason, 'personal-substitution-message'>;
       message: ImSubstitutionPromptMessage;
-      targetAliases: readonly [string];
+      targetAliases: readonly [string, ...string[]];
+      invalidTargetCount: number;
     }>;
 
 type ImReplyPolicyBase = Readonly<{
@@ -234,7 +246,9 @@ export type ImReplyPolicy =
   | (ImReplyPolicyBase &
       Readonly<{
         invocationKind: 'substitution';
-        substitutionTargetOpenIds: readonly [string];
+        substitutionTargetOpenIds: readonly [string, ...string[]];
+        substitutionTargetLabels: readonly [string, ...string[]];
+        invalidTargetCount: number;
       }>);
 
 export type ImInvocation = ImOrdinaryInvocation | ImPeerInvocation | ImSubstitutionInvocation;
@@ -268,7 +282,7 @@ export type ImSubstitutionInvocation = Readonly<{
   scope: ImConversationScope;
   sourceMessages: readonly [ImSourceMessage];
   replyTarget: ImReplyTarget;
-  targets: readonly [ImSubstitutionTarget];
+  targets: readonly [ImSubstitutionTarget, ...ImSubstitutionTarget[]];
   promptPolicy: Extract<ImPromptPolicy, { kind: 'substitution' }>;
   replyPolicy: Extract<ImReplyPolicy, { invocationKind: 'substitution' }>;
 }>;
@@ -333,31 +347,29 @@ export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
       });
     }
     const substitution = input.personalSubstitution;
-    const configuredTarget =
-      substitution?.enabled === true && substitution.targetOpenIds.length === 1
-        ? substitution.targetOpenIds[0]
-        : undefined;
-    if (configuredTarget) {
-      const targetMention = directSubstitutionMention(input.message, configuredTarget);
-      if (targetMention === 'contradictory') {
+    if (substitution?.enabled === true && substitution.targetOpenIds.length > 0) {
+      const mentions = directSubstitutionMentions(
+        input.message,
+        substitution.targetOpenIds,
+        source.sender.id,
+      );
+      if (mentions && mentions.targets.length === 0) {
         return Object.freeze({
-          lane: 'drop',
-          reason: 'contradictory-mention',
-          allowAccessHint: false,
+          lane: 'control',
+          reason: 'personal-substitution-invalid-targets',
+          scope,
+          source,
+          invalidTargetCount: mentions.invalidTargetCount,
         });
       }
-      if (targetMention !== 'not-direct') {
-        const target: ImSubstitutionTarget = Object.freeze({
-          openId: verifiedHumanId(configuredTarget),
-          displayAlias: targetMention.displayAlias,
-        });
-        const targets: readonly [ImSubstitutionTarget] = Object.freeze([target]);
+      if (mentions) {
         return Object.freeze({
           lane: 'substitution',
           reason: 'personal-substitution',
           scope,
           source,
-          targets,
+          targets: Object.freeze(nonEmpty(mentions.targets)),
+          invalidTargetCount: mentions.invalidTargetCount,
         });
       }
     }
@@ -457,17 +469,23 @@ export function createImInvocation(
   if (first.lane === 'substitution') {
     const target = replyTarget(first.source.message);
     const sourceMessages: readonly [ImSourceMessage] = Object.freeze([first.source]);
-    const targets: readonly [ImSubstitutionTarget] = Object.freeze([
-      Object.freeze({ ...first.targets[0] }),
-    ]);
-    const substitutionTargetOpenIds: readonly [string] = Object.freeze([targets[0].openId]);
-    const targetAliases: readonly [string] = Object.freeze([targets[0].displayAlias]);
+    const targets = Object.freeze(
+      nonEmpty(first.targets.map((substitutionTarget) => Object.freeze({ ...substitutionTarget }))),
+    );
+    const substitutionTargetOpenIds = Object.freeze(
+      nonEmpty(targets.map(({ openId }) => openId)),
+    );
+    const substitutionTargetLabels = Object.freeze(
+      nonEmpty(targets.map(({ displayAlias }) => displayAlias)),
+    );
     const replyPolicy = Object.freeze({
       invocationKind: 'substitution',
       scope: first.scope,
       target,
       senderOwnership: senderOwnership(first.scope, first.source.sender),
       substitutionTargetOpenIds,
+      substitutionTargetLabels,
+      invalidTargetCount: first.invalidTargetCount,
     }) satisfies ImSubstitutionInvocation['replyPolicy'];
     return Object.freeze({
       kind: 'substitution',
@@ -479,8 +497,9 @@ export function createImInvocation(
       promptPolicy: Object.freeze({
         kind: 'substitution',
         reason: 'personal-substitution-message',
-        message: toSubstitutionPromptMessage(first.source, targets[0].openId),
-        targetAliases,
+        message: toSubstitutionPromptMessage(first.source),
+        targetAliases: substitutionTargetLabels,
+        invalidTargetCount: first.invalidTargetCount,
       }),
       replyPolicy,
     });
@@ -890,14 +909,15 @@ function toPeerPromptMessage(source: ImSourceMessage, alias: string): ImPeerProm
   });
 }
 
-function toSubstitutionPromptMessage(
-  source: ImSourceMessage,
-  targetOpenId: string,
-): ImSubstitutionPromptMessage {
+function toSubstitutionPromptMessage(source: ImSourceMessage): ImSubstitutionPromptMessage {
   const message = source.message;
+  let content = message.content;
+  for (const mention of message.mentions ?? []) {
+    if (mention.openId) content = content.replaceAll(mention.openId, '[对象]');
+  }
   return Object.freeze({
     messageId: message.messageId,
-    content: message.content.replaceAll(targetOpenId, '[目标]'),
+    content,
     resourceFileKeys: Object.freeze(message.resources.map((resource) => resource.fileKey)),
   });
 }
@@ -915,10 +935,13 @@ function snapshotTrustedPeers(
   );
 }
 
-function directSubstitutionMention(
+function directSubstitutionMentions(
   message: NormalizedMessage,
-  targetOpenId: string,
-): Readonly<{ displayAlias: string }> | 'not-direct' | 'contradictory' {
+  configuredTargetOpenIds: readonly string[],
+  senderOpenId: VerifiedHumanId,
+):
+  | Readonly<{ targets: readonly ImSubstitutionTarget[]; invalidTargetCount: number }>
+  | undefined {
   const raw = message.raw;
   if (
     typeof raw !== 'object' ||
@@ -927,31 +950,53 @@ function directSubstitutionMention(
     typeof raw.message !== 'object' ||
     raw.message === null ||
     !('mentions' in raw.message) ||
-    !Array.isArray(raw.message.mentions)
+    !Array.isArray(raw.message.mentions) ||
+    raw.message.mentions.length === 0
   ) {
-    return 'not-direct';
+    return undefined;
   }
-  const rawMatch = raw.message.mentions.some(
-    (mention) =>
-      Boolean(mention) &&
-      typeof mention === 'object' &&
-      'id' in mention &&
-      typeof mention.id === 'object' &&
-      mention.id !== null &&
-      'open_id' in mention.id &&
-      mention.id.open_id === targetOpenId,
-  );
-  if (!rawMatch) return 'not-direct';
 
-  const normalized = (message.mentions ?? []).filter(
-    (mention) => mention.openId === targetOpenId,
-  );
-  if (normalized.length === 0 || normalized.some((mention) => mention.isBot === true)) {
-    return 'contradictory';
+  const configured = new Set(configuredTargetOpenIds);
+  const seen = new Set<string>();
+  const targets: ImSubstitutionTarget[] = [];
+  let invalidTargetCount = 0;
+  for (const rawMention of raw.message.mentions) {
+    const rawId =
+      rawMention &&
+      typeof rawMention === 'object' &&
+      'id' in rawMention &&
+      typeof rawMention.id === 'object' &&
+      rawMention.id !== null &&
+      'open_id' in rawMention.id &&
+      typeof rawMention.id.open_id === 'string' &&
+      rawMention.id.open_id
+        ? rawMention.id.open_id
+        : undefined;
+    if (!rawId) {
+      invalidTargetCount++;
+      continue;
+    }
+    if (seen.has(rawId)) continue;
+    seen.add(rawId);
+
+    const normalized = (message.mentions ?? []).filter((mention) => mention.openId === rawId);
+    if (
+      rawId === senderOpenId ||
+      !configured.has(rawId) ||
+      normalized.length === 0 ||
+      normalized.some((mention) => mention.isBot === true)
+    ) {
+      invalidTargetCount++;
+      continue;
+    }
+    targets.push(
+      Object.freeze({
+        openId: verifiedHumanId(rawId),
+        displayAlias: safeDisplayAlias(normalized[0]?.name, rawId),
+      }),
+    );
   }
-  return Object.freeze({
-    displayAlias: safeDisplayAlias(normalized[0]?.name, targetOpenId),
-  });
+  return Object.freeze({ targets: Object.freeze(targets), invalidTargetCount });
 }
 
 function safeDisplayAlias(value: string | undefined, targetOpenId: string): string {

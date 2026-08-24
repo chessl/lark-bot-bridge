@@ -446,12 +446,22 @@ function buildOmpReplyMarkdownPost(
   if (input.senderOwnership.kind === 'mention') {
     content.push([{ tag: 'at', user_id: input.senderOwnership.openId }]);
   }
-  if (targetOpenIds[0]) {
-    content.push([
-      { tag: 'text', text: 'AI 代 ' },
-      { tag: 'at', user_id: targetOpenIds[0] },
-      { tag: 'text', text: '回答（已在本回复中点名）' },
-    ]);
+  if (targetOpenIds.length > 0) {
+    const disclosure: object[] = [{ tag: 'text', text: 'AI 代 ' }];
+    targetOpenIds.forEach((openId, index) => {
+      if (index > 0) disclosure.push({ tag: 'text', text: '、' });
+      disclosure.push({ tag: 'at', user_id: openId });
+    });
+    disclosure.push({ tag: 'text', text: ' 回答（已在本回复中点名）' });
+    content.push(disclosure);
+    if (input.invocationKind === 'substitution' && input.invalidTargetCount > 0) {
+      content.push([
+        {
+          tag: 'text',
+          text: `另有 ${input.invalidTargetCount} 个对象身份无法确认，未代答。`,
+        },
+      ]);
+    }
     content.push([{ tag: 'text', text: '' }]);
   }
   if (content.length === 0) {
@@ -637,13 +647,17 @@ function withSenderOwnership(
         : `<at id="${escapeAttribute(input.senderOwnership.openId)}"></at>`,
     );
   }
-  const targetOpenId = substitutionMentionOpenIds(input)[0];
-  if (targetOpenId) {
-    const target =
+  const targetOpenIds = substitutionMentionOpenIds(input);
+  if (targetOpenIds.length > 0 && input.invocationKind === 'substitution') {
+    const targets = targetOpenIds.map((targetOpenId, index) =>
       mentionMode === 'plain'
-        ? '\\@目标'
-        : `<at id="${escapeAttribute(targetOpenId)}"></at>`;
-    prefix.push(`AI 代 ${target}回答（已在本回复中点名）`);
+        ? `\\@${escapeMarkdown(input.substitutionTargetLabels[index] ?? '目标')}`
+        : `<at id="${escapeAttribute(targetOpenId)}"></at>`,
+    );
+    prefix.push(`AI 代 ${targets.join('、')} 回答（已在本回复中点名）`);
+    if (input.invalidTargetCount > 0) {
+      prefix.push(`另有 ${input.invalidTargetCount} 个对象身份无法确认，未代答。`);
+    }
   }
   if (prefix.length === 0) return ownedBody;
   if (mentionMode === 'plain') {

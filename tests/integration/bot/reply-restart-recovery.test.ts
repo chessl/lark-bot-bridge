@@ -40,7 +40,9 @@ const SUBSTITUTION_REPLY_POLICY: ImReplyPolicy = {
   scope: REPLY_POLICY.scope,
   target: TARGET,
   senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-  substitutionTargetOpenIds: ['ou_target'],
+  substitutionTargetOpenIds: ['ou_target', 'ou_second'],
+  substitutionTargetLabels: ['Target', 'Second'],
+  invalidTargetCount: 2,
 };
 const cleanups: Array<() => Promise<void>> = [];
 const journals: OmpDeliveryJournal[] = [];
@@ -161,7 +163,7 @@ describe('OMP Reply restart recovery', () => {
     expect(fake.reply).toHaveBeenCalledOnce();
     const payload = JSON.stringify(replyPayload(fake.reply.mock.calls[0]?.[0]));
     expect(payload.match(/ou_sender/g)).toHaveLength(1);
-    expect(payload).not.toMatch(/ou_target|AI 代|回答（已在本回复中点名）/);
+    expect(payload).not.toMatch(/ou_target|ou_second|另有 2 个|AI 代|回答（已在本回复中点名）/);
     expect(restarted.entries()).toEqual([]);
   });
 
@@ -186,8 +188,11 @@ describe('OMP Reply restart recovery', () => {
                 [
                   { tag: 'text', text: 'AI 代 ' },
                   { tag: 'at', user_id: 'ou_target' },
-                  { tag: 'text', text: '回答（已在本回复中点名）' },
+                  { tag: 'text', text: '、' },
+                  { tag: 'at', user_id: 'ou_second' },
+                  { tag: 'text', text: ' 回答（已在本回复中点名）' },
                 ],
+                [{ tag: 'text', text: '另有 2 个对象身份无法确认，未代答。' }],
                 [{ tag: 'md', text: 'answer' }],
               ],
             },
@@ -215,7 +220,11 @@ describe('OMP Reply restart recovery', () => {
 
     expect(fake.reply).toHaveBeenCalledOnce();
     expect(fake.reply.mock.calls[0]?.[0]).toEqual(pending.request);
-    expect(JSON.stringify(fake.reply.mock.calls[0]?.[0]).match(/ou_target/g)).toHaveLength(1);
+    const replay = JSON.stringify(fake.reply.mock.calls[0]?.[0]);
+    expect(replay.match(/ou_target/g)).toHaveLength(1);
+    expect(replay.match(/ou_second/g)).toHaveLength(1);
+    expect(replay.indexOf('ou_target')).toBeLessThan(replay.indexOf('ou_second'));
+    expect(replay).toContain('另有 2 个对象身份无法确认');
     expect(fake.update).not.toHaveBeenCalled();
     expect(fake.patch).not.toHaveBeenCalled();
     expect(restarted.entries()).toEqual([]);

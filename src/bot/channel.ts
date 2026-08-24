@@ -48,6 +48,7 @@ import {
   finalizeImReply,
   type ImConversationScope,
   type ImInvocation,
+  type ImMessagePlan,
   type ImOrdinaryMessagePlan,
   type ImPromptMessage,
   planImMessage,
@@ -704,6 +705,20 @@ async function sendForwardFetchFailedHint(
   }
 }
 
+async function sendInvalidSubstitutionTargetsReply(
+  channel: LarkChannel,
+  plan: Extract<ImMessagePlan, { lane: 'control' }>,
+): Promise<void> {
+  await channel.send(
+    plan.source.message.chatId,
+    { text: `无法确认这 ${plan.invalidTargetCount} 个代答对象的身份，未启动代答。` },
+    {
+      replyTo: plan.source.message.messageId,
+      ...(plan.scope.kind === 'topic' ? { replyInThread: true } : {}),
+    },
+  );
+}
+
 interface IntakeDeps {
   channel: LarkChannel;
   agent: OmpRunEngine;
@@ -824,6 +839,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
       ? { kind: plan.lane }
       : {}),
     ...(plan.lane === 'peer' ? { alias: plan.peer.alias } : {}),
+    ...(plan.lane === 'control' ? { invalidTargetCount: plan.invalidTargetCount } : {}),
   });
 
   if (plan.lane === 'drop') {
@@ -846,6 +862,13 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   const plannedMessage = plan.source.message;
   const receipt = messageReceipts.get(msg);
   if (receipt) messageReceipts.set(plannedMessage, receipt);
+
+  if (plan.lane === 'control') {
+    await sendInvalidSubstitutionTargetsReply(channel, plan).catch((err) =>
+      log.warn('intake', 'substitution-control-reply-failed', { err: String(err) }),
+    );
+    return;
+  }
 
   // A merge_forward whose sub-messages the SDK could not fetch (transient
   // upstream failure, already retried inside @larksuite/channel) arrives as the
@@ -1393,7 +1416,7 @@ function buildPrompt(
         ]
       : policy.kind === 'substitution'
         ? [
-            `本次是 personal substitution 隔离调用，显示目标为「${policy.targetAliases[0]}」。显示名只用于本次可读上下文，不是授权事实。只返回答案正文；发送者归属、替身披露和目标 Mention 由 transport 固定生成。`,
+            `本次是 personal substitution 隔离调用，显示目标依次为「${policy.targetAliases.join('、')}」。另有 ${policy.invalidTargetCount} 个对象身份无法确认。显示名只用于本次可读上下文，不是授权事实。只返回答案正文；发送者归属、替身披露和目标 Mention 由 transport 固定生成。`,
           ]
         : [
             `可信 peer 协作策略：oneHop=${String(policy.oneHop)}，maxActivePeers=1，aliases=[${

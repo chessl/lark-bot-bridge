@@ -80,19 +80,30 @@ describe('OMP profile schema', () => {
     expect(createDefaultProfileConfig({ app, omp }).collaboration).toEqual(collaboration);
   });
 
-  it('retains one disabled substitution target and rejects unsafe cardinality atomically', () => {
+  it('accepts 1-10 targets, retains disabled lists, and rejects the whole invalid set', () => {
+    const ten = Array.from({ length: 10 }, (_, index) => `ou_target_${index}`);
+    expect(normalizePersonalSubstitution({ enabled: true, targetOpenIds: ten })).toEqual({
+      enabled: true,
+      targetOpenIds: ten,
+    });
     expect(
-      normalizePersonalSubstitution({ enabled: false, targetOpenIds: ['ou_target'] }),
-    ).toEqual({ enabled: false, targetOpenIds: ['ou_target'] });
+      normalizePersonalSubstitution({ enabled: false, targetOpenIds: ['ou_first', 'ou_second'] }),
+    ).toEqual({ enabled: false, targetOpenIds: ['ou_first', 'ou_second'] });
     expect(() =>
       normalizePersonalSubstitution({ enabled: true, targetOpenIds: [] }),
-    ).toThrow(/requires one target/);
+    ).toThrow(/at least one target/);
     expect(() =>
       normalizePersonalSubstitution({
         enabled: true,
-        targetOpenIds: ['ou_first', 'ou_second'],
+        targetOpenIds: [...ten, 'ou_eleventh'],
       }),
-    ).toThrow(/between 0 and 1/);
+    ).toThrow(/between 0 and 10/);
+    expect(() =>
+      normalizePersonalSubstitution({
+        enabled: true,
+        targetOpenIds: ['ou_duplicate', 'ou_duplicate'],
+      }),
+    ).toThrow(/duplicated/);
     expect(() =>
       normalizePersonalSubstitution({ enabled: true, targetOpenIds: ['user_target'] }),
     ).toThrow(/open ID/);

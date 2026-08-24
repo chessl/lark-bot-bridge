@@ -133,6 +133,8 @@ describe('OMP Reply CardKit budget', () => {
       target: { chatId: 'oc_group', messageId: 'om_source', replyInThread: false },
       senderOwnership: { kind: 'mention', openId: 'ou_sender' },
       substitutionTargetOpenIds: ['ou_target'],
+      substitutionTargetLabels: ['Target'],
+      invalidTargetCount: 0,
       state,
     };
 
@@ -149,7 +151,7 @@ describe('OMP Reply CardKit budget', () => {
     expect(Buffer.byteLength(degraded)).toBeLessThanOrEqual(MAX_CARD_BYTES);
     expect(degraded).toContain(TRUNCATION_MARKER);
     expect(degraded).toContain('\\\\@请求者');
-    expect(degraded).toContain('\\\\@目标');
+    expect(degraded).toContain('\\\\@Target');
     expect(degraded).not.toMatch(/ou_sender|ou_target|<at|"tag":"at"/);
   });
 

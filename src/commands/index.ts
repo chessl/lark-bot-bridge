@@ -1409,17 +1409,22 @@ async function saveAccessConfig(
 
 async function handleConfig(args: string, ctx: CommandContext): Promise<void> {
   const [sub = '', arg] = args.trim().split(/\s+/);
+  const counts = parseConfigDraftCounts(arg);
   switch (sub) {
     case '':
       return showConfigForm(ctx);
     case 'submit':
-      return submitConfig(ctx, parsePeerCount(arg));
+      return submitConfig(ctx, counts);
     case 'cancel':
       return cancelConfig(ctx);
     case 'peer-add':
-      return updateTrustedPeerDraft(ctx, 'add');
+      return updateCollaborationDraft(ctx, 'peer-add', counts);
     case 'peer-delete':
-      return updateTrustedPeerDraft(ctx, 'delete', parsePeerCount(arg));
+      return updateCollaborationDraft(ctx, 'peer-delete', counts);
+    case 'substitution-add':
+      return updateCollaborationDraft(ctx, 'substitution-add', counts);
+    case 'substitution-delete':
+      return updateCollaborationDraft(ctx, 'substitution-delete', counts);
     default:
       await reply(ctx, '用法:`/config`');
   }
@@ -1462,10 +1467,31 @@ async function showConfigForm(ctx: CommandContext): Promise<void> {
   await sendManagedCard(ctx.channel, ctx.msg.chatId, card, commandReplyOptions(ctx));
 }
 
-function parsePeerCount(value: string | undefined): number | undefined {
-  if (value === undefined || !/^\d+$/.test(value)) return undefined;
-  const count = Number(value);
-  return count >= 0 && count <= 10 ? count : undefined;
+interface ConfigDraftCounts {
+  peerCount?: number;
+  substitutionCount?: number;
+  deleteIndex?: number;
+}
+
+function parseConfigDraftCounts(value: string | undefined): ConfigDraftCounts {
+  if (value === undefined) return {};
+  const match = /^(\d+),(\d+)(?:,(\d+))?$/.exec(value);
+  if (!match) return {};
+  const peerCount = Number(match[1]);
+  const substitutionCount = Number(match[2]);
+  const deleteIndex = match[3] === undefined ? undefined : Number(match[3]);
+  if (
+    peerCount > 10 ||
+    substitutionCount > 10 ||
+    (deleteIndex !== undefined && deleteIndex > 9)
+  ) {
+    return {};
+  }
+  return {
+    peerCount,
+    substitutionCount,
+    ...(deleteIndex === undefined ? {} : { deleteIndex }),
+  };
 }
 
 function trustedPeerDraft(
@@ -1512,7 +1538,10 @@ function restoreTrustedPeerDraft(
   });
 }
 
-function personalSubstitutionDraft(ctx: CommandContext): PersonalSubstitutionConfig {
+function personalSubstitutionDraft(
+  ctx: CommandContext,
+  count: number | undefined,
+): PersonalSubstitutionConfig {
   const fv = ctx.formValue ?? {};
   const current = maskSavedPersonalSubstitution(
     ctx.controls.cfg.collaboration.personalSubstitution,
@@ -1524,20 +1553,32 @@ function personalSubstitutionDraft(ctx: CommandContext): PersonalSubstitutionCon
       : rawEnabled === 'no'
         ? false
         : ctx.controls.cfg.collaboration.personalSubstitution.enabled;
-  const target =
-    'personal_substitution_target' in fv
-      ? String(fv.personal_substitution_target ?? '').trim()
-      : (current.targetOpenIds[0] ?? '');
-  return { enabled, targetOpenIds: target ? [target] : [] };
+  const indexes =
+    count === undefined
+      ? Object.keys(fv)
+          .map((key) => /^personal_substitution_target_(\d+)$/.exec(key)?.[1])
+          .filter((value): value is string => value !== undefined)
+          .map(Number)
+          .filter((value) => Number.isInteger(value) && value >= 0 && value < 10)
+      : Array.from({ length: count }, (_, index) => index);
+  const ordered = [...new Set(indexes)].sort((left, right) => left - right);
+  if (ordered.length === 0 && count === undefined) return current;
+  return {
+    enabled,
+    targetOpenIds: ordered.map((index) =>
+      String(fv[`personal_substitution_target_${index}`] ?? '').trim(),
+    ),
+  };
 }
 
 function maskSavedPersonalSubstitution(
   config: PersonalSubstitutionConfig,
 ): PersonalSubstitutionConfig {
-  const target = config.targetOpenIds[0];
   return {
     enabled: config.enabled,
-    targetOpenIds: target ? [`…${target.slice(-6)} [substitution saved 0]`] : [],
+    targetOpenIds: config.targetOpenIds.map(
+      (target, index) => `…${target.slice(-6)} [substitution saved ${index}]`,
+    ),
   };
 }
 
@@ -1545,58 +1586,78 @@ async function resolvePersonalSubstitution(
   ctx: CommandContext,
   draft: PersonalSubstitutionConfig,
 ): Promise<PersonalSubstitutionConfig> {
-  const target = draft.targetOpenIds[0];
-  if (!target) return normalizePersonalSubstitution(draft);
-
-  const savedMatch = /^…(.{1,6}) \[substitution saved 0\]$/.exec(target);
-  if (savedMatch) {
-    const saved = ctx.controls.cfg.collaboration.personalSubstitution.targetOpenIds[0];
-    if (!saved || saved.slice(-6) !== savedMatch[1]) {
-      throw new Error('saved personal substitution target is stale');
-    }
-    return normalizePersonalSubstitution({ enabled: draft.enabled, targetOpenIds: [saved] });
-  }
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(target)) {
-    throw new Error('personal substitution target must be an enterprise email');
-  }
-
-  const response = await ctx.channel.rawClient.request<{
-    data?: {
-      user_list?: Array<{ email?: string; user_id?: string }>;
-    };
-  }>({
-    method: 'POST',
-    url: '/open-apis/contact/v3/users/batch_get_id',
-    params: { user_id_type: 'open_id' },
-    data: { emails: [target] },
-  });
-  const matches = (response.data?.user_list ?? []).filter(
-    (entry) => entry.email?.toLowerCase() === target.toLowerCase(),
+  const saved = ctx.controls.cfg.collaboration.personalSubstitution.targetOpenIds;
+  const resolved: Array<string | undefined> = Array.from(
+    { length: draft.targetOpenIds.length },
+    () => undefined,
   );
-  if (matches.length !== 1 || typeof matches[0]?.user_id !== 'string') {
-    throw new Error('personal substitution target could not be resolved');
+  const emails: string[] = [];
+  const emailIndexes = new Map<string, number>();
+  for (const [index, target] of draft.targetOpenIds.entries()) {
+    const savedMatch = /^…(.{1,6}) \[substitution saved (\d+)\]$/.exec(target);
+    if (savedMatch) {
+      const savedIndex = Number(savedMatch[2]);
+      const original = saved[savedIndex];
+      if (!original || original.slice(-6) !== savedMatch[1]) {
+        throw new Error('saved personal substitution target is stale');
+      }
+      resolved[index] = original;
+      continue;
+    }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(target)) {
+      throw new Error('personal substitution target must be an enterprise email');
+    }
+    const key = target.toLowerCase();
+    if (emailIndexes.has(key)) {
+      throw new Error('personal substitution target is duplicated');
+    }
+    emailIndexes.set(key, index);
+    emails.push(target);
+  }
+
+  if (emails.length > 0) {
+    const response = await ctx.channel.rawClient.request<{
+      data?: {
+        user_list?: Array<{ email?: string; user_id?: string }>;
+      };
+    }>({
+      method: 'POST',
+      url: '/open-apis/contact/v3/users/batch_get_id',
+      params: { user_id_type: 'open_id' },
+      data: { emails },
+    });
+    for (const email of emails) {
+      const matches = (response.data?.user_list ?? []).filter(
+        (entry) => entry.email?.toLowerCase() === email.toLowerCase(),
+      );
+      const index = emailIndexes.get(email.toLowerCase());
+      if (matches.length !== 1 || typeof matches[0]?.user_id !== 'string' || index === undefined) {
+        throw new Error('personal substitution target could not be resolved');
+      }
+      resolved[index] = matches[0].user_id;
+    }
   }
   return normalizePersonalSubstitution({
     enabled: draft.enabled,
-    targetOpenIds: [matches[0].user_id],
+    targetOpenIds: resolved.map((target) => {
+      if (!target) throw new Error('personal substitution target could not be resolved');
+      return target;
+    }),
   });
 }
 
 function configFormOptions(
   ctx: CommandContext,
   trustedPeerBots: TrustedPeerBot[],
-  personalSubstitution = personalSubstitutionDraft(ctx),
+  personalSubstitution = personalSubstitutionDraft(ctx, undefined),
 ): ConfigFormOpts {
   const idleMs = getRunIdleTimeoutMs(ctx.controls.cfg);
   const access = ctx.controls.cfg.access;
-  const substitutionTarget = personalSubstitution.targetOpenIds[0];
   const safePersonalSubstitution = {
     enabled: personalSubstitution.enabled,
-    targetOpenIds:
-      substitutionTarget &&
-      /^…[A-Za-z0-9_-]{1,6} \[substitution saved 0\]$/.test(substitutionTarget)
-        ? [substitutionTarget]
-        : [],
+    targetOpenIds: personalSubstitution.targetOpenIds.map((target) =>
+      /^…[A-Za-z0-9_-]{1,6} \[substitution saved \d+\]$/.test(target) ? target : '',
+    ),
   };
   return {
     mode: ctx.controls.cfg.mode,
@@ -1616,18 +1677,30 @@ function configFormOptions(
   };
 }
 
-async function updateTrustedPeerDraft(
+async function updateCollaborationDraft(
   ctx: CommandContext,
-  action: 'add' | 'delete',
-  deleteIndex?: number,
+  action: 'peer-add' | 'peer-delete' | 'substitution-add' | 'substitution-delete',
+  counts: ConfigDraftCounts,
 ): Promise<void> {
   if (!ctx.fromCardAction) return;
-  const peers = trustedPeerDraft(ctx, undefined);
-  const substitution = personalSubstitutionDraft(ctx);
-  if (action === 'add') {
-    if (peers.length < 10) peers.push({ alias: '', openId: '' });
-  } else if (deleteIndex !== undefined && deleteIndex < peers.length) {
-    peers.splice(deleteIndex, 1);
+  const peers = trustedPeerDraft(ctx, counts.peerCount);
+  const substitution = personalSubstitutionDraft(ctx, counts.substitutionCount);
+  if (action === 'peer-add' && peers.length < 10) {
+    peers.push({ alias: '', openId: '' });
+  } else if (
+    action === 'peer-delete' &&
+    counts.deleteIndex !== undefined &&
+    counts.deleteIndex < peers.length
+  ) {
+    peers.splice(counts.deleteIndex, 1);
+  } else if (action === 'substitution-add' && substitution.targetOpenIds.length < 10) {
+    substitution.targetOpenIds.push('');
+  } else if (
+    action === 'substitution-delete' &&
+    counts.deleteIndex !== undefined &&
+    counts.deleteIndex < substitution.targetOpenIds.length
+  ) {
+    substitution.targetOpenIds.splice(counts.deleteIndex, 1);
   }
   const card = configFormCard(configFormOptions(ctx, peers, substitution));
   const formMsgId = ctx.msg.messageId;
@@ -1668,13 +1741,13 @@ async function cancelConfig(ctx: CommandContext): Promise<void> {
   }
 }
 
-async function submitConfig(ctx: CommandContext, peerCount?: number): Promise<void> {
+async function submitConfig(ctx: CommandContext, counts: ConfigDraftCounts): Promise<void> {
   const fv = ctx.formValue ?? {};
   const peerDraft = restoreTrustedPeerDraft(
-    trustedPeerDraft(ctx, peerCount),
+    trustedPeerDraft(ctx, counts.peerCount),
     ctx.controls.cfg.collaboration.trustedPeerBots,
   );
-  const substitutionDraft = personalSubstitutionDraft(ctx);
+  const substitutionDraft = personalSubstitutionDraft(ctx, counts.substitutionCount);
   // Unexpected or empty values keep the current selection. Store `undefined`
   // for the "default" sentinel to keep config tidy.
   const rawModel = String(fv.model ?? '').trim();

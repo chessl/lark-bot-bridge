@@ -249,7 +249,9 @@ describe('terminal OMP Run state', () => {
         scope: { kind: 'chat', id: 'oc_group', chatId: 'oc_group', mode: 'group' },
         target: { chatId: 'oc_group', messageId: 'om_source', replyInThread: false },
         senderOwnership: { kind: 'mention', openId: 'ou_sender' },
-        substitutionTargetOpenIds: ['ou_target'],
+        substitutionTargetOpenIds: ['ou_target', 'ou_second'],
+        substitutionTargetLabels: ['Target', 'Second'],
+        invalidTargetCount: 2,
         state,
       };
       const card = JSON.stringify(renderOmpReplyCard(plan));
@@ -260,14 +262,18 @@ describe('terminal OMP Run state', () => {
       for (const projection of [card, markdown, post]) {
         expect(projection.match(/ou_sender/g)).toHaveLength(1);
         expect(projection.includes('ou_target')).toBe(targetMention);
+        expect(projection.includes('ou_second')).toBe(targetMention);
         expect(projection.includes('AI 代')).toBe(targetMention);
         expect(projection.includes('回答（已在本回复中点名）')).toBe(targetMention);
+        expect(projection.includes('另有 2 个对象身份无法确认')).toBe(targetMention);
         expect(projection).not.toContain('ou_fake');
       }
       expect(post.match(/ou_target/g) ?? []).toHaveLength(targetMention ? 1 : 0);
-      expect(degraded).not.toMatch(/ou_sender|ou_target|<at|"tag":"at"/);
+      expect(post.match(/ou_second/g) ?? []).toHaveLength(targetMention ? 1 : 0);
+      expect(degraded).not.toMatch(/ou_sender|ou_target|ou_second|<at|"tag":"at"/);
       expect(degraded).toContain('\\\\@请求者');
-      expect(degraded.includes('\\\\@目标')).toBe(targetMention);
+      expect(degraded.includes('\\\\@Target')).toBe(targetMention);
+      expect(degraded.includes('\\\\@Second')).toBe(targetMention);
       expect(degraded.includes('回答（已在本回复中点名）')).toBe(targetMention);
       expect(degraded).toContain('Mention 不可用');
     },

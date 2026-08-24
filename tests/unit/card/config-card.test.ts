@@ -43,7 +43,7 @@ describe('config trusted peer controls', () => {
     expect(json).toContain('config.peer-add');
     expect(json).toContain('config.peer-delete');
     expect(json).toContain('trusted_peer_alias_1');
-    expect(json).toContain('"cmd":"config.submit","arg":"2"');
+    expect(json).toContain('"cmd":"config.submit","arg":"2,0"');
     expect(json).not.toContain('ou_peer_secret_123456');
   });
 
@@ -62,15 +62,20 @@ describe('config trusted peer controls', () => {
 describe('config personal substitution controls', () => {
   const personalSubstitution = {
     enabled: true,
-    targetOpenIds: ['ou_target_secret_123456'],
+    targetOpenIds: ['ou_target_secret_123456', 'ou_second_secret_654321'],
   };
 
-  it('keeps one retained target in the collaboration form without a real Mention or full ID', () => {
+  it('renders Add/Delete rows without a real Mention or full ID', () => {
     const json = JSON.stringify(configFormCard({ ...base, personalSubstitution }));
     expect(json).toContain('personal_substitution_enabled');
-    expect(json).toContain('personal_substitution_target');
+    expect(json).toContain('personal_substitution_target_0');
+    expect(json).toContain('personal_substitution_target_1');
+    expect(json).toContain('config.substitution-add');
+    expect(json).toContain('config.substitution-delete');
     expect(json).toContain('…123456');
+    expect(json).toContain('…654321');
     expect(json).not.toContain('ou_target_secret_123456');
+    expect(json).not.toContain('ou_second_secret_654321');
     expect(json).not.toContain('<at');
   });
 
@@ -80,11 +85,11 @@ describe('config personal substitution controls', () => {
       configFailedCard(
         'target@example.com failed for ou_target_secret_123456',
         [],
-        1,
+        2,
       ),
     );
-    expect(saved).toContain('启用（1 个已保存目标）');
-    expect(failed).toContain('1 个目标（内容已隐藏）');
+    expect(saved).toContain('启用（2 个已保存目标）');
+    expect(failed).toContain('2 个目标（内容已隐藏）');
     for (const card of [saved, failed]) {
       expect(card).not.toContain('target@example.com');
       expect(card).not.toContain('ou_target_secret_123456');
