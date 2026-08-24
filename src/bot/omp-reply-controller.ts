@@ -1238,8 +1238,8 @@ function validateFinalPlan(plan: ImReplyPlan, progressPolicy: ImReplyPolicy): vo
     case 'substitution':
       break;
     default: {
-      const exhaustive: never = plan.invocationKind;
-      throw new Error(`unsupported IM Invocation kind: ${exhaustive}`);
+      const exhaustive: never = plan;
+      throw new Error(`unsupported IM Invocation: ${String(exhaustive)}`);
     }
   }
 
