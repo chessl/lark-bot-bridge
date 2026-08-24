@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createDefaultProfileConfig,
   normalizeProfileConfig,
+  normalizeTrustedPeerBots,
 } from '../../../src/config/profile-schema';
 
 const app = { id: 'cli_test', secret: 'secret', tenant: 'feishu' as const };
@@ -76,5 +77,43 @@ describe('OMP profile schema', () => {
   it('requires persisted collaboration and defaults new profiles off', () => {
     expect(() => normalizeProfileConfig({ app, omp })).toThrow(/collaboration/);
     expect(createDefaultProfileConfig({ app, omp }).collaboration).toEqual(collaboration);
+  });
+
+  it('validates trusted peer aliases and canonical IDs atomically', () => {
+    expect(
+      normalizeTrustedPeerBots(
+        [
+          { alias: 'Hermes_1', openId: 'ou_peer1' },
+          { alias: '北斗-2', openId: 'ou_peer2' },
+        ],
+        'ou_current',
+      ),
+    ).toEqual([
+      { alias: 'Hermes_1', openId: 'ou_peer1' },
+      { alias: '北斗-2', openId: 'ou_peer2' },
+    ]);
+
+    const invalid = [
+      [{ alias: 'all', openId: 'ou_peer' }],
+      [{ alias: 'bad alias', openId: 'ou_peer' }],
+      [{ alias: '@peer', openId: 'ou_peer' }],
+      [{ alias: 'Hermes', openId: 'user_peer' }],
+      [
+        { alias: 'Hermes', openId: 'ou_peer1' },
+        { alias: 'ℌermes', openId: 'ou_peer2' },
+      ],
+      [
+        { alias: 'Hermes', openId: 'ou_peer' },
+        { alias: 'Atlas', openId: 'ou_peer' },
+      ],
+      [{ alias: 'Self', openId: 'ou_current' }],
+      Array.from({ length: 11 }, (_, index) => ({
+        alias: `Peer${index}`,
+        openId: `ou_peer${index}`,
+      })),
+    ];
+    for (const peers of invalid) {
+      expect(() => normalizeTrustedPeerBots(peers, 'ou_current')).toThrow();
+    }
   });
 });

@@ -95,6 +95,8 @@ export async function savePreferencesConfig(
   mode: ProfileMode,
   /** In-meeting agent settings; omitted by callers that don't edit them. */
   meeting?: ProfileConfig['meeting'],
+  /** Trusted peer settings; omitted by callers that do not edit collaboration. */
+  collaboration?: ProfileConfig['collaboration'],
 ): Promise<void> {
   await withConfigFileLock(state.configPath, async () => {
     const root = await loadRootConfig(state.configPath);
@@ -114,6 +116,7 @@ export async function savePreferencesConfig(
         requireMentionInGroup,
       },
       ...(meeting ? { meeting } : {}),
+      ...(collaboration ? { collaboration } : {}),
     };
     await saveRootConfig(root, state.configPath);
     state.cfg = runtimeProfileConfig(root, state.profile);

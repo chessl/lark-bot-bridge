@@ -1118,6 +1118,7 @@ async function failRecovery(
 function validateFinalPlan(plan: ImReplyPlan, progressPolicy: ImReplyPolicy): void {
   switch (plan.invocationKind) {
     case 'ordinary':
+    case 'peer':
       break;
     default: {
       const exhaustive: never = plan.invocationKind;

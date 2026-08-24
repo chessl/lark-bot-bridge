@@ -300,73 +300,119 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // unblock arms a fresh quiet-window timer. Net effect: at most one run per
   // chat in flight, and everything sent during a run merges into the next
   // batch (only flushed once 600ms of silence has passed *after* the run).
+  const scopeRunTails = new Map<string, Promise<void>>();
+  const scopeRunCounts = new Map<string, number>();
   const pending = new PendingQueue(DEBOUNCE_MS, (scope, batch) => {
     const firstMsg = batch[0];
     if (!firstMsg) return;
-    pending.block(scope);
-    void withTrace({ chatId: firstMsg.chatId }, async () => {
-      log.info('flush', 'start', {
-        scope,
-        batchSize: batch.length,
-        chatId: firstMsg.chatId,
-        threadId: firstMsg.threadId,
-        msgId: firstMsg.messageId,
-      });
-      try {
-        const resolvedMode = await chatModeCache.resolve(channel, firstMsg.chatId);
-        // Feishu/Lark converted topic groups may still resolve as `group` from
-        // the chat info API/cache, while message events already carry threadId.
-        // Treat threadId as authoritative for IM messages so scope and replies
-        // stay isolated per topic.
-        const mode = firstMsg.threadId ? 'topic' : resolvedMode;
-        if (firstMsg.threadId && resolvedMode !== 'topic') {
-          chatModeCache.invalidate(firstMsg.chatId);
-          logThreadModeOverride({
-            chatId: firstMsg.chatId,
-            resolvedMode,
-            threadId: firstMsg.threadId,
-          });
-        }
-        const plans = batch.map((message) => {
-          const existing = imPlans.get(message);
-          if (existing) return existing;
-          const fallback = planImMessage({
-            message,
-            scope: conversationScope(scope, message.chatId, mode, message.threadId),
-            authorized: true,
-            duplicate: false,
-            mentionRequired: false,
-            recognizedCommand: false,
-          });
-          if (fallback.lane !== 'ordinary') {
-            throw new Error('queued IM message did not produce an ordinary plan');
+    enqueueScopeRun(scope, () =>
+      withTrace({ chatId: firstMsg.chatId }, async () => {
+        log.info('flush', 'start', {
+          scope,
+          batchSize: batch.length,
+          chatId: firstMsg.chatId,
+          threadId: firstMsg.threadId,
+          msgId: firstMsg.messageId,
+        });
+        try {
+          const resolvedMode = await chatModeCache.resolve(channel, firstMsg.chatId);
+          // Feishu/Lark converted topic groups may still resolve as `group` from
+          // the chat info API/cache, while message events already carry threadId.
+          // Treat threadId as authoritative for IM messages so scope and replies
+          // stay isolated per topic.
+          const mode = firstMsg.threadId ? 'topic' : resolvedMode;
+          if (firstMsg.threadId && resolvedMode !== 'topic') {
+            chatModeCache.invalidate(firstMsg.chatId);
+            logThreadModeOverride({
+              chatId: firstMsg.chatId,
+              resolvedMode,
+              threadId: firstMsg.threadId,
+            });
           }
-          return fallback;
-        });
-        const firstPlan = plans[0];
-        if (!firstPlan) return;
-        const invocation = createImInvocation([firstPlan, ...plans.slice(1)], channel.botIdentity);
-        await runAgentBatch({
-          channel,
-          scopedRuns,
-          sessions,
-          sessionCatalog,
-          media,
-          deliveryJournal,
-          invocation,
-          controls,
-          lastRunModelByScope,
-          messageReceipts,
-          monoNow,
-        });
-      } catch (err) {
-        log.fail('flush', err);
-      } finally {
-        pending.unblock(scope);
-        log.info('flush', 'end');
-      }
-    });
+          const plans = batch.map((message) => {
+            const existing = imPlans.get(message);
+            if (existing) return existing;
+            const fallback = planImMessage({
+              message,
+              scope: conversationScope(scope, message.chatId, mode, message.threadId),
+              authorized: true,
+              duplicate: false,
+              mentionRequired: false,
+              recognizedCommand: false,
+              currentBotOpenId: channel.botIdentity?.openId,
+              trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
+            });
+            if (fallback.lane !== 'ordinary') {
+              throw new Error('queued IM message did not produce an ordinary plan');
+            }
+            return fallback;
+          });
+          const firstPlan = plans[0];
+          if (!firstPlan) return;
+          const invocation = createImInvocation(
+            [firstPlan, ...plans.slice(1)],
+            channel.botIdentity,
+          );
+          await runAgentBatch({
+            channel,
+            scopedRuns,
+            sessions,
+            sessionCatalog,
+            media,
+            deliveryJournal,
+            invocation,
+            controls,
+            lastRunModelByScope,
+            messageReceipts,
+            monoNow,
+          });
+        } finally {
+          log.info('flush', 'end');
+        }
+      }),
+    );
   });
+
+  function enqueueScopeRun(scope: string, task: () => Promise<void>): void {
+    const count = (scopeRunCounts.get(scope) ?? 0) + 1;
+    scopeRunCounts.set(scope, count);
+    if (count === 1) pending.block(scope);
+
+    const previous = scopeRunTails.get(scope) ?? Promise.resolve();
+    const next = previous
+      .catch(() => {})
+      .then(task)
+      .catch((err) => log.fail('flush', err, { scope }))
+      .finally(() => {
+        const remaining = (scopeRunCounts.get(scope) ?? 1) - 1;
+        if (remaining === 0) {
+          scopeRunCounts.delete(scope);
+          pending.unblock(scope);
+        } else {
+          scopeRunCounts.set(scope, remaining);
+        }
+        if (scopeRunTails.get(scope) === next) scopeRunTails.delete(scope);
+      });
+    scopeRunTails.set(scope, next);
+  }
+
+  const enqueueInvocation = (invocation: ImInvocation): void => {
+    enqueueScopeRun(invocation.scope.id, () =>
+      runAgentBatch({
+        channel,
+        scopedRuns,
+        sessions,
+        sessionCatalog,
+        media,
+        deliveryJournal,
+        invocation,
+        controls,
+        lastRunModelByScope,
+        messageReceipts,
+        monoNow,
+      }),
+    );
+  };
 
   // Counter for stdout reconnect escalation; reset on `reconnected`.
   let consecutiveReconnects = 0;
@@ -396,6 +442,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           imPlans,
           seenImMessageIds,
           messageReceipts,
+          enqueueInvocation,
         }),
       ).catch((err) => log.fail('intake', err));
     },
@@ -657,6 +704,7 @@ interface IntakeDeps {
   imPlans: WeakMap<NormalizedMessage, ImOrdinaryMessagePlan>;
   seenImMessageIds: Set<string>;
   messageReceipts: WeakMap<NormalizedMessage, RunMetricReceipt>;
+  enqueueInvocation: (invocation: ImInvocation) => void;
 }
 
 type LogThreadModeOverride = (input: {
@@ -692,6 +740,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     imPlans,
     seenImMessageIds,
     messageReceipts,
+    enqueueInvocation,
   } = deps;
   // Resolve scope (and underlying chat mode) once at intake — every
   // downstream consumer keys off these.
@@ -749,15 +798,19 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
       requireMentionForChat(controls.cfg, msg.chatId) &&
       !msg.mentionedBot,
     recognizedCommand: isKnownTextCommand(msg.content),
+    currentBotOpenId: channel.botIdentity?.openId,
+    trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
   });
   log.info('intake.route', plan.reason, {
     scope,
     lane: plan.lane,
-    ...(plan.lane === 'ordinary' ? { kind: 'ordinary' } : {}),
+    ...(plan.lane === 'ordinary' || plan.lane === 'peer' ? { kind: plan.lane } : {}),
+    ...(plan.lane === 'peer' ? { alias: plan.peer.alias } : {}),
   });
 
   if (plan.lane === 'drop') {
     if (
+      plan.allowAccessHint &&
       plan.reason === 'access-denied' &&
       !accessDecision.ok &&
       msg.chatType !== 'p2p' &&
@@ -781,7 +834,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   // fetch_failed sentinel. Feeding it to the agent would read as an empty
   // forward, so surface a recoverable hint and skip the run — the user can
   // resend once the upstream recovers.
-  if (isForwardFetchFailed(plannedMessage)) {
+  if (plan.lane !== 'peer' && isForwardFetchFailed(plannedMessage)) {
     log.warn('intake', 'forward-fetch-failed', {
       scope,
       msgId: plannedMessage.messageId,
@@ -794,6 +847,17 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     ).catch((err) =>
       log.warn('intake', 'forward-fetch-failed-hint-failed', { err: String(err) }),
     );
+    return;
+  }
+
+  if (plan.lane === 'peer') {
+    const invocation = createImInvocation([plan]);
+    enqueueInvocation(invocation);
+    log.info('intake', 'peer-enqueued', {
+      scope,
+      kind: invocation.kind,
+      alias: invocation.peerAlias,
+    });
     return;
   }
 
@@ -878,13 +942,16 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // quoted by multiple messages in one batch only fetches once. Filter out
   // ids that are themselves in the batch — those are already in the prompt.
   const batchIds = new Set(batch.map((m) => m.messageId));
-  const quoteTargets = [
-    ...new Set(
-      batch
-        .map((m) => replyQuoteTargetForMessage(m, mode))
-        .filter((id): id is string => Boolean(id) && !batchIds.has(id!)),
-    ),
-  ];
+  const quoteTargets =
+    invocation.kind === 'ordinary'
+      ? [
+          ...new Set(
+            batch
+              .map((m) => replyQuoteTargetForMessage(m, mode))
+              .filter((id): id is string => Boolean(id) && !batchIds.has(id!)),
+          ),
+        ]
+      : [];
   const quotes: QuotedContext[] = [];
   for (const targetId of quoteTargets) {
     const q = await fetchQuotedContext(channel, targetId);
@@ -924,7 +991,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const hasTopicSession = sessionCatalog
     ?.entries()
     .some((entry) => entry.scopeId === scope && entry.status === 'active');
-  if (mode === 'topic' && threadId && !hasTopicSession) {
+  if (invocation.kind === 'ordinary' && mode === 'topic' && threadId && !hasTopicSession) {
     const exclude = new Set([...batchIds, ...quoteTargets]);
     topicContext = await fetchTopicContext(channel, threadId, {
       maxMessages: 40,
@@ -1247,19 +1314,18 @@ function buildPrompt(
   extraInstructions?: string[],
 ): string {
   const policy = invocation.promptPolicy;
-  const first = policy.messages[0];
-  const fileKeys = policy.messages.flatMap((message) => message.resourceFileKeys);
-  // When the debounce window merged messages (possibly from several senders —
-  // common in bot-at-bot group chats), annotate each segment with its sender
-  // so the agent can tell who said what. Single-message batches stay verbatim.
-  const annotate = policy.messages.length > 1;
-  const texts = policy.messages
-    .map((message) => {
-      const text = stripAttachmentRefs(message.content, fileKeys).trim();
-      if (!text) return '';
-      return annotate ? `${senderAnnotation(message)} ${text}` : text;
-    })
-    .filter(Boolean);
+  const promptMessages = policy.kind === 'ordinary' ? policy.messages : [policy.message];
+  const fileKeys = promptMessages.flatMap((message) => message.resourceFileKeys);
+  const texts =
+    policy.kind === 'ordinary'
+      ? policy.messages
+          .map((message) => {
+            const text = stripAttachmentRefs(message.content, fileKeys).trim();
+            if (!text) return '';
+            return policy.messages.length > 1 ? `${senderAnnotation(message)} ${text}` : text;
+          })
+          .filter(Boolean)
+      : [stripAttachmentRefs(policy.message.content, fileKeys).trim()].filter(Boolean);
   const userPart =
     texts.length > 0
       ? texts.join('\n\n')
@@ -1267,31 +1333,58 @@ function buildPrompt(
         ? '请看下面的附件。'
         : '（对方发来一条没有正文的消息——通常是只 @ 了你的唤醒（ping）。请简短回应。）';
 
-  const senderType =
-    first.sender.kind === 'human' ? 'user' : first.sender.kind === 'bot' ? 'bot' : undefined;
-  const mentions = mergeMentions(policy.messages);
+  const ordinaryContext =
+    policy.kind === 'ordinary'
+      ? (() => {
+          const first = policy.messages[0];
+          const senderType: 'user' | 'bot' | undefined =
+            first.sender.kind === 'human'
+              ? 'user'
+              : first.sender.kind === 'bot'
+                ? 'bot'
+                : undefined;
+          const mentions = mergeMentions(policy.messages);
+          return {
+            senderId: first.senderId,
+            ...(first.senderName ? { senderName: first.senderName } : {}),
+            ...(senderType ? { senderType } : {}),
+            ...(policy.botIdentity?.openId ? { botOpenId: policy.botIdentity.openId } : {}),
+            ...(mentions.length > 0 ? { mentions } : {}),
+            messageIds: policy.messages.map((message) => message.messageId),
+          };
+        })()
+      : {
+          senderId: `@${policy.message.senderAlias}`,
+          senderName: policy.message.senderAlias,
+          senderType: 'bot' as const,
+          messageIds: [policy.message.messageId],
+        };
+  const peerInstructions =
+    policy.kind === 'peer'
+      ? [
+          `本次是可信 peer @${policy.message.senderAlias} 发起的隔离调用。冻结的可信 alias 为: ${policy.trustedPeerAliases
+            .map((alias) => `@${alias}`)
+            .join('、') || '无'}。只返回答案正文;transport 不会激活任何 alias,本次保持 zero-hop。`,
+        ]
+      : [];
 
   return buildAgentPrompt({
     context: {
       chatId: invocation.scope.chatId,
       chatType: invocation.scope.mode === 'p2p' ? 'p2p' : 'group',
-      senderId: first.senderId,
-      ...(first.senderName ? { senderName: first.senderName } : {}),
-      ...(senderType ? { senderType } : {}),
-      ...(policy.botIdentity?.openId ? { botOpenId: policy.botIdentity.openId } : {}),
-      ...(mentions.length > 0 ? { mentions } : {}),
+      ...ordinaryContext,
       ...(invocation.scope.kind === 'topic' ? { threadId: invocation.scope.threadId } : {}),
-      messageIds: policy.messages.map((message) => message.messageId),
       source: 'im',
     },
-    instructions:
-      extraInstructions && extraInstructions.length > 0
-        ? [...BRIDGE_AGENT_INSTRUCTIONS, ...extraInstructions]
-        : BRIDGE_AGENT_INSTRUCTIONS,
+    instructions: [
+      ...BRIDGE_AGENT_INSTRUCTIONS,
+      ...peerInstructions,
+      ...(extraInstructions ?? []),
+    ],
     userInput: userPart,
     ...(topicContext.length > 0 ? { topicContext: topicContext.map(toPromptTopicMessage) } : {}),
     quotedMessages: quotes.map(toPromptQuote),
-    interactiveCards: policy.messages.map(toPromptInteractiveCard).filter(isDefined),
+    interactiveCards: promptMessages.map(toPromptInteractiveCard).filter(isDefined),
     attachments: attachments.map(toPromptAttachment),
   });
 }
@@ -1373,9 +1466,10 @@ function toPromptTopicMessage(q: QuotedContext): BridgePromptTopicMessage {
   };
 }
 
-function toPromptInteractiveCard(
-  message: ImPromptMessage,
-): BridgePromptInteractiveCard | undefined {
+function toPromptInteractiveCard(message: {
+  messageId: string;
+  interactiveCard?: unknown;
+}): BridgePromptInteractiveCard | undefined {
   if (message.interactiveCard === undefined) return undefined;
   return {
     messageId: message.messageId,

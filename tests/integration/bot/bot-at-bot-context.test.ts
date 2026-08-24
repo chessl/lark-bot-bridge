@@ -66,6 +66,7 @@ const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   sdkMock.channel = undefined;
+  vi.useRealTimers();
   sdkMock.createLarkChannel.mockClear();
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
 });
@@ -81,8 +82,12 @@ describe('bot identity injection into the agent adapter', () => {
 });
 
 describe('sender identity in bridge_context', () => {
-  it('marks a bot sender via raw sender_type and injects botOpenId and mentions', async () => {
+  it('projects a trusted direct peer through aliases without canonical peer IDs', async () => {
     const h = await createHarness();
+    h.profileConfig.collaboration.trustedPeerBots.push({
+      alias: 'Hermes',
+      openId: 'ou_hermes',
+    });
     await startTestBridge(h);
 
     await h.channel.handlers.message?.(
@@ -91,26 +96,32 @@ describe('sender identity in bridge_context', () => {
         senderId: 'ou_hermes',
         senderName: 'HermesBot',
         content: '@Bridge 部署完成，请验证',
-        rawSenderType: 'app',
-        mentions: [
-          { key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true },
-          { key: '@_user_2', openId: 'ou_human', name: '张三', isBot: false },
+        rawSenderType: 'bot',
+        mentions: [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }],
+        rawMentions: [
+          {
+            key: '@_user_1',
+            id: { open_id: 'ou_bot' },
+            mentioned_type: 'bot',
+            name: 'Bridge',
+          },
         ],
       }),
     );
     await waitFor(() => h.agent.runOptions.length === 1);
 
-    const context = readSection(h.agent.runOptions[0]?.prompt ?? '', 'bridge_context') as {
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    const context = readSection(prompt, 'bridge_context') as {
       senderType?: string;
+      senderId?: string;
       botOpenId?: string;
-      mentions?: Array<{ openId?: string; name?: string; isBot?: boolean }>;
+      mentions?: unknown[];
     };
-    expect(context.senderType).toBe('bot');
-    expect(context.botOpenId).toBe('ou_bot');
-    expect(context.mentions).toEqual([
-      { openId: 'ou_bot', name: 'Bridge', isBot: true },
-      { openId: 'ou_human', name: '张三', isBot: false },
-    ]);
+    expect(context).toMatchObject({ senderType: 'bot', senderId: '@Hermes' });
+    expect(context).not.toHaveProperty('botOpenId');
+    expect(context).not.toHaveProperty('mentions');
+    expect(prompt).toContain('@Hermes');
+    expect(prompt).not.toContain('ou_hermes');
   });
 
   it('marks a human sender via raw sender_type', async () => {
@@ -132,7 +143,57 @@ describe('sender identity in bridge_context', () => {
     expect(context.senderType).toBe('user');
   });
 
-  it('omits senderType when the raw event is unavailable', async () => {
+  it('silently drops untrusted, indirect, and Bot Command traffic', async () => {
+    vi.useFakeTimers();
+    const h = await createHarness();
+    h.profileConfig.collaboration.trustedPeerBots.push({
+      alias: 'Hermes',
+      openId: 'ou_hermes',
+    });
+    await startTestBridge(h);
+
+    const directMention = [
+      {
+        key: '@_user_1',
+        id: { open_id: 'ou_bot' },
+        mentioned_type: 'bot',
+        name: 'Bridge',
+      },
+    ];
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_untrusted',
+        senderId: 'ou_unknown_bot',
+        content: 'untrusted',
+        rawSenderType: 'bot',
+        rawMentions: directMention,
+      }),
+    );
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_indirect',
+        senderId: 'ou_hermes',
+        content: '@Bridge text only',
+        rawSenderType: 'bot',
+        rawMentions: [],
+      }),
+    );
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_bot_command',
+        senderId: 'ou_hermes',
+        content: '/config',
+        rawSenderType: 'bot',
+        rawMentions: directMention,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(h.agent.runOptions).toHaveLength(0);
+  });
+
+  it('silently drops traffic whose sender identity is unavailable', async () => {
+    vi.useFakeTimers();
     const h = await createHarness();
     await startTestBridge(h);
 
@@ -140,16 +201,12 @@ describe('sender identity in bridge_context', () => {
       message({
         messageId: 'om_no_raw',
         content: '@Bridge 在吗',
+        normalizedSenderType: 'bot',
       }),
     );
-    await waitFor(() => h.agent.runOptions.length === 1);
+    await vi.advanceTimersByTimeAsync(800);
 
-    const context = readSection(h.agent.runOptions[0]?.prompt ?? '', 'bridge_context') as Record<
-      string,
-      unknown
-    >;
-    expect(context).not.toHaveProperty('senderType');
-    expect(context.botOpenId).toBe('ou_bot');
+    expect(h.agent.runOptions).toHaveLength(0);
   });
 
   it('turns a mention-only message into an explicit wake-up ping', async () => {
@@ -172,37 +229,42 @@ describe('sender identity in bridge_context', () => {
     expect(userInput.text).toContain('没有正文');
   });
 
-  it('annotates each message with its sender when a batch merges multiple senders', async () => {
+  it('runs peer messages independently and in arrival order', async () => {
     const h = await createHarness();
+    h.profileConfig.collaboration.trustedPeerBots.push({
+      alias: 'Hermes',
+      openId: 'ou_hermes',
+    });
     await startTestBridge(h);
 
-    await h.channel.handlers.message?.(
-      message({
-        messageId: 'om_batch_user',
-        senderId: 'ou_human',
-        senderName: '张三',
-        content: '@Bridge 这个报错怎么回事',
-        rawSenderType: 'user',
-      }),
-    );
-    await h.channel.handlers.message?.(
-      message({
-        messageId: 'om_batch_bot',
-        senderId: 'ou_hermes',
-        senderName: 'HermesBot',
-        content: '我刚发布了 v1.2.3',
-        rawSenderType: 'app',
-      }),
-    );
-    await waitFor(() => h.agent.runOptions.length === 1);
+    for (const [messageId, content] of [
+      ['om_peer_first', 'first peer request'],
+      ['om_peer_second', 'second peer request'],
+    ]) {
+      await h.channel.handlers.message?.(
+        message({
+          messageId,
+          senderId: 'ou_hermes',
+          senderName: 'HermesBot',
+          content,
+          rawSenderType: 'bot',
+          mentions: [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }],
+          rawMentions: [
+            {
+              key: '@_user_1',
+              id: { open_id: 'ou_bot' },
+              mentioned_type: 'bot',
+              name: 'Bridge',
+            },
+          ],
+        }),
+      );
+    }
+    await waitFor(() => h.agent.runOptions.length === 2);
 
-    const userInput = readSection(h.agent.runOptions[0]?.prompt ?? '', 'user_input') as {
-      text: string;
-    };
-    expect(userInput.text).toContain('[张三 (user)]:');
-    expect(userInput.text).toContain('[HermesBot (bot)]:');
-    expect(userInput.text).toContain('这个报错怎么回事');
-    expect(userInput.text).toContain('我刚发布了 v1.2.3');
+    expect(h.agent.runOptions[0]?.prompt).toContain('first peer request');
+    expect(h.agent.runOptions[1]?.prompt).toContain('second peer request');
+    expect(h.agent.runOptions[0]?.prompt).not.toContain('second peer request');
   });
 
   it('keeps single-message batches free of sender annotations', async () => {
@@ -358,7 +420,15 @@ function message(input: {
   senderId?: string;
   senderName?: string;
   rawSenderType?: string;
+  normalizedSenderType?: string;
   mentions?: Array<{ key: string; openId?: string; name?: string; isBot?: boolean }>;
+  rawMentions?: Array<{
+    key: string;
+    id: { open_id: string };
+    mentioned_type: string;
+    name: string;
+  }>;
+  mentionedBot?: boolean;
 }): NormalizedMessage {
   return {
     messageId: input.messageId,
@@ -366,6 +436,12 @@ function message(input: {
     chatType: 'group',
     senderId: input.senderId ?? 'ou_user',
     senderName: input.senderName ?? 'User',
+    ...(input.normalizedSenderType
+      ? {
+          senderType: input.normalizedSenderType,
+          senderIsBot: input.normalizedSenderType === 'bot',
+        }
+      : {}),
     content: input.content,
     rawContentType: 'text',
     resources: [],
@@ -373,7 +449,7 @@ function message(input: {
       { key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true },
     ],
     mentionAll: false,
-    mentionedBot: true,
+    mentionedBot: input.mentionedBot ?? true,
     createTime: 1760000001000,
     ...(input.rawSenderType
       ? {
@@ -382,7 +458,10 @@ function message(input: {
               sender_id: { open_id: input.senderId ?? 'ou_user' },
               sender_type: input.rawSenderType,
             },
-            message: { message_id: input.messageId },
+            message: {
+              message_id: input.messageId,
+              ...(input.rawMentions ? { mentions: input.rawMentions } : {}),
+            },
           },
         }
       : {}),

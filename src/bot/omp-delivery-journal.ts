@@ -48,7 +48,7 @@ const SenderOwnershipSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 const ReplyPolicySchema = z.object({
-  invocationKind: z.literal('ordinary'),
+  invocationKind: z.enum(['ordinary', 'peer']),
   scope: ConversationScopeSchema,
   target: ReplyTargetSchema,
   senderOwnership: SenderOwnershipSchema,

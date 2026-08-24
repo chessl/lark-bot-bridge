@@ -59,6 +59,45 @@ describe('profile-aware account and config commands', () => {
     expect((root as unknown as { accounts?: unknown }).accounts).toBeUndefined();
   });
 
+
+  it('atomically saves a complete trusted peer directory', async () => {
+    vi.useFakeTimers();
+    const h = await createHarness();
+
+    await h.command('/config submit 2', {
+      trusted_peer_alias_0: 'Hermes',
+      trusted_peer_open_id_0: 'ou_peer1',
+      trusted_peer_alias_1: 'Atlas',
+      trusted_peer_open_id_1: 'ou_peer2',
+    });
+
+    const root = await waitForRoot(
+      h.rootDir,
+      (candidate) => candidate.profiles.claude?.collaboration.trustedPeerBots.length === 2,
+    );
+    expect(root.profiles.claude?.collaboration.trustedPeerBots).toEqual([
+      { alias: 'Hermes', openId: 'ou_peer1' },
+      { alias: 'Atlas', openId: 'ou_peer2' },
+    ]);
+  });
+
+  it('writes nothing when any trusted peer row is invalid', async () => {
+    vi.useFakeTimers();
+    const h = await createHarness();
+
+    await h.command('/config submit 2', {
+      max_concurrent_runs: '9',
+      trusted_peer_alias_0: 'Hermes',
+      trusted_peer_open_id_0: 'ou_peer1',
+      trusted_peer_alias_1: 'hermes',
+      trusted_peer_open_id_1: 'ou_peer2',
+    });
+    await vi.runAllTimersAsync();
+
+    const root = await readRoot(h.rootDir);
+    expect(root.profiles.claude?.collaboration.trustedPeerBots).toEqual([]);
+    expect(root.profiles.claude?.preferences.maxConcurrentRuns).toBeUndefined();
+  });
   it('saves /account submit into the active profile and profile-local keystore', async () => {
     vi.useFakeTimers();
     const h = await createHarness();

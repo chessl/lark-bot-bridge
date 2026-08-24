@@ -18,8 +18,13 @@ export interface OmpConfig {
   binaryPath: string;
   profile?: string;
 }
+export interface TrustedPeerBot {
+  alias: string;
+  openId: string;
+}
+
 export interface CollaborationConfig {
-  trustedPeerBots: Array<{ alias: string; openId: string }>;
+  trustedPeerBots: TrustedPeerBot[];
   personalSubstitution: {
     enabled: boolean;
     targetOpenIds: string[];
@@ -181,6 +186,64 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   };
 }
 
+const TRUSTED_PEER_ALIAS = /^[\p{L}\p{N}_-]{1,32}$/u;
+const TRUSTED_PEER_OPEN_ID = /^ou_[A-Za-z0-9_-]+$/;
+const RESERVED_PEER_ALIASES: Record<string, true> = {
+  all: true,
+  everyone: true,
+  here: true,
+};
+
+export function normalizeTrustedPeerBots(
+  input: unknown,
+  currentBotOpenId?: string,
+): TrustedPeerBot[] {
+  if (!Array.isArray(input) || input.length > 10) {
+    throw new Error('trusted peer count must be between 0 and 10');
+  }
+  const aliases = new Set<string>();
+  const openIds = new Set<string>();
+  return input.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error('trusted peer entry is invalid');
+    }
+    const alias =
+      'alias' in entry && typeof entry.alias === 'string' ? entry.alias : undefined;
+    const openId =
+      'openId' in entry && typeof entry.openId === 'string' ? entry.openId : undefined;
+    if (alias === undefined || openId === undefined) {
+      throw new Error('trusted peer entry is invalid');
+    }
+    const aliasKey = alias.normalize('NFKC').toLowerCase();
+    if (
+      alias !== alias.trim() ||
+      !TRUSTED_PEER_ALIAS.test(alias) ||
+      !TRUSTED_PEER_ALIAS.test(aliasKey) ||
+      [...aliasKey].length > 32
+    ) {
+      throw new Error('trusted peer alias is invalid');
+    }
+    if (RESERVED_PEER_ALIASES[aliasKey]) {
+      throw new Error('trusted peer alias is reserved');
+    }
+    if (aliases.has(aliasKey)) {
+      throw new Error('trusted peer alias is duplicated');
+    }
+    if (!TRUSTED_PEER_OPEN_ID.test(openId)) {
+      throw new Error('trusted peer open ID is invalid');
+    }
+    if (openIds.has(openId)) {
+      throw new Error('trusted peer open ID is duplicated');
+    }
+    if (currentBotOpenId && openId === currentBotOpenId) {
+      throw new Error('current Bot cannot be a trusted peer');
+    }
+    aliases.add(aliasKey);
+    openIds.add(openId);
+    return { alias, openId };
+  });
+}
+
 function normalizeCollaboration(input: unknown): CollaborationConfig {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('profile collaboration configuration is required');
@@ -189,24 +252,7 @@ function normalizeCollaboration(input: unknown): CollaborationConfig {
     trustedPeerBots?: unknown;
     personalSubstitution?: unknown;
   };
-  if (!Array.isArray(raw.trustedPeerBots)) {
-    throw new Error('collaboration trustedPeerBots must be an array');
-  }
-  const trustedPeerBots = raw.trustedPeerBots.map((entry) => {
-    if (
-      !entry ||
-      typeof entry !== 'object' ||
-      !('alias' in entry) ||
-      typeof entry.alias !== 'string' ||
-      !entry.alias.trim() ||
-      !('openId' in entry) ||
-      typeof entry.openId !== 'string' ||
-      !entry.openId.trim()
-    ) {
-      throw new Error('collaboration trustedPeerBots entry is invalid');
-    }
-    return { alias: entry.alias.trim(), openId: entry.openId.trim() };
-  });
+  const trustedPeerBots = normalizeTrustedPeerBots(raw.trustedPeerBots);
   const substitution = raw.personalSubstitution;
   if (!substitution || typeof substitution !== 'object' || Array.isArray(substitution)) {
     throw new Error('collaboration personalSubstitution is required');

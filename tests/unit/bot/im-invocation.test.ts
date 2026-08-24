@@ -38,74 +38,125 @@ const P2P_SCOPE: ImConversationScope = {
 
 
 describe('IM message planning', () => {
-  it.each(
-    [
-      {
-        name: 'verified human',
-        senderType: 'user',
-        rawSenderId: 'ou_sender',
-        expected: { kind: 'human', id: 'ou_sender' },
-      },
-      {
-        name: 'verified bot',
-        senderType: 'app',
-        rawSenderId: 'ou_sender',
-        expected: { kind: 'bot', id: 'ou_sender' },
-      },
-      {
-        name: 'missing raw sender',
-        senderType: undefined,
-        rawSenderId: undefined,
-        expected: { kind: 'unknown', reason: 'missing-raw-sender' },
-      },
-      {
-        name: 'missing raw sender ID',
-        senderType: 'user',
-        rawSenderId: undefined,
-        expected: { kind: 'unknown', reason: 'missing-sender-id' },
-      },
-      {
-        name: 'contradictory sender ID',
-        senderType: 'user',
+  it('keeps a verified human identity on ordinary traffic', () => {
+    const plan = ordinaryPlan(
+      imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
+      CHAT_SCOPE,
+    );
+    expect(plan.source.sender).toEqual({ kind: 'human', id: 'ou_sender' });
+  });
+
+  it.each([
+    {
+      name: 'missing raw sender',
+      message: imMessage({ normalizedSenderType: 'bot' }),
+      reason: 'unknown-sender',
+    },
+    {
+      name: 'contradictory sender ID',
+      message: imMessage({
+        senderType: 'bot',
+        normalizedSenderType: 'bot',
         rawSenderId: 'ou_other',
-        expected: { kind: 'unknown', reason: 'contradictory-sender-id' },
-      },
-      {
-        name: 'unknown sender type',
-        senderType: 'tenant',
-        rawSenderId: 'ou_sender',
-        expected: { kind: 'unknown', reason: 'unknown-sender-type' },
-      },
-      {
-        name: 'contradictory sender type',
+      }),
+      reason: 'unknown-sender',
+    },
+    {
+      name: 'contradictory sender type',
+      message: imMessage({
         senderType: 'user',
         normalizedSenderType: 'bot',
         rawSenderId: 'ou_sender',
-        expected: { kind: 'unknown', reason: 'contradictory-sender-type' },
-      },
-    ] satisfies Array<{
-      name: string;
-      senderType: string | undefined;
-      normalizedSenderType?: string;
-      rawSenderId: string | undefined;
-      expected: object;
-    }>,
-  )(
-    'keeps $name explicit',
-    ({ name, senderType, normalizedSenderType, rawSenderId, expected }) => {
-      const message = imMessage({
-        messageId: `om_${name}`,
-        ...(senderType === undefined ? {} : { senderType }),
-        ...(normalizedSenderType === undefined ? {} : { normalizedSenderType }),
-        ...(rawSenderId === undefined ? {} : { rawSenderId }),
-      });
-      const plan = ordinaryPlan(message, CHAT_SCOPE);
+      }),
+      reason: 'unknown-sender',
+    },
+  ])('drops $name without constructing a privileged lane', ({ message, reason }) => {
+    expect(
+      planImMessage({
+        message,
+        scope: CHAT_SCOPE,
+        authorized: true,
+        duplicate: false,
+        mentionRequired: false,
+        recognizedCommand: false,
+      }),
+    ).toMatchObject({ lane: 'drop', reason, allowAccessHint: false });
+  });
 
-      expect(plan.source.sender).toEqual(expected);
+  it.each([
+    {
+      name: 'trusted direct peer',
+      senderId: 'ou_peer',
+      rawMentionType: 'bot',
+      trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
+      content: 'please review',
+      expected: { lane: 'peer', reason: 'trusted-peer' },
+    },
+    {
+      name: 'untrusted direct Bot',
+      senderId: 'ou_other',
+      rawMentionType: 'bot',
+      trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
+      content: 'please review',
+      expected: { lane: 'drop', reason: 'untrusted-bot' },
+    },
+    {
+      name: 'indirect trusted Bot',
+      senderId: 'ou_peer',
+      rawMentionType: undefined,
+      trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
+      content: '@Bridge as text only',
+      expected: { lane: 'drop', reason: 'bot-not-direct-mention' },
+    },
+    {
+      name: 'contradictory Mention kind',
+      senderId: 'ou_peer',
+      rawMentionType: 'user',
+      trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
+      content: 'please review',
+      expected: { lane: 'drop', reason: 'contradictory-mention' },
+    },
+    {
+      name: 'Bot Command',
+      senderId: 'ou_peer',
+      rawMentionType: 'bot',
+      trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
+      content: '/config',
+      expected: { lane: 'drop', reason: 'bot-command' },
+    },
+  ])(
+    'routes $name from verified identity and structured current-Bot Mention only',
+    ({ senderId, rawMentionType, trustedPeerBots, content, expected }) => {
+      const directMention =
+        rawMentionType === undefined
+          ? []
+          : [{ id: { open_id: 'ou_bot' }, mentioned_type: rawMentionType }];
+      const plan = planImMessage({
+        message: imMessage({
+          senderId,
+          senderType: 'bot',
+          rawSenderId: senderId,
+          content,
+          mentions:
+            rawMentionType === undefined
+              ? []
+              : [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }],
+          rawMentions: directMention,
+          mentionedBot: rawMentionType !== undefined,
+        }),
+        scope: CHAT_SCOPE,
+        authorized: true,
+        duplicate: false,
+        mentionRequired: false,
+        recognizedCommand: content === '/config',
+        currentBotOpenId: 'ou_bot',
+        trustedPeerBots,
+      });
+      expect(plan).toMatchObject(expected);
     },
   );
 
-  it('applies access, duplicate, mention, and human Command precedence in that order', () => {
+  it('applies access, duplicate, human Command, then mention policy precedence', () => {
     const message = imMessage({ senderType: 'user', rawSenderId: 'ou_sender' });
     const base = {
       message,
@@ -122,14 +173,7 @@ describe('IM message planning', () => {
     expect(planImMessage({ ...base, duplicate: true, mentionRequired: true }).reason).toBe(
       'duplicate-message',
     );
-    expect(planImMessage({ ...base, mentionRequired: true }).reason).toBe('mention-required');
-    expect(planImMessage(base)).toMatchObject({ lane: 'command', reason: 'human-command' });
-
-    const botCommand = planImMessage({
-      ...base,
-      message: imMessage({ senderType: 'app', rawSenderId: 'ou_sender' }),
-    });
-    expect(botCommand).toMatchObject({ lane: 'ordinary', reason: 'ordinary-message' });
+    expect(planImMessage({ ...base, mentionRequired: true }).reason).toBe('human-command');
   });
 });
 
@@ -215,6 +259,61 @@ describe('ordinary IM Invocation creation', () => {
       kind: 'mention',
       openId: 'ou_sender',
     });
+  });
+});
+
+describe('peer IM Invocation creation', () => {
+  it('freezes alias policy, keeps Topic target, and projects no canonical peer IDs', () => {
+    const trustedPeerBots = [
+      { alias: 'Hermes', openId: 'ou_peer' },
+      { alias: 'Atlas', openId: 'ou_atlas' },
+    ];
+    const plan = planImMessage({
+      message: imMessage({
+        messageId: 'om_peer',
+        senderId: 'ou_peer',
+        senderType: 'bot',
+        rawSenderId: 'ou_peer',
+        threadId: 'omt_topic',
+        mentions: [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }],
+        rawMentions: [{ id: { open_id: 'ou_bot' }, mentioned_type: 'bot' }],
+      }),
+      scope: TOPIC_SCOPE,
+      authorized: true,
+      duplicate: false,
+      mentionRequired: false,
+      recognizedCommand: false,
+      currentBotOpenId: 'ou_bot',
+      trustedPeerBots,
+    });
+    if (plan.lane !== 'peer') throw new Error(`expected peer plan, got ${plan.lane}`);
+
+    trustedPeerBots[0] = { alias: 'Changed', openId: 'ou_changed' };
+    const invocation = createImInvocation([plan]);
+
+    expect(invocation).toMatchObject({
+      kind: 'peer',
+      peerAlias: 'Hermes',
+      scope: TOPIC_SCOPE,
+      replyTarget: {
+        messageId: 'om_peer',
+        threadId: 'omt_topic',
+        replyInThread: true,
+      },
+      replyPolicy: {
+        invocationKind: 'peer',
+        senderOwnership: { kind: 'none', reason: 'verified-bot-sender' },
+      },
+      promptPolicy: {
+        kind: 'peer',
+        reason: 'trusted-peer-message',
+        trustedPeerAliases: ['Hermes', 'Atlas'],
+        zeroHop: true,
+      },
+    });
+    expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_peer');
+    expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_atlas');
+    expect(Object.isFrozen(invocation.trustedPeers)).toBe(true);
   });
 });
 
@@ -304,6 +403,12 @@ function imMessage(
     rawSenderId?: string;
     normalizedSenderType?: string;
     threadId?: string;
+    mentions?: Array<{ key: string; openId?: string; name?: string; isBot?: boolean }>;
+    rawMentions?: Array<{
+      id: { open_id: string };
+      mentioned_type: string;
+    }>;
+    mentionedBot?: boolean;
   } = {},
 ): NormalizedMessage {
   const senderId = input.senderId ?? 'ou_sender';
@@ -323,9 +428,9 @@ function imMessage(
     content: input.content ?? 'hello',
     rawContentType: 'text',
     resources: [],
-    mentions: [],
+    mentions: input.mentions ?? [],
     mentionAll: false,
-    mentionedBot: true,
+    mentionedBot: input.mentionedBot ?? true,
     createTime: 1760000001000,
     ...(input.senderType === undefined
       ? {}
@@ -337,6 +442,7 @@ function imMessage(
                 ? {}
                 : { sender_id: { open_id: input.rawSenderId } }),
             },
+            ...(input.rawMentions ? { message: { mentions: input.rawMentions } } : {}),
           },
         }),
     ...(input.threadId ? { threadId: input.threadId } : {}),

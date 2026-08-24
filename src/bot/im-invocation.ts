@@ -47,11 +47,17 @@ export type ImReplyTarget =
 export type ImRouteReason =
   | 'access-denied'
   | 'duplicate-message'
+  | 'unknown-sender'
   | 'mention-required'
   | 'human-command'
+  | 'bot-command'
+  | 'bot-not-direct-mention'
+  | 'contradictory-mention'
+  | 'untrusted-bot'
+  | 'trusted-peer'
   | 'ordinary-message';
 
-export type ImPromptReason = 'ordinary-message-batch';
+export type ImPromptReason = 'ordinary-message-batch' | 'trusted-peer-message';
 
 export type ImReplyReason =
   | 'run-completed'
@@ -67,6 +73,10 @@ export type ImSenderOwnership =
   | Readonly<{ kind: 'mention'; openId: string }>
   | Readonly<{ kind: 'none'; reason: ImSenderOwnershipReason }>;
 
+export type ImTrustedPeer = Readonly<{
+  alias: string;
+  openId: VerifiedBotId;
+}>;
 
 export interface PlanImMessageInput {
   message: NormalizedMessage;
@@ -75,13 +85,30 @@ export interface PlanImMessageInput {
   duplicate: boolean;
   mentionRequired: boolean;
   recognizedCommand: boolean;
+  currentBotOpenId?: string;
+  trustedPeerBots?: ReadonlyArray<{ alias: string; openId: string }>;
 }
 
-export type ImMessagePlan = ImDroppedMessagePlan | ImCommandPlan | ImOrdinaryMessagePlan;
+export type ImMessagePlan =
+  | ImDroppedMessagePlan
+  | ImCommandPlan
+  | ImOrdinaryMessagePlan
+  | ImPeerMessagePlan;
 
 export type ImDroppedMessagePlan = Readonly<{
   lane: 'drop';
-  reason: Extract<ImRouteReason, 'access-denied' | 'duplicate-message' | 'mention-required'>;
+  reason: Extract<
+    ImRouteReason,
+    | 'access-denied'
+    | 'duplicate-message'
+    | 'unknown-sender'
+    | 'mention-required'
+    | 'bot-command'
+    | 'bot-not-direct-mention'
+    | 'contradictory-mention'
+    | 'untrusted-bot'
+  >;
+  allowAccessHint: boolean;
 }>;
 
 export type ImCommandPlan = Readonly<{
@@ -96,6 +123,15 @@ export type ImOrdinaryMessagePlan = Readonly<{
   reason: 'ordinary-message';
   scope: ImConversationScope;
   source: ImSourceMessage;
+}>;
+
+export type ImPeerMessagePlan = Readonly<{
+  lane: 'peer';
+  reason: 'trusted-peer';
+  scope: ImConversationScope;
+  source: ImSourceMessage;
+  peer: ImTrustedPeer;
+  trustedPeers: readonly ImTrustedPeer[];
 }>;
 
 export type ImSourceMessage = Readonly<{
@@ -119,28 +155,58 @@ export type ImPromptMessage = Readonly<{
   interactiveCard?: unknown;
 }>;
 
-export type ImPromptPolicy = Readonly<{
-  kind: 'ordinary';
-  reason: ImPromptReason;
-  messages: readonly [ImPromptMessage, ...ImPromptMessage[]];
-  botIdentity?: Readonly<{ openId: string; name?: string }>;
+export type ImPeerPromptMessage = Readonly<{
+  messageId: string;
+  senderAlias: string;
+  content: string;
+  resourceFileKeys: readonly string[];
+  interactiveCard?: unknown;
 }>;
 
+export type ImPromptPolicy =
+  | Readonly<{
+      kind: 'ordinary';
+      reason: Extract<ImPromptReason, 'ordinary-message-batch'>;
+      messages: readonly [ImPromptMessage, ...ImPromptMessage[]];
+      botIdentity?: Readonly<{ openId: string; name?: string }>;
+    }>
+  | Readonly<{
+      kind: 'peer';
+      reason: Extract<ImPromptReason, 'trusted-peer-message'>;
+      message: ImPeerPromptMessage;
+      trustedPeerAliases: readonly string[];
+      zeroHop: true;
+    }>;
+
 export type ImReplyPolicy = Readonly<{
-  invocationKind: 'ordinary';
+  invocationKind: 'ordinary' | 'peer';
   scope: ImConversationScope;
   target: ImReplyTarget;
   senderOwnership: ImSenderOwnership;
 }>;
 
-export type ImInvocation = Readonly<{
+export type ImInvocation = ImOrdinaryInvocation | ImPeerInvocation;
+
+export type ImOrdinaryInvocation = Readonly<{
   kind: 'ordinary';
   routeReason: 'ordinary-message';
   scope: ImConversationScope;
   sourceMessages: readonly [ImSourceMessage, ...ImSourceMessage[]];
   replyTarget: ImReplyTarget;
-  promptPolicy: ImPromptPolicy;
-  replyPolicy: ImReplyPolicy;
+  promptPolicy: Extract<ImPromptPolicy, { kind: 'ordinary' }>;
+  replyPolicy: ImReplyPolicy & Readonly<{ invocationKind: 'ordinary' }>;
+}>;
+
+export type ImPeerInvocation = Readonly<{
+  kind: 'peer';
+  routeReason: 'trusted-peer';
+  scope: ImConversationScope;
+  sourceMessages: readonly [ImSourceMessage];
+  replyTarget: ImReplyTarget;
+  peerAlias: string;
+  trustedPeers: readonly ImTrustedPeer[];
+  promptPolicy: Extract<ImPromptPolicy, { kind: 'peer' }>;
+  replyPolicy: ImReplyPolicy & Readonly<{ invocationKind: 'peer' }>;
 }>;
 
 export type ImReplyPlan = ImReplyPolicy &
@@ -150,33 +216,125 @@ export type ImReplyPlan = ImReplyPolicy &
   }>;
 
 export function planImMessage(input: PlanImMessageInput): ImMessagePlan {
-  if (!input.authorized) return Object.freeze({ lane: 'drop', reason: 'access-denied' });
-  if (input.duplicate) return Object.freeze({ lane: 'drop', reason: 'duplicate-message' });
-  if (input.mentionRequired) return Object.freeze({ lane: 'drop', reason: 'mention-required' });
-
   const source = snapshotSource(input.message);
+  const allowAccessHint = source.sender.kind === 'human';
+  if (!input.authorized) {
+    return Object.freeze({ lane: 'drop', reason: 'access-denied', allowAccessHint });
+  }
+  if (input.duplicate) {
+    return Object.freeze({ lane: 'drop', reason: 'duplicate-message', allowAccessHint: false });
+  }
   const scope = snapshotScope(input.scope);
-  if (input.recognizedCommand && source.sender.kind === 'human') {
+  if (source.sender.kind === 'unknown') {
+    if (isBotCandidate(input.message)) {
+      return Object.freeze({ lane: 'drop', reason: 'unknown-sender', allowAccessHint: false });
+    }
+    if (input.mentionRequired) {
+      return Object.freeze({ lane: 'drop', reason: 'mention-required', allowAccessHint: false });
+    }
     return Object.freeze({
-      lane: 'command',
-      reason: 'human-command',
+      lane: 'ordinary',
+      reason: 'ordinary-message',
       scope,
       source,
     });
   }
+  if (source.sender.kind === 'human') {
+    if (input.recognizedCommand) {
+      return Object.freeze({
+        lane: 'command',
+        reason: 'human-command',
+        scope,
+        source,
+      });
+    }
+    if (input.mentionRequired) {
+      return Object.freeze({ lane: 'drop', reason: 'mention-required', allowAccessHint: false });
+    }
+    return Object.freeze({
+      lane: 'ordinary',
+      reason: 'ordinary-message',
+      scope,
+      source,
+    });
+  }
+
+  if (input.recognizedCommand) {
+    return Object.freeze({ lane: 'drop', reason: 'bot-command', allowAccessHint: false });
+  }
+  const mention = directCurrentBotMention(input.message, input.currentBotOpenId);
+  if (mention === 'contradictory') {
+    return Object.freeze({
+      lane: 'drop',
+      reason: 'contradictory-mention',
+      allowAccessHint: false,
+    });
+  }
+  if (mention === 'not-direct') {
+    return Object.freeze({
+      lane: 'drop',
+      reason: 'bot-not-direct-mention',
+      allowAccessHint: false,
+    });
+  }
+
+  const trustedPeers = snapshotTrustedPeers(input.trustedPeerBots ?? []);
+  const peer = trustedPeers.find((candidate) => candidate.openId === source.sender.id);
+  if (!peer) {
+    return Object.freeze({ lane: 'drop', reason: 'untrusted-bot', allowAccessHint: false });
+  }
   return Object.freeze({
-    lane: 'ordinary',
-    reason: 'ordinary-message',
+    lane: 'peer',
+    reason: 'trusted-peer',
     scope,
     source,
+    peer,
+    trustedPeers,
   });
 }
 
 export function createImInvocation(
   plans: readonly [ImOrdinaryMessagePlan, ...ImOrdinaryMessagePlan[]],
   botIdentity?: Readonly<{ openId: string; name?: string }>,
+): ImOrdinaryInvocation;
+export function createImInvocation(
+  plans: readonly [ImPeerMessagePlan],
+  botIdentity?: Readonly<{ openId: string; name?: string }>,
+): ImPeerInvocation;
+export function createImInvocation(
+  plans:
+    | readonly [ImOrdinaryMessagePlan, ...ImOrdinaryMessagePlan[]]
+    | readonly [ImPeerMessagePlan],
+  botIdentity?: Readonly<{ openId: string; name?: string }>,
 ): ImInvocation {
   const first = plans[0];
+  if (first.lane === 'peer') {
+    const target = replyTarget(first.source.message);
+    const replyPolicy = Object.freeze({
+      invocationKind: 'peer',
+      scope: first.scope,
+      target,
+      senderOwnership: Object.freeze({ kind: 'none', reason: 'verified-bot-sender' }),
+    }) satisfies ImPeerInvocation['replyPolicy'];
+    return Object.freeze({
+      kind: 'peer',
+      routeReason: 'trusted-peer',
+      scope: first.scope,
+      sourceMessages: Object.freeze([first.source]),
+      replyTarget: target,
+      peerAlias: first.peer.alias,
+      trustedPeers: first.trustedPeers,
+      promptPolicy: Object.freeze({
+        kind: 'peer',
+        reason: 'trusted-peer-message',
+        message: toPeerPromptMessage(first.source, first.peer.alias),
+        trustedPeerAliases: Object.freeze(first.trustedPeers.map(({ alias }) => alias)),
+        zeroHop: true,
+      }),
+      replyPolicy,
+    });
+  }
+
   const seen = new Set<string>();
   const sources: ImSourceMessage[] = [];
   for (const plan of plans) {
@@ -198,7 +356,7 @@ export function createImInvocation(
     scope: first.scope,
     target,
     senderOwnership: senderOwnership(first.scope, last.sender),
-  }) satisfies ImReplyPolicy;
+  }) satisfies ImOrdinaryInvocation['replyPolicy'];
   return Object.freeze({
     kind: 'ordinary',
     routeReason: 'ordinary-message',
@@ -337,6 +495,76 @@ function toPromptMessage(source: ImSourceMessage): ImPromptMessage {
   });
 }
 
+function toPeerPromptMessage(source: ImSourceMessage, alias: string): ImPeerPromptMessage {
+  const message = source.message;
+  const interactiveCard = readInteractiveCard(message);
+  return Object.freeze({
+    messageId: message.messageId,
+    senderAlias: alias,
+    content: message.content,
+    resourceFileKeys: Object.freeze(message.resources.map((resource) => resource.fileKey)),
+    ...(interactiveCard === undefined ? {} : { interactiveCard }),
+  });
+}
+
+function snapshotTrustedPeers(
+  peers: ReadonlyArray<{ alias: string; openId: string }>,
+): readonly ImTrustedPeer[] {
+  return Object.freeze(
+    peers.map(({ alias, openId }) =>
+      Object.freeze({
+        alias,
+        openId: verifiedBotId(openId),
+      }),
+    ),
+  );
+}
+
+function directCurrentBotMention(
+  message: NormalizedMessage,
+  currentBotOpenId: string | undefined,
+): 'direct' | 'not-direct' | 'contradictory' {
+  if (!currentBotOpenId) return 'not-direct';
+  const raw = message.raw;
+  if (
+    typeof raw !== 'object' ||
+    raw === null ||
+    !('message' in raw) ||
+    typeof raw.message !== 'object' ||
+    raw.message === null ||
+    !('mentions' in raw.message) ||
+    !Array.isArray(raw.message.mentions)
+  ) {
+    return 'not-direct';
+  }
+
+  let direct = false;
+  for (const mention of raw.message.mentions) {
+    if (
+      !mention ||
+      typeof mention !== 'object' ||
+      !('id' in mention) ||
+      typeof mention.id !== 'object' ||
+      mention.id === null ||
+      !('open_id' in mention.id) ||
+      mention.id.open_id !== currentBotOpenId
+    ) {
+      continue;
+    }
+    if (!('mentioned_type' in mention) || mention.mentioned_type !== 'bot') {
+      return 'contradictory';
+    }
+    direct = true;
+  }
+  if (!direct) return 'not-direct';
+
+  const normalized = (message.mentions ?? []).find(
+    (mention) => mention.openId === currentBotOpenId,
+  );
+  if (!normalized || normalized.isBot === false) return 'contradictory';
+  return 'direct';
+}
+
 function readInteractiveCard(message: NormalizedMessage): unknown {
   const raw = message.raw;
   if (
@@ -410,6 +638,22 @@ function senderKind(value: unknown): 'human' | 'bot' | undefined {
   if (value === 'user') return 'human';
   if (value === 'app' || value === 'bot') return 'bot';
   return undefined;
+}
+
+function isBotCandidate(message: NormalizedMessage): boolean {
+  if (message.senderIsBot === true || senderKind(message.senderType) === 'bot') return true;
+  const raw = message.raw;
+  if (
+    typeof raw !== 'object' ||
+    raw === null ||
+    !('sender' in raw) ||
+    typeof raw.sender !== 'object' ||
+    raw.sender === null ||
+    !('sender_type' in raw.sender)
+  ) {
+    return false;
+  }
+  return senderKind(raw.sender.sender_type) === 'bot';
 }
 
 function nonEmpty<T>(items: readonly T[]): [T, ...T[]] {

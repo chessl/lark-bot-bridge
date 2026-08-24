@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { DEFAULT_MODEL, normalizeModelSelection, supportedModels } from '../agent/models';
 import type { OmpRunEngine } from '../agent/types';
@@ -16,6 +17,7 @@ import {
   accountSuccessCard,
 } from '../card/account-cards';
 import {
+  type ConfigFormOpts,
   configCancelledCard,
   configFailedCard,
   configFormCard,
@@ -39,7 +41,13 @@ import {
 import { helpCard, resumeCard, statusCard, workspacesCard } from '../card/templates';
 import { resolveAppPaths } from '../config/app-paths';
 import * as configOps from '../config/config-ops';
-import type { ProfileAccess, ProfileConfig, ProfileMode } from '../config/profile-schema';
+import {
+  normalizeTrustedPeerBots,
+  type ProfileAccess,
+  type ProfileConfig,
+  type ProfileMode,
+  type TrustedPeerBot,
+} from '../config/profile-schema';
 import type { AppCredentials, AppPreferences, TenantBrand } from '../config/schema';
 import {
   getMaxConcurrentRuns,
@@ -1398,14 +1406,18 @@ async function saveAccessConfig(
 // ────────────── /config — preferences form ──────────────
 
 async function handleConfig(args: string, ctx: CommandContext): Promise<void> {
-  const sub = args.trim().split(/\s+/)[0] ?? '';
+  const [sub = '', arg] = args.trim().split(/\s+/);
   switch (sub) {
     case '':
       return showConfigForm(ctx);
     case 'submit':
-      return submitConfig(ctx);
+      return submitConfig(ctx, parsePeerCount(arg));
     case 'cancel':
       return cancelConfig(ctx);
+    case 'peer-add':
+      return updateTrustedPeerDraft(ctx, 'add');
+    case 'peer-delete':
+      return updateTrustedPeerDraft(ctx, 'delete', parsePeerCount(arg));
     default:
       await reply(ctx, '用法:`/config`');
   }
@@ -1437,11 +1449,102 @@ async function showConfigForm(ctx: CommandContext): Promise<void> {
     allowedUsers: access.allowedUsers,
     allowedChats: access.allowedChats,
     admins: access.admins,
-    knownChats: ctx.controls.knownChats ?? [],
+    trustedPeerBots: maskSavedTrustedPeers(ctx.controls.cfg.collaboration.trustedPeerBots),
     ...(consoleUrl ? { consoleUrl } : {}),
   });
   if (ctx.fromCardAction) await recallMessage(ctx, ctx.msg.messageId);
   await sendManagedCard(ctx.channel, ctx.msg.chatId, card, commandReplyOptions(ctx));
+}
+
+function parsePeerCount(value: string | undefined): number | undefined {
+  if (value === undefined || !/^\d+$/.test(value)) return undefined;
+  const count = Number(value);
+  return count >= 0 && count <= 10 ? count : undefined;
+}
+
+function trustedPeerDraft(
+  ctx: CommandContext,
+  count: number | undefined,
+): TrustedPeerBot[] {
+  const fv = ctx.formValue ?? {};
+  const indexes =
+    count === undefined
+      ? Object.keys(fv)
+          .map((key) => /^trusted_peer_(?:alias|open_id)_(\d+)$/.exec(key)?.[1])
+          .filter((value): value is string => value !== undefined)
+          .map(Number)
+          .filter((value) => Number.isInteger(value) && value >= 0 && value < 10)
+      : Array.from({ length: count }, (_, index) => index);
+  const ordered = [...new Set(indexes)].sort((left, right) => left - right);
+  if (ordered.length === 0 && count === undefined) {
+    return maskSavedTrustedPeers(ctx.controls.cfg.collaboration.trustedPeerBots);
+  }
+  return ordered.map((index) => ({
+    alias: String(fv[`trusted_peer_alias_${index}`] ?? ''),
+    openId: String(fv[`trusted_peer_open_id_${index}`] ?? ''),
+  }));
+}
+
+function maskSavedTrustedPeers(peers: readonly TrustedPeerBot[]): TrustedPeerBot[] {
+  return peers.map((peer, index) => ({
+    alias: peer.alias,
+    openId: `…${peer.openId.slice(-6)} [saved ${index}]`,
+  }));
+}
+
+function restoreTrustedPeerDraft(
+  peers: readonly TrustedPeerBot[],
+  saved: readonly TrustedPeerBot[],
+): TrustedPeerBot[] {
+  return peers.map((peer) => {
+    const match = /^…(.{1,6}) \[saved (\d+)\]$/.exec(peer.openId);
+    if (!match) return { ...peer };
+    const index = Number(match[2]);
+    const original = saved[index];
+    if (!original || original.openId.slice(-6) !== match[1]) return { ...peer };
+    return { alias: peer.alias, openId: original.openId };
+  });
+}
+
+function configFormOptions(ctx: CommandContext, trustedPeerBots: TrustedPeerBot[]): ConfigFormOpts {
+  const idleMs = getRunIdleTimeoutMs(ctx.controls.cfg);
+  const access = ctx.controls.cfg.access;
+  return {
+    mode: ctx.controls.cfg.mode,
+    model: normalizeModelSelection(ctx.controls.cfg.preferences?.model),
+    maxConcurrentRuns: getMaxConcurrentRuns(ctx.controls.cfg),
+    runIdleTimeoutMinutes: idleMs ? Math.round(idleMs / 60_000) : 0,
+    requireMentionInGroup: getRequireMentionInGroup(ctx.controls.cfg),
+    allowedUsers: access.allowedUsers,
+    allowedChats: access.allowedChats,
+    admins: access.admins,
+    knownChats: ctx.controls.knownChats ?? [],
+    trustedPeerBots,
+    maskTrustedPeerIds: false,
+    collaborationExpanded: true,
+  };
+}
+
+async function updateTrustedPeerDraft(
+  ctx: CommandContext,
+  action: 'add' | 'delete',
+  deleteIndex?: number,
+): Promise<void> {
+  if (!ctx.fromCardAction) return;
+  const peers = trustedPeerDraft(ctx, undefined);
+  if (action === 'add') {
+    if (peers.length < 10) peers.push({ alias: '', openId: '' });
+  } else if (deleteIndex !== undefined && deleteIndex < peers.length) {
+    peers.splice(deleteIndex, 1);
+  }
+  const card = configFormCard(configFormOptions(ctx, peers));
+  const formMsgId = ctx.msg.messageId;
+  void (async () => {
+    await delay(FORM_SETTLE_MS);
+    await updateManagedCard(ctx.channel, formMsgId, card).catch((err) =>
+      log.warn('command', 'config-draft-update-failed', { err: String(err) }),
+    );
+  })();
 }
 
 async function showResultCardInPlace(
@@ -1467,14 +1570,18 @@ async function cancelConfig(ctx: CommandContext): Promise<void> {
   if (ctx.fromCardAction) {
     const formMsgId = ctx.msg.messageId;
     void (async () => {
-      await new Promise((r) => setTimeout(r, FORM_SETTLE_MS));
+      await delay(FORM_SETTLE_MS);
       await showResultCardInPlace(ctx, formMsgId, configCancelledCard());
     })();
   }
 }
 
-async function submitConfig(ctx: CommandContext): Promise<void> {
+async function submitConfig(ctx: CommandContext, peerCount?: number): Promise<void> {
   const fv = ctx.formValue ?? {};
+  const peerDraft = restoreTrustedPeerDraft(
+    trustedPeerDraft(ctx, peerCount),
+    ctx.controls.cfg.collaboration.trustedPeerBots,
+  );
   // Unexpected or empty values keep the current selection. Store `undefined`
   // for the "default" sentinel to keep config tidy.
   const rawModel = String(fv.model ?? '').trim();
@@ -1529,9 +1636,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
     const submittedAt = Date.now();
     const waitForSettle = async (): Promise<void> => {
       const elapsed = Date.now() - submittedAt;
-      if (elapsed < FORM_SETTLE_MS) {
-        await new Promise<void>((r) => setTimeout(r, FORM_SETTLE_MS - elapsed));
-      }
+      if (elapsed < FORM_SETTLE_MS) await delay(FORM_SETTLE_MS - elapsed);
     };
 
     const nextPreferences: AppPreferences = {
@@ -1541,12 +1646,27 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
       runIdleTimeoutMinutes,
     };
 
+    let trustedPeerBots: TrustedPeerBot[];
     try {
-      await savePreferencesConfig(ctx, nextPreferences, requireMentionInGroup, mode);
+      trustedPeerBots = normalizeTrustedPeerBots(peerDraft, ctx.channel.botIdentity?.openId);
+      await savePreferencesConfig(
+        ctx,
+        nextPreferences,
+        requireMentionInGroup,
+        mode,
+        {
+          ...ctx.controls.cfg.collaboration,
+          trustedPeerBots,
+        },
+      );
     } catch (err) {
       log.fail('command', err, { step: 'config.save' });
       await waitForSettle();
-      await showResultCardInPlace(ctx, formMsgId, configFailedCard('配置未写入，未做任何修改。'));
+      await showResultCardInPlace(
+        ctx,
+        formMsgId,
+        configFailedCard('trusted peer 配置无效；整张卡未写入。', peerDraft),
+      );
       return;
     }
 
@@ -1558,6 +1678,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
       allowedUsersCount: access.allowedUsers.length,
       allowedChatsCount: access.allowedChats.length,
       adminsCount: access.admins.length,
+      trustedPeerBotsCount: trustedPeerBots.length,
     });
     await waitForSettle();
     await showResultCardInPlace(
@@ -1573,6 +1694,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
         allowedChats: access.allowedChats,
         admins: access.admins,
         knownChats: ctx.controls.knownChats ?? [],
+        trustedPeerBots,
       }),
     );
 
@@ -1657,8 +1779,16 @@ async function savePreferencesConfig(
   preferences: AppPreferences,
   requireMentionInGroup: boolean,
   mode: ProfileMode,
+  collaboration: ProfileConfig['collaboration'],
 ): Promise<void> {
-  return configOps.savePreferencesConfig(ctx.controls, preferences, requireMentionInGroup, mode);
+  return configOps.savePreferencesConfig(
+    ctx.controls,
+    preferences,
+    requireMentionInGroup,
+    mode,
+    undefined,
+    collaboration,
+  );
 }
 
 // ────────────── /meeting — in-meeting agent (智能体入会) ──────────────

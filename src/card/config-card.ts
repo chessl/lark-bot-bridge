@@ -1,6 +1,6 @@
 import { modelLabel, supportedModels } from '../agent/models';
 import type { KnownChat } from '../bot/lark-info';
-import type { ProfileMode } from '../config/profile-schema';
+import type { ProfileMode, TrustedPeerBot } from '../config/profile-schema';
 
 export interface ConfigFormOpts {
   /** Deployment mode: 'personal' (default) or 'team'. */
@@ -15,15 +15,23 @@ export interface ConfigFormOpts {
   allowedChats: string[];
   admins: string[];
   knownChats: KnownChat[];
+  trustedPeerBots?: TrustedPeerBot[];
+  collaborationExpanded?: boolean;
+  collaborationError?: string;
+  maskTrustedPeerIds?: boolean;
   /** URL of the running local web console (supervisor `--web-ui` mode). Shown
    * at the top of the card when present; omitted when no console is running. */
   consoleUrl?: string;
 }
 
-function collapsedAccessPanel(title: string, elements: object[]): object {
+function collapsedAccessPanel(
+  title: string,
+  elements: object[],
+  expanded = false,
+): object {
   return {
     tag: 'collapsible_panel',
-    expanded: false,
+    expanded,
     header: {
       title: { tag: 'markdown', content: title },
       vertical_align: 'center',
@@ -53,6 +61,102 @@ function chatList(chatIds: string[], knownChats: KnownChat[]): string {
   return chatIds
     .map((id) => `- **${nameMap.get(id) ?? '(未知群)'}**（...${id.slice(-6)}）`)
     .join('\n');
+}
+
+function trustedPeerPanel(opts: ConfigFormOpts): object {
+  const peers = opts.trustedPeerBots ?? [];
+  const rows = peers.flatMap((peer, index) => [
+    {
+      tag: 'column_set',
+      flex_mode: 'flow',
+      horizontal_spacing: 'small',
+      columns: [
+        {
+          tag: 'column',
+          width: 'weighted',
+          weight: 1,
+          elements: [
+            {
+              tag: 'input',
+              name: `trusted_peer_alias_${index}`,
+              default_value: peer.alias,
+              placeholder: { tag: 'plain_text', content: 'alias' },
+              input_type: 'text',
+            },
+          ],
+        },
+        {
+          tag: 'column',
+          width: 'weighted',
+          weight: 2,
+          elements: [
+            {
+              tag: 'input',
+              name: `trusted_peer_open_id_${index}`,
+              default_value:
+                opts.maskTrustedPeerIds === false || !peer.openId.startsWith('ou_')
+                  ? peer.openId
+                  : `…${peer.openId.slice(-6)}`,
+              input_type: 'text',
+            },
+          ],
+        },
+        {
+          tag: 'column',
+          width: 'auto',
+          elements: [
+            {
+              tag: 'button',
+              name: `trusted_peer_delete_${index}`,
+              text: { tag: 'plain_text', content: '删除' },
+              form_action_type: 'submit',
+              behaviors: [
+                { type: 'callback', value: { cmd: 'config.peer-delete', arg: String(index) } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    { tag: 'hr' },
+  ]);
+  return collapsedAccessPanel(
+    `**群聊协作**（${peers.length} Bot，点击展开）`,
+    [
+      {
+        tag: 'markdown',
+        content:
+          '_可信 peer 只有以 verified Bot 身份直接结构化 @ 当前 Bot 时才会建立隔离 Invocation。alias 与 open_id 仅影响之后的新 Invocation。_',
+      },
+      ...(opts.collaborationError
+        ? [{ tag: 'markdown', content: `**未保存：** ${opts.collaborationError}` }]
+        : []),
+      ...rows,
+      ...(peers.length < 10
+        ? [
+            {
+              tag: 'button',
+              name: 'trusted_peer_add',
+              text: { tag: 'plain_text', content: '添加 trusted peer' },
+              form_action_type: 'submit',
+              behaviors: [{ type: 'callback', value: { cmd: 'config.peer-add' } }],
+            },
+          ]
+        : [{ tag: 'markdown', content: '_已达到 10 个 trusted peer 上限。_' }]),
+    ],
+    opts.collaborationExpanded ?? false,
+  );
+}
+
+function safePeerSummary(peers: readonly TrustedPeerBot[], includeAliases: boolean): string {
+  if (peers.length === 0) return '0 Bot';
+  if (!includeAliases) return `${peers.length} Bot（ID 已隐藏）`;
+  return peers
+    .map((peer) => {
+      const alias = includeAliases ? `${peer.alias.replace(/[_-]/g, '\\$&')} ` : '';
+      return `${alias}(...${peer.openId.slice(-6)})`;
+    })
+    .join('、');
 }
 
 /** Form card for `/config`. */
@@ -207,6 +311,7 @@ export function configFormCard(opts: ConfigFormOpts): object {
                 { text: { tag: 'plain_text', content: '否' }, value: 'no' },
               ],
             },
+            trustedPeerPanel(opts),
             collapsedAccessPanel('🔒 **访问控制**（点击展开）', accessElements),
             {
               tag: 'column_set',
@@ -223,7 +328,15 @@ export function configFormCard(opts: ConfigFormOpts): object {
                       text: { tag: 'plain_text', content: '提交' },
                       type: 'primary',
                       form_action_type: 'submit',
-                      behaviors: [{ type: 'callback', value: { cmd: 'config.submit' } }],
+                      behaviors: [
+                        {
+                          type: 'callback',
+                          value: {
+                            cmd: 'config.submit',
+                            arg: String((opts.trustedPeerBots ?? []).length),
+                          },
+                        },
+                      ],
                     },
                   ],
                 },
@@ -264,7 +377,8 @@ export function configSavedCard(opts: ConfigFormOpts): object {
             `**模型**:\`${modelLabel(opts.model)}\`\n` +
             `**并发上限**:\`${opts.maxConcurrentRuns}\`\n` +
             `**run 探活**:\`${opts.runIdleTimeoutMinutes > 0 ? `${opts.runIdleTimeoutMinutes} 分钟` : '关闭'}\`\n` +
-            `**群里需要 @ bot**:\`${opts.requireMentionInGroup ? '是' : '否'}\`\n\n` +
+            `**群里需要 @ bot**:\`${opts.requireMentionInGroup ? '是' : '否'}\`\n` +
+            `**trusted peer Bot**:${safePeerSummary(opts.trustedPeerBots ?? [], true)}\n\n` +
             '🔒 **访问控制**' +
             (opts.mode === 'team' ? '（_团队版下不生效,任何人可用_）' : '') +
             '\n' +
@@ -335,12 +449,22 @@ export function configCancelledCard(): object {
   };
 }
 
-export function configFailedCard(reason: string): object {
+export function configFailedCard(
+  reason: string,
+  trustedPeerBots: readonly TrustedPeerBot[] = [],
+): object {
   return {
     schema: '2.0',
     config: { summary: { content: '保存失败' } },
     body: {
-      elements: [{ tag: 'markdown', content: `保存失败：${reason}` }],
+      elements: [
+        {
+          tag: 'markdown',
+          content:
+            `保存失败：${reason}\n\n` +
+            `trusted peer 草稿：${safePeerSummary(trustedPeerBots, false)}`,
+        },
+      ],
     },
   };
 }
