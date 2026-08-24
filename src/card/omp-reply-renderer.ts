@@ -1,5 +1,5 @@
 import { deepMaskEmails, maskEmails } from './mask-email';
-import type { RunState, ToolEntry } from './run-state';
+import type { RunState, ToolEntry, ToolStatus } from './run-state';
 
 const MAX_CARD_BYTES = 30 * 1024;
 const MAX_CARD_ELEMENTS = 200;
@@ -7,13 +7,19 @@ const TRUNCATION_MARKER = '内容过长，已截断';
 
 type RenderOptions = Readonly<{
   streamingMode: boolean;
+  toolCount?: number | null;
+}>;
+
+type OmpReplyPresentation = Readonly<{
+  finalReply: string;
+  statusLabel: string;
   summary: string;
 }>;
 
 export function renderOmpReplyCard(state: RunState, options?: RenderOptions): object {
   let reasoning = state.reasoningEntries ?? [];
   let tools = state.tools;
-  const finalText = finalReply(state);
+  const finalText = ompReplyPresentation(state).finalReply;
   let card = buildOmpReplyCard(state, reasoning, tools, finalText, options);
 
   while (!withinCardBudget(card) && reasoning.length > 0) {
@@ -38,25 +44,27 @@ function buildOmpReplyCard(
   options: RenderOptions | undefined,
 ): object {
   const running = state.terminal === 'running';
+  const presentation = ompReplyPresentation(state);
   const activity = state.activityStack?.at(-1)?.label;
-
+  const toolCount =
+    options?.toolCount === null ? undefined : (options?.toolCount ?? state.metrics.toolIds.length);
   return deepMaskEmails({
     schema: '2.0',
     config: {
       update_multi: true,
       width_mode: 'default',
       streaming_mode: options?.streamingMode ?? running,
-      summary: { content: options?.summary ?? summaryFor(state) },
+      summary: { content: presentation.summary },
     },
     header: {
       title: { tag: 'plain_text', content: running ? 'OMP 正在处理' : 'OMP Reply' },
-      subtitle: { tag: 'plain_text', content: activity ?? statusLabel(state) },
+      subtitle: { tag: 'plain_text', content: activity ?? presentation.statusLabel },
       template: state.terminal === 'done' ? 'green' : running ? 'blue' : 'red',
       icon: { tag: 'standard_icon', token: 'ai-common_colorful' },
       text_tag_list: [
         {
           tag: 'text_tag',
-          text: { tag: 'plain_text', content: statusLabel(state) },
+          text: { tag: 'plain_text', content: presentation.statusLabel },
           color: state.terminal === 'done' ? 'green' : running ? 'blue' : 'red',
         },
       ],
@@ -85,22 +93,26 @@ function buildOmpReplyCard(
             : `**${finalText}**`,
           text_size: 'body',
         },
-        ...metricsElements(state),
-        disclosure(
-          'tools',
-          `🔧 调用工具 ${state.metrics.toolIds.length} 次`,
-          running,
-          [
-            {
-              tag: 'markdown',
-              content:
-                tools.length > 0
-                  ? tools.map((tool) => toolRow(tool)).join('\n')
-                  : "<font color='grey'>尚未调用工具</font>",
-              text_size: 'notation',
-            },
-          ],
-        ),
+        ...metricsElements(state, toolCount),
+        ...(toolCount === undefined
+          ? []
+          : [
+              disclosure(
+                'tools',
+                `🔧 调用工具 ${toolCount} 次`,
+                running,
+                [
+                  {
+                    tag: 'markdown',
+                    content:
+                      tools.length > 0
+                        ? tools.map((tool) => toolRow(tool)).join('\n')
+                        : "<font color='grey'>尚未调用工具</font>",
+                    text_size: 'notation',
+                  },
+                ],
+              ),
+            ]),
       ],
     },
   });
@@ -192,18 +204,54 @@ function previousCodePointBoundary(value: string, index: number): number {
     : previous;
 }
 
-export function renderOmpReplyMarkdown(state: RunState): string {
+export function renderOmpReplyMarkdown(
+  state: RunState,
+  options?: Pick<RenderOptions, 'toolCount'>,
+): string {
   if (state.terminal === 'running') {
     throw new Error('cannot render a running OMP Reply as terminal Markdown');
   }
-  const metrics = metricParts(state).join(' · ');
+  const finalText = ompReplyPresentation(state).finalReply;
+  const full = buildOmpReplyMarkdown(state, finalText, options);
+  if (Buffer.byteLength(full) <= MAX_CARD_BYTES || state.terminal !== 'done') return full;
+
+  let lower = 0;
+  let upper = finalText.length;
+  let best = buildOmpReplyMarkdown(state, TRUNCATION_MARKER, options);
+  while (lower < upper) {
+    let middle = codePointBoundary(finalText, Math.floor((lower + upper + 1) / 2));
+    if (middle <= lower) middle = upper;
+    const candidate = buildOmpReplyMarkdown(
+      state,
+      `${finalText.slice(0, middle)}${TRUNCATION_MARKER}`,
+      options,
+    );
+    if (Buffer.byteLength(candidate) <= MAX_CARD_BYTES) {
+      lower = middle;
+      best = candidate;
+    } else {
+      upper = previousCodePointBoundary(finalText, middle);
+    }
+  }
+  return best;
+}
+
+function buildOmpReplyMarkdown(
+  state: RunState,
+  finalText: string,
+  options: Pick<RenderOptions, 'toolCount'> | undefined,
+): string {
+  const presentation = ompReplyPresentation(state);
+  const toolCount =
+    options?.toolCount === null ? undefined : (options?.toolCount ?? state.metrics.toolIds.length);
+  const metrics = metricParts(state, toolCount).join(' · ');
   return maskEmails(
-    `**Final Reply**\n\n${finalReply(state)}\n\n_Run Termination: ${statusLabel(state)}_${metrics ? `\n\n_${metrics}_` : ''}`,
+    `**Final Reply**\n\n${finalText}\n\n_Run Termination: ${presentation.statusLabel}_${metrics ? `\n\n_${metrics}_` : ''}`,
   );
 }
 
-function metricsElements(state: RunState): object[] {
-  const content = metricParts(state).join(' · ');
+function metricsElements(state: RunState, toolCount: number | undefined): object[] {
+  const content = metricParts(state, toolCount).join(' · ');
   return content
     ? [
         {
@@ -216,7 +264,7 @@ function metricsElements(state: RunState): object[] {
     : [];
 }
 
-function metricParts(state: RunState): string[] {
+function metricParts(state: RunState, toolCount: number | undefined): string[] {
   const metrics = state.metrics;
   const terminal = state.terminal !== 'running';
   const contextPercent = validPercent(metrics.contextPercent);
@@ -249,7 +297,7 @@ function metricParts(state: RunState): string[] {
     terminal && metrics.outputTokens !== undefined
       ? `输出 ${formatTokens(metrics.outputTokens)}`
       : undefined,
-    terminal ? `工具 ${metrics.toolIds.length}` : undefined,
+    terminal && toolCount !== undefined ? `工具 ${toolCount}` : undefined,
   ].filter((part): part is string => part !== undefined);
 }
 
@@ -306,45 +354,51 @@ function placeholder(content: string): object {
   };
 }
 
+const TOOL_STATUS_PRESENTATION: Record<
+  ToolStatus,
+  Readonly<{ icon: string; label: string }>
+> = {
+  error: { icon: '⚠️', label: '失败' },
+  done: { icon: '✓', label: '完成' },
+  unfinished: { icon: '◼', label: '未完成' },
+  running: { icon: '⏳', label: '运行中' },
+};
+
 function toolRow(tool: ToolEntry): string {
-  const icon =
-    tool.status === 'error'
-      ? '⚠️'
-      : tool.status === 'done'
-        ? '✓'
-        : tool.status === 'unfinished'
-          ? '◼'
-          : '⏳';
-  const status =
-    tool.status === 'error'
-      ? '失败'
-      : tool.status === 'done'
-        ? '完成'
-        : tool.status === 'unfinished'
-          ? '未完成'
-          : '运行中';
-  return `- ${icon} **${escapeMarkdown(tool.name)}** · ${tool.action} · ${status}`;
+  const status = TOOL_STATUS_PRESENTATION[tool.status];
+  return `- ${status.icon} **${escapeMarkdown(tool.name)}** · ${tool.action} · ${status.label}`;
 }
 
-function finalReply(state: RunState): string {
-  if (state.terminal === 'done') return state.finalText?.trim() || '未返回内容';
-  if (state.terminal === 'interrupted') return '运行已中断。';
-  if (state.terminal === 'idle_timeout') return '运行已超时。';
-  if (state.terminal === 'error') return '运行失败。';
-  return '';
-}
-
-function statusLabel(state: RunState): string {
-  if (state.terminal === 'done') return '已完成';
-  if (state.terminal === 'interrupted') return '已中断';
-  if (state.terminal === 'idle_timeout') return '已超时';
-  if (state.terminal === 'error') return '失败';
-  return '运行中';
-}
-
-function summaryFor(state: RunState): string {
-  const activity = state.activityStack?.at(-1);
-  return activity?.label ?? statusLabel(state);
+export function ompReplyPresentation(state: RunState): OmpReplyPresentation {
+  const statusLabel =
+    state.terminal === 'done'
+      ? '已完成'
+      : state.terminal === 'interrupted'
+        ? '已中断'
+        : state.terminal === 'idle_timeout'
+          ? '已超时'
+          : state.terminal === 'error'
+            ? '失败'
+            : '运行中';
+  const finalReply =
+    state.terminal === 'done'
+      ? state.finalText?.trim() || '未返回内容'
+      : state.terminal === 'interrupted'
+        ? '运行已中断。'
+        : state.terminal === 'idle_timeout'
+          ? '运行已超时。'
+          : state.terminal === 'error'
+            ? '运行失败。'
+            : '';
+  const summary =
+    state.terminal !== 'running'
+      ? statusLabel
+      : state.footer === 'tool_running'
+        ? '正在调用工具'
+        : state.footer === 'streaming'
+          ? '正在输出'
+          : '思考中';
+  return { finalReply, statusLabel, summary };
 }
 
 function escapeMarkdown(value: string): string {

@@ -332,7 +332,8 @@ async function runMeetingAgent(
 
 /** Collect assistant text from the agent event stream. */
 function textOf(event: AgentEvent): string {
-  return event.type === 'text' ? event.delta : '';
+  if (event.type === 'text') return event.delta;
+  return event.type === 'final_text' ? event.content : '';
 }
 
 export type { MeetingEvent };

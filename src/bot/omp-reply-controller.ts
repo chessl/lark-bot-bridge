@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
-import { renderOmpReplyCard, renderOmpReplyMarkdown } from '../card/omp-reply-renderer';
+import {
+  ompReplyPresentation,
+  renderOmpReplyCard,
+  renderOmpReplyMarkdown,
+} from '../card/omp-reply-renderer';
 import { initialState as emptyRunState, markInterrupted, type RunState } from '../card/run-state';
 import type {
   ActiveDelivery,
+  DeliveryFailureReason,
   DeliveryState,
   DurablePendingOperation,
   OmpDeliveryJournal,
@@ -215,7 +220,7 @@ export class OmpReplyController {
           JSON.stringify(markdownPost(renderOmpReplyMarkdown(finalState))),
           true,
         );
-        if (markdown === 'rejected') throw this.deliveryFailure('terminal Markdown rejected');
+        if (markdown === 'rejected') throw this.deliveryFailure('terminal-markdown-rejected');
       }
       this.#finished = true;
     });
@@ -310,7 +315,7 @@ export class OmpReplyController {
       data: {
         settings: JSON.stringify({
           streaming_mode: false,
-          summary: { content: summaryFor(finalState) },
+          summary: { content: ompReplyPresentation(finalState).summary },
         }),
         sequence,
         uuid,
@@ -329,9 +334,9 @@ export class OmpReplyController {
   }
 
   private async patchKnownTerminal(projection: Projection): Promise<void> {
-    if (!this.#messageId) throw this.deliveryFailure('known message has no message_id');
+    if (!this.#messageId) throw this.deliveryFailure('known-message-missing-message-id');
     const patch = await this.commitStaticPatch(projection, true);
-    if (patch === 'rejected') throw this.deliveryFailure('static terminal patch rejected');
+    if (patch === 'rejected') throw this.deliveryFailure('static-terminal-patch-rejected');
   }
 
   private async commitStaticPatch(
@@ -346,7 +351,7 @@ export class OmpReplyController {
       return 'success';
     }
     const messageId = this.#messageId;
-    if (!messageId) throw this.deliveryFailure('same-message patch requires message_id');
+    if (!messageId) throw this.deliveryFailure('same-message-patch-missing-message-id');
     this.#pending = {
       kind: 'patch',
       terminal,
@@ -459,42 +464,13 @@ export class OmpReplyController {
   }
 
   private async attempt(operation: PendingOperation): Promise<OperationResult> {
-    try {
-      if (operation.kind === 'reply') {
-        const result = await this.#channel.rawClient.im.v1.message.reply(operation.request);
-        const code = result.code;
-        const messageId = result.data?.message_id;
-        if (
-          (code === undefined || code === 0) &&
-          typeof messageId === 'string' &&
-          messageId.trim()
-        ) {
-          this.#messageId = messageId;
-          return 'success';
-        }
-        if (code === CARD_ALREADY_BOUND) {
-          return operation.attempts > 1 ? 'success' : 'unknown';
-        }
-        return typeof code === 'number' && code !== 0 ? 'rejected' : 'unknown';
-      }
-
-      if (operation.kind === 'patch') {
-        const result = await this.#channel.rawClient.im.v1.message.patch(operation.request);
-        const code = result.code;
-        if (code === 0) return 'success';
-        return typeof code === 'number' ? 'rejected' : 'unknown';
-      }
-
-      const result =
-        operation.kind === 'update'
-          ? await this.#channel.rawClient.cardkit.v1.card.update(operation.request)
-          : await this.#channel.rawClient.cardkit.v1.card.settings(operation.request);
-      const code = result.code;
-      if (code === 0) return 'success';
-      return typeof code === 'number' ? 'rejected' : 'unknown';
-    } catch (error) {
-      return isClearRejection(error) ? 'rejected' : 'unknown';
-    }
+    const attempt = await attemptDurableOperation(
+      this.#channel,
+      durableOperation(operation),
+      operation.kind === 'reply' && operation.attempts > 1,
+    );
+    if (attempt.messageId) this.#messageId = attempt.messageId;
+    return attempt.result;
   }
 
   private pendingError(): Error {
@@ -503,7 +479,7 @@ export class OmpReplyController {
     return new Error(`OMP Reply ${kind} delivery is ${this.#deliveryState}`);
   }
 
-  private deliveryFailure(reason: string): Error {
+  private deliveryFailure(reason: DeliveryFailureReason): Error {
     const error = new Error(`OMP Reply Delivery Failure: ${reason}`);
     error.name = 'OmpReplyDeliveryFailure';
     return error;
@@ -595,9 +571,17 @@ async function scanRecoverableDeliveries(
       if (startup) await journal.remove(entry.runId);
       continue;
     }
+    const scanNow = now();
+    if (
+      entry.time.openedAtMs > scanNow ||
+      (entry.time.messageKnownAtMs !== undefined && entry.time.messageKnownAtMs > scanNow)
+    ) {
+      await failRecovery(journal, entry, 'recovery-timestamp-in-future');
+      continue;
+    }
     if (entry.deliveryState === 'message_known') {
       if (!startup) continue;
-      if (isKnownEntryExpired(entry, now())) {
+      if (isKnownEntryExpired(entry, scanNow)) {
         await failRecovery(journal, entry, 'message-update-window-expired');
         continue;
       }
@@ -612,8 +596,8 @@ async function scanRecoverableDeliveries(
       entry.pending.kind === 'reply' && entry.time.messageKnownAtMs === undefined;
     if (
       initialSubmission
-        ? now() - entry.time.openedAtMs > INITIAL_UUID_WINDOW_MS
-        : isKnownEntryExpired(entry, now())
+        ? scanNow - entry.time.openedAtMs > INITIAL_UUID_WINDOW_MS
+        : isKnownEntryExpired(entry, scanNow)
     ) {
       await failRecovery(
         journal,
@@ -691,7 +675,9 @@ async function recoverInterrupted(
   journal.claim(entry.runId);
   try {
     const interrupted = markInterrupted(emptyRunState);
-    const staticProjection = makeProjection(renderOmpReplyCard(interrupted));
+    const staticProjection = makeProjection(
+      renderOmpReplyCard(interrupted, { streamingMode: false, toolCount: null }),
+    );
     if (entry.transport === 'managed' && entry.cardId) {
       const sequence = entry.nextSequence;
       const uuid = randomUUID();
@@ -705,7 +691,7 @@ async function recoverInterrupted(
           data: {
             card: {
               type: 'card_json',
-              data: JSON.stringify(renderManagedCard(interrupted)),
+              data: JSON.stringify(renderManagedCard(interrupted, null)),
             },
             sequence,
             uuid,
@@ -739,9 +725,10 @@ async function closeRecoveredManaged(
   now: () => number,
 ): Promise<void> {
   if (!entry.cardId) {
-    await failRecovery(journal, entry, 'managed-recovery-has-no-card-id');
+    await failRecovery(journal, entry, 'managed-recovery-missing-card-id');
     return;
   }
+  const interrupted = markInterrupted(emptyRunState);
   const sequence = entry.nextSequence;
   const uuid = randomUUID();
   const pending: DurablePendingOperation = {
@@ -754,7 +741,7 @@ async function closeRecoveredManaged(
       data: {
         settings: JSON.stringify({
           streaming_mode: false,
-          summary: { content: '已中断' },
+          summary: { content: ompReplyPresentation(interrupted).summary },
         }),
         sequence,
         uuid,
@@ -770,7 +757,9 @@ async function closeRecoveredManaged(
       channel,
       journal,
       known,
-      makeProjection(renderOmpReplyCard(markInterrupted(emptyRunState))),
+      makeProjection(
+        renderOmpReplyCard(interrupted, { streamingMode: false, toolCount: null }),
+      ),
     );
     return;
   }
@@ -784,12 +773,16 @@ async function patchRecoveredMessage(
   projection: Projection,
 ): Promise<void> {
   if (!entry.messageId) {
-    await failRecovery(journal, entry, 'same-message-recovery-has-no-message-id');
+    await failRecovery(journal, entry, 'same-message-recovery-missing-message-id');
     return;
   }
   const content =
     entry.transport === 'markdown'
-      ? JSON.stringify(markdownPost(renderOmpReplyMarkdown(markInterrupted(emptyRunState))))
+      ? JSON.stringify(
+          markdownPost(
+            renderOmpReplyMarkdown(markInterrupted(emptyRunState), { toolCount: null }),
+          ),
+        )
       : projection.serialized;
   const pending: DurablePendingOperation = {
     kind: 'patch',
@@ -879,7 +872,7 @@ function isKnownEntryExpired(entry: ActiveDelivery, nowMs: number): boolean {
 async function failRecovery(
   journal: OmpDeliveryJournal,
   entry: ActiveDelivery,
-  reason: string,
+  reason: DeliveryFailureReason,
 ): Promise<void> {
   journal.recordFailure(entry.runId, reason);
   await journal.remove(entry.runId);
@@ -916,20 +909,10 @@ function isClearRejection(error: unknown): boolean {
   );
 }
 
-function renderManagedCard(state: RunState): object {
+function renderManagedCard(state: RunState, toolCount?: number | null): object {
   return renderOmpReplyCard(state, {
     streamingMode: true,
-    summary: summaryFor(state),
+    ...(toolCount === undefined ? {} : { toolCount }),
   });
-}
-
-function summaryFor(state: RunState): string {
-  if (state.terminal === 'done') return '已完成';
-  if (state.terminal === 'interrupted') return '已中断';
-  if (state.terminal === 'idle_timeout') return '已超时';
-  if (state.terminal === 'error') return '出错';
-  if (state.footer === 'tool_running') return '正在调用工具';
-  if (state.footer === 'streaming') return '正在输出';
-  return '思考中';
 }
 

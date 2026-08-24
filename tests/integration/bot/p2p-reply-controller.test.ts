@@ -242,6 +242,14 @@ describe('P2P OMP Reply', () => {
     'terminalizes $name in the original Reply before closing',
     async ({ events, expectedAnswer, expectedReasoning, unfinishedTool }) => {
       const h = await createHarness({ events });
+      const expectedSummary =
+        expectedAnswer === '运行失败。'
+          ? '失败'
+          : expectedAnswer === '运行已中断。'
+            ? '已中断'
+            : expectedAnswer === '运行已超时。'
+              ? '已超时'
+              : '已完成';
       await startTestBridge(h);
 
       await h.channel.handlers.message?.(message(`om_terminal_${expectedAnswer}`, 'run'));
@@ -275,6 +283,9 @@ describe('P2P OMP Reply', () => {
       const closeCall = h.channel.rawClient.cardkit.v1.card.settings.mock.calls.at(-1)?.[0];
       const closeSequence = (finalUpdate?.sequence ?? 0) + 1;
       expect(operationSequence(closeCall)).toBe(closeSequence);
+      expect(JSON.parse(closeSettings(closeCall))).toMatchObject({
+        summary: { content: expectedSummary },
+      });
       expect(h.channel.operations.indexOf(`card:update:${finalUpdate?.sequence}`)).toBeLessThan(
         h.channel.operations.indexOf(`card:close:${closeSequence}`),
       );

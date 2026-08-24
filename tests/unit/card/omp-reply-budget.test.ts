@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { renderOmpReplyCard } from '../../../src/card/omp-reply-renderer.js';
+import {
+  renderOmpReplyCard,
+  renderOmpReplyMarkdown,
+} from '../../../src/card/omp-reply-renderer.js';
 import { createRunState, type RunState, type ToolEntry } from '../../../src/card/run-state.js';
 
 const MAX_CARD_BYTES = 30 * 1024;
@@ -104,6 +107,16 @@ describe('OMP Reply CardKit budget', () => {
     expect(answer).toContain(TRUNCATION_MARKER);
     expect(answer).not.toContain('�');
     expect(beforeMarker?.charCodeAt((beforeMarker?.length ?? 0) - 1)).not.toBeGreaterThanOrEqual(0xd800);
+  });
+
+  it('applies the UTF-8 Final Reply budget to terminal Markdown fallback', () => {
+    const markdown = renderOmpReplyMarkdown(terminalState('界🚀'.repeat(10_000)));
+    const markerIndex = markdown.indexOf(TRUNCATION_MARKER);
+
+    expect(Buffer.byteLength(markdown)).toBeLessThanOrEqual(MAX_CARD_BYTES);
+    expect(markerIndex).toBeGreaterThan(0);
+    expect(markdown).not.toContain('�');
+    expect(markdown.charCodeAt(markerIndex - 1)).not.toBeGreaterThanOrEqual(0xd800);
   });
 
   it('removes all oldest Reasoning before oldest Tools and retains the metrics unit', () => {

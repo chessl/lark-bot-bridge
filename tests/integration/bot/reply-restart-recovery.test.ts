@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { initialState } from '../../../src/card/run-state.js';
 import {
   type ActiveDelivery,
+  type DeliveryFailure,
   type DurablePendingOperation,
   OmpDeliveryJournal,
 } from '../../../src/bot/omp-delivery-journal.js';
@@ -176,6 +177,12 @@ describe('OMP Reply restart recovery', () => {
       path: { message_id: 'om_known_inline' },
     });
     expect(restarted.entries()).toEqual([]);
+    const managedPayload = updatePayload(fake.update.mock.calls[0]?.[0]);
+    const inlinePayload = JSON.stringify(fake.patch.mock.calls[0]?.[0]);
+    for (const payload of [managedPayload, inlinePayload]) {
+      expect(payload).not.toContain('调用工具 0 次');
+      expect(payload).not.toContain('工具 0');
+    }
   });
 
   it('recovers reservations in the final-update and close crash windows', async () => {
@@ -273,7 +280,7 @@ describe('OMP Reply restart recovery', () => {
   it('fails closed on expired and corrupt state without a network call', async () => {
     const tmp = await temporaryProfile();
     const path = join(tmp.profile, 'expired.json');
-    const failures: Array<{ runId?: string; reason: string }> = [];
+    const failures: DeliveryFailure[] = [];
     await seed(path, [
       {
         ...delivery('run_expired_initial', 'unknown'),
@@ -286,6 +293,17 @@ describe('OMP Reply restart recovery', () => {
         ...knownDelivery('run_expired_known'),
         time: { openedAtMs: NOW - 20 * 86_400_000, messageKnownAtMs: NOW - 14 * 86_400_000 - 1 },
       },
+      {
+        ...delivery('run_future_initial', 'unknown'),
+        cardId: 'card_future',
+        transport: 'managed',
+        time: { openedAtMs: NOW + 1 },
+        pending: initialReplyOperation(),
+      },
+      {
+        ...knownDelivery('run_future_known'),
+        time: { openedAtMs: NOW - 1_000, messageKnownAtMs: NOW + 1 },
+      },
     ]);
     const fake = fakeChannel();
     const expired = trackedJournal(path, failures);
@@ -295,6 +313,8 @@ describe('OMP Reply restart recovery', () => {
     expect(failures).toEqual([
       { runId: 'run_expired_initial', reason: 'initial-uuid-window-expired' },
       { runId: 'run_expired_known', reason: 'message-update-window-expired' },
+      { runId: 'run_future_initial', reason: 'recovery-timestamp-in-future' },
+      { runId: 'run_future_known', reason: 'recovery-timestamp-in-future' },
     ]);
     expect(expired.entries()).toEqual([]);
     expect(fake.reply).not.toHaveBeenCalled();
@@ -303,7 +323,7 @@ describe('OMP Reply restart recovery', () => {
 
     const corruptPath = join(tmp.profile, 'corrupt.json');
     await writeFile(corruptPath, '{ definitely not json', { mode: 0o600 });
-    const corruptFailures: Array<{ runId?: string; reason: string }> = [];
+    const corruptFailures: DeliveryFailure[] = [];
     const corrupt = trackedJournal(corruptPath, corruptFailures);
     await activateOmpReplyRecovery({ channel: fake.channel, journal: corrupt, now: () => NOW });
     expect(corruptFailures).toEqual([{ reason: 'corrupt-journal-json' }]);
@@ -359,7 +379,7 @@ describe('OMP Reply restart recovery', () => {
       }),
       { mode: 0o600 },
     );
-    const mismatchFailures: Array<{ runId?: string; reason: string }> = [];
+    const mismatchFailures: DeliveryFailure[] = [];
     const mismatch = trackedJournal(mismatchPath, mismatchFailures);
     await activateOmpReplyRecovery({ channel: fake.channel, journal: mismatch, now: () => NOW });
     expect(mismatchFailures).toEqual([
@@ -382,7 +402,7 @@ async function temporaryProfile(): Promise<TmpProfile> {
 
 function trackedJournal(
   path: string,
-  failures?: Array<{ runId?: string; reason: string }>,
+  failures?: DeliveryFailure[],
 ): OmpDeliveryJournal {
   const journal = new OmpDeliveryJournal({
     path,

@@ -28,7 +28,7 @@ const noopClient: VcRequestClient = {
   request: vi.fn(async () => ({ code: 0, data: {} }) as never),
 };
 
-/** A run that emits one text chunk then completes. */
+/** A run that emits one final assistant response then completes. */
 function fakeRun(text: string) {
   return {
     ok: true as const,
@@ -41,7 +41,7 @@ function fakeRun(text: string) {
       },
       events: {
         async *[Symbol.asyncIterator]() {
-          yield { type: 'text', delta: text };
+          yield { type: 'final_text', content: text };
           yield { type: 'done' };
         },
       },

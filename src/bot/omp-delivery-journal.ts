@@ -109,9 +109,30 @@ export type DurablePatchRequest = z.infer<typeof PatchRequestSchema>;
 export type DurablePendingOperation = z.infer<typeof PendingOperationSchema>;
 export type ActiveDelivery = z.infer<typeof ActiveDeliverySchema>;
 
+export type DeliveryFailureReason =
+  | 'journal-read-failed'
+  | 'corrupt-journal-json'
+  | 'corrupt-journal-shape'
+  | 'corrupt-journal-entry'
+  | 'recovery-timestamp-in-future'
+  | 'initial-uuid-window-expired'
+  | 'message-update-window-expired'
+  | 'unknown-delivery-without-operation'
+  | 'managed-recovery-missing-card-id'
+  | 'same-message-recovery-missing-message-id'
+  | 'static-terminal-patch-rejected'
+  | 'terminal-markdown-rejected'
+  | 'known-message-missing-message-id'
+  | 'same-message-patch-missing-message-id';
+
+export type DeliveryFailure = Readonly<{
+  runId?: string;
+  reason: DeliveryFailureReason;
+}>;
+
 export class OmpDeliveryJournal {
   readonly #path: string;
-  readonly #onFailure: (input: { runId?: string; reason: string }) => void;
+  readonly #onFailure: (input: DeliveryFailure) => void;
   readonly #entries = new Map<string, ActiveDelivery>();
   #writer: Promise<void> = Promise.resolve();
   #loaded = false;
@@ -121,7 +142,7 @@ export class OmpDeliveryJournal {
 
   constructor(input: {
     path: string;
-    onFailure?: (input: { runId?: string; reason: string }) => void;
+    onFailure?: (input: DeliveryFailure) => void;
   }) {
     this.#path = input.path;
     this.#onFailure =
@@ -133,9 +154,6 @@ export class OmpDeliveryJournal {
         }));
   }
 
-  get path(): string {
-    return this.#path;
-  }
 
   async load(): Promise<void> {
     if (this.#loaded) return;
@@ -196,9 +214,6 @@ export class OmpDeliveryJournal {
     return [...this.#entries.values()];
   }
 
-  get(runId: string): ActiveDelivery | undefined {
-    return this.#entries.get(runId);
-  }
 
   put(entry: ActiveDelivery): Promise<void> {
     return this.enqueue(() => this.#entries.set(entry.runId, entry));
@@ -228,7 +243,7 @@ export class OmpDeliveryJournal {
     await this.#writer;
   }
 
-  recordFailure(runId: string | undefined, reason: string): void {
+  recordFailure(runId: string | undefined, reason: DeliveryFailureReason): void {
     this.#onFailure({ ...(runId ? { runId } : {}), reason });
   }
 
