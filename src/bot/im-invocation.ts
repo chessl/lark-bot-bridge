@@ -990,11 +990,13 @@ function directSubstitutionMentions(
     const normalized = rawKey
       ? (message.mentions ?? []).filter((mention) => mention.key === rawKey)
       : [];
+    const [candidate, ...duplicates] = normalized;
     const identity =
-      normalized.length === 1 &&
-      normalized[0]?.openId === rawId &&
-      normalized[0].isBot === false
-        ? normalized[0]
+      candidate &&
+      duplicates.length === 0 &&
+      candidate.openId === rawId &&
+      candidate.isBot === false
+        ? candidate
         : undefined;
     if (
       !rawId ||

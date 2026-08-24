@@ -330,7 +330,7 @@ describe('P2P OMP Reply safe fallback', () => {
       trustedPeerBots: [{ alias: 'Atlas', openId: 'ou_atlas' }],
       personalSubstitutionTargetOpenIds: ['ou_first', 'ou_second'],
       update: async (_input, attempt) =>
-        attempt === 1 ? { status: 503 } : { code: 230001, msg: 'rejected' },
+        attempt === 1 ? { status: 503 } : { code: 230001, msg: 'mention rejected' },
     });
     await startTestBridge(h);
     vi.useFakeTimers();
@@ -661,7 +661,6 @@ function verifiedMessage(messageId: string): NormalizedMessage {
 function verifiedSubstitutionMessage(messageId: string): NormalizedMessage {
   return {
     ...message(messageId),
-    chatType: 'group',
     mentions: [
       { key: '@_user_1', openId: 'ou_second', name: 'Second', isBot: false },
       { key: '@_user_2', openId: 'ou_first', name: 'First', isBot: false },
