@@ -4,8 +4,13 @@ import type * as LarkChannelModule from '@larksuite/channel';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { AgentEvent } from '../../../src/agent/types.js';
+import type { ImReplyPlan } from '../../../src/bot/im-invocation.js';
 import { OmpReplyController } from '../../../src/bot/omp-reply-controller.js';
-import { createRunState, type RunState } from '../../../src/card/run-state.js';
+import {
+  createRunState,
+  finalizeIfRunning,
+  type RunState,
+} from '../../../src/card/run-state.js';
 import type { Controls } from '../../../src/commands/index.js';
 import {
   createDefaultProfileConfig,
@@ -585,6 +590,40 @@ describe('P2P OMP Reply', () => {
     expect(overOutbound).toContain('中间过程（98 条）');
     expect(exactChannel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
     expect(overChannel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a Final Reply plan that differs from the Progress Reply target', async () => {
+    const channel = createFakeLarkChannel();
+    const progressTarget = {
+      chatId: 'oc_final_plan',
+      messageId: 'om_progress_target',
+      replyInThread: false,
+    } as const;
+    const controller = new OmpReplyController({
+      channel: channel as unknown as LarkChannel,
+      target: progressTarget,
+    });
+    await controller.open(createRunState());
+    const plan: ImReplyPlan = {
+      invocationKind: 'ordinary',
+      reason: 'run-completed',
+      scope: {
+        kind: 'chat',
+        id: 'oc_final_plan',
+        chatId: 'oc_final_plan',
+        mode: 'group',
+      },
+      target: {
+        chatId: 'oc_final_plan',
+        messageId: 'om_final_target',
+        replyInThread: false,
+      },
+      state: finalizeIfRunning(createRunState()),
+    };
+
+    await expect(controller.finish(plan)).rejects.toThrow(
+      'Final IM Reply target differs from the Progress Reply target',
+    );
   });
 
   it('captures an exact 30 KB terminal card with metrics, marker, and one IM Reply', async () => {

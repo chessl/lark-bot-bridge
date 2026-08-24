@@ -5,8 +5,13 @@ import {
   renderOmpReplyCard,
   renderOmpReplyMarkdownPost,
 } from '../card/omp-reply-renderer';
-import { initialState as emptyRunState, markInterrupted, type RunState } from '../card/run-state';
-import type { ImReplyPlan, ImReplyTarget } from './im-invocation';
+import {
+  initialState as emptyRunState,
+  markInterrupted,
+  type RunState,
+  type Terminal,
+} from '../card/run-state';
+import type { ImReplyPlan, ImReplyReason, ImReplyTarget } from './im-invocation';
 import type {
   ActiveDelivery,
   DeliveryFailureReason,
@@ -46,6 +51,16 @@ interface PendingAttempt {
 
 const PROJECTION_THROTTLE_MS = 400;
 const RETRY_DELAYS_MS = [0, 500, 1_000] as const;
+
+const TERMINAL_BY_IM_REPLY_REASON: Record<
+  ImReplyReason,
+  Exclude<Terminal, 'running'>
+> = {
+  'run-completed': 'done',
+  'run-failed': 'error',
+  'run-interrupted': 'interrupted',
+  'run-timed-out': 'idle_timeout',
+};
 const CARD_ALREADY_BOUND = 200780;
 
 /** Owns the one CardKit bubble used by an OMP instant-message Run. */
@@ -115,6 +130,7 @@ export class OmpReplyController {
           'interactive',
           JSON.stringify({ type: 'card', data: { card_id: cardId } }),
           false,
+          this.#target,
         );
         if (result === 'success') return;
       }
@@ -125,6 +141,7 @@ export class OmpReplyController {
         'interactive',
         JSON.stringify(inlineCard),
         false,
+        this.#target,
       );
       if (inline === 'success') return;
 
@@ -158,6 +175,7 @@ export class OmpReplyController {
   }
 
   async finish(plan: ImReplyPlan): Promise<void> {
+    validateFinalPlan(plan, this.#target);
     const finalState = plan.state;
     if (finalState.terminal === 'running') throw new Error('cannot finish a running OMP Reply');
     if (this.#terminalRequested || this.#finished) throw new Error('OMP Reply is already finished');
@@ -191,6 +209,7 @@ export class OmpReplyController {
           'post',
           JSON.stringify(renderOmpReplyMarkdownPost(finalState)),
           true,
+          plan.target,
         );
         if (markdown === 'rejected') throw this.deliveryFailure('terminal-markdown-rejected');
       }
@@ -223,14 +242,15 @@ export class OmpReplyController {
     msgType: 'interactive' | 'post',
     content: string,
     terminal: boolean,
+    target: ImReplyTarget,
   ): Promise<Exclude<OperationResult, 'unknown'>> {
     const uuid = randomUUID();
     const request = {
-      path: { message_id: this.#target.messageId },
+      path: { message_id: target.messageId },
       data: {
         msg_type: msgType,
         content,
-        reply_in_thread: this.#target.replyInThread,
+        reply_in_thread: target.replyInThread,
         uuid,
       },
     } satisfies ReplyRequest;
@@ -839,6 +859,47 @@ async function failRecovery(
 ): Promise<void> {
   journal.recordFailure(entry.runId, reason);
   await journal.remove(entry.runId);
+}
+
+function validateFinalPlan(plan: ImReplyPlan, progressTarget: ImReplyTarget): void {
+  switch (plan.invocationKind) {
+    case 'ordinary':
+      break;
+    default: {
+      const exhaustive: never = plan.invocationKind;
+      throw new Error(`unsupported IM Invocation kind: ${exhaustive}`);
+    }
+  }
+
+  const expectedTerminal = TERMINAL_BY_IM_REPLY_REASON[plan.reason];
+  if (plan.state.terminal !== expectedTerminal) {
+    throw new Error(`IM Reply reason ${plan.reason} contradicts Run termination`);
+  }
+
+  const expectedScopeId =
+    plan.scope.kind === 'topic'
+      ? `${plan.scope.chatId}:${plan.scope.threadId}`
+      : plan.scope.chatId;
+  if (plan.scope.id !== expectedScopeId || plan.scope.chatId !== plan.target.chatId) {
+    throw new Error('IM Reply target does not belong to its Conversation Scope');
+  }
+  if (
+    (plan.scope.kind === 'topic' &&
+      (!plan.target.replyInThread || plan.target.threadId !== plan.scope.threadId)) ||
+    (plan.scope.kind === 'chat' && plan.target.replyInThread)
+  ) {
+    throw new Error('IM Reply placement contradicts its Conversation Scope');
+  }
+  if (
+    progressTarget.chatId !== plan.target.chatId ||
+    progressTarget.messageId !== plan.target.messageId ||
+    progressTarget.replyInThread !== plan.target.replyInThread ||
+    (progressTarget.replyInThread &&
+      plan.target.replyInThread &&
+      progressTarget.threadId !== plan.target.threadId)
+  ) {
+    throw new Error('Final IM Reply target differs from the Progress Reply target');
+  }
 }
 
 function makeProjection(card: object): Projection {
