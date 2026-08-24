@@ -2,8 +2,8 @@ import pkg from '../../package.json';
 import { OmpAdapter } from '../agent/omp/adapter';
 import type { OmpRunEngine } from '../agent/types';
 import {
-  startChannel as realStartChannel,
   type BridgeChannel,
+  startChannel as realStartChannel,
   type StartChannelDeps,
 } from '../bot/channel';
 import { OmpDeliveryJournal } from '../bot/omp-delivery-journal';
