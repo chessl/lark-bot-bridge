@@ -168,7 +168,9 @@ describe('P2P OMP Reply safe fallback', () => {
   it('keeps sender and one peer semantics across managed, inline, and Markdown transports', async () => {
     for (const transport of ['managed', 'inline', 'markdown'] as const) {
       const h = await createHarness({
-        events: terminalEvents(`before @Hermes after ${transport}`),
+        events: terminalEvents(
+          `\`\`\`text\n${'x'.repeat(40_000)}\n\`\`\`\nbefore @Hermes after ${transport}`,
+        ),
         trustedPeerBots: [{ alias: 'Hermes', openId: 'ou_peer' }],
         ...(transport === 'managed'
           ? {}
@@ -203,9 +205,11 @@ describe('P2P OMP Reply safe fallback', () => {
           : transport === 'inline'
             ? JSON.stringify(h.channel.patches.at(-1)?.card)
             : replyContent(replyInputs(h.channel).at(-1));
+      expect(outbound).toContain('内容过长，已截断');
       expect(outbound).toContain('ou_sender');
       expect(outbound).toContain('ou_peer');
       expect(outbound.match(/ou_peer/g)).toHaveLength(1);
+      expect(outbound).not.toContain('```');
       expect(replyInputs(h.channel).every((input) => requestMessageId(input) === `om_${transport}`)).toBe(
         true,
       );

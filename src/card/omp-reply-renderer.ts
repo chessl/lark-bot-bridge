@@ -139,10 +139,41 @@ function truncateFinalReply(
   finalText: string,
   options: RenderOptions | undefined,
 ): object {
+  if (isImReplyPlan(input) && input.peerActivation) {
+    let lower = 0;
+    let upper = finalText.length - (input.peerActivation.end - input.peerActivation.start);
+    let preserved = peerPreservingReply(input, finalText, 0);
+    let best = buildOmpReplyCard(
+      preserved.input,
+      reasoning,
+      tools,
+      preserved.finalText,
+      options,
+    );
+    while (lower < upper) {
+      const middle = Math.floor((lower + upper + 1) / 2);
+      const candidateReply = peerPreservingReply(input, finalText, middle);
+      const candidate = buildOmpReplyCard(
+        candidateReply.input,
+        reasoning,
+        tools,
+        candidateReply.finalText,
+        options,
+      );
+      if (withinCardBudget(candidate)) {
+        lower = middle;
+        preserved = candidateReply;
+        best = candidate;
+      } else {
+        upper = middle - 1;
+      }
+    }
+    return best;
+  }
+
   let lower = 0;
   let upper = finalText.length;
   let best = buildOmpReplyCard(input, reasoning, tools, TRUNCATION_MARKER, options);
-
   while (lower < upper) {
     let middle = codePointBoundary(finalText, Math.floor((lower + upper + 1) / 2));
     if (middle <= lower) middle = upper;
@@ -214,17 +245,79 @@ function previousCodePointBoundary(value: string, index: number): number {
     : previous;
 }
 
-export function renderOmpReplyMarkdown(
+function peerPreservingReply(
+  input: ImReplyPlan,
+  finalText: string,
+  contextLength: number,
+): { input: ImReplyPlan; finalText: string } {
+  const activation = input.peerActivation;
+  if (!activation) return { input, finalText };
+  const tokenLength = activation.end - activation.start;
+  const preserveWholePrefix = contextLength >= activation.start;
+  const sliceStart = preserveWholePrefix ? 0 : activation.start;
+  const remainingContext = Math.max(0, contextLength - (activation.start - sliceStart));
+  const sliceEnd = codePointBoundary(
+    finalText,
+    activation.end + Math.min(finalText.length - activation.end, remainingContext),
+  );
+  const prefix = sliceStart > 0 ? `${TRUNCATION_MARKER}\n` : '';
+  const suffix = sliceEnd < finalText.length ? `\n${TRUNCATION_MARKER}` : '';
+  const truncated = `${prefix}${finalText.slice(sliceStart, sliceEnd)}${suffix}`;
+  const start = prefix.length + activation.start - sliceStart;
+  return {
+    finalText: truncated,
+    input: {
+      ...input,
+      state: { ...input.state, finalText: truncated },
+      peerActivation: {
+        ...activation,
+        start,
+        end: start + tokenLength,
+      },
+    },
+  };
+}
+
+type RenderedMarkdown = Readonly<{ input: ReplyInput; markdown: string }>;
+
+function renderedOmpReplyMarkdown(
   input: ReplyInput,
   mentionMode?: ReplyMentionMode,
-): string {
+): RenderedMarkdown {
   const state = replyState(input);
   if (state.terminal === 'running') {
     throw new Error('cannot render a running OMP Reply as terminal Markdown');
   }
   const finalText = ompReplyPresentation(state).finalReply;
   const full = buildOmpReplyMarkdown(input, finalText, mentionMode);
-  if (withinMarkdownBudget(full) || state.terminal !== 'done') return full;
+  const fullFits =
+    isImReplyPlan(input) && input.peerActivation
+      ? withinPeerMarkdownBudget(full)
+      : withinMarkdownBudget(full);
+  if (fullFits || state.terminal !== 'done') return { input, markdown: full };
+  if (isImReplyPlan(input) && input.peerActivation) {
+    let lower = 0;
+    let upper = finalText.length - (input.peerActivation.end - input.peerActivation.start);
+    let preserved = peerPreservingReply(input, finalText, 0);
+    let best = buildOmpReplyMarkdown(preserved.input, preserved.finalText, mentionMode);
+    while (lower < upper) {
+      const middle = Math.floor((lower + upper + 1) / 2);
+      const candidateReply = peerPreservingReply(input, finalText, middle);
+      const candidate = buildOmpReplyMarkdown(
+        candidateReply.input,
+        candidateReply.finalText,
+        mentionMode,
+      );
+      if (withinPeerMarkdownBudget(candidate)) {
+        lower = middle;
+        preserved = candidateReply;
+        best = candidate;
+      } else {
+        upper = middle - 1;
+      }
+    }
+    return { input: preserved.input, markdown: best };
+  }
 
   let lower = 0;
   let upper = finalText.length;
@@ -244,7 +337,14 @@ export function renderOmpReplyMarkdown(
       upper = previousCodePointBoundary(finalText, middle);
     }
   }
-  return best;
+  return { input, markdown: best };
+}
+
+export function renderOmpReplyMarkdown(
+  input: ReplyInput,
+  mentionMode?: ReplyMentionMode,
+): string {
+  return renderedOmpReplyMarkdown(input, mentionMode).markdown;
 }
 
 export function renderOmpReplyMarkdownPost(
@@ -260,22 +360,38 @@ export function renderOmpReplyMarkdownPost(
       input.senderOwnership.kind === 'mention'
         ? [[{ tag: 'at', user_id: input.senderOwnership.openId }]]
         : [];
-    const markdown = renderOmpReplyMarkdown(input, 'omit');
-    const body = sanitizeImAnswer(ompReplyPresentation(input.state).finalReply);
-    const before = maskEmails(`**回复**\n\n${body.slice(0, activation.start)}`);
-    const matched = maskEmails(body.slice(activation.start, activation.end));
-    if (
-      markdown.startsWith(before) &&
-      markdown.slice(before.length, before.length + matched.length) === matched
-    ) {
-      const peerRow = [
-        ...(before ? [{ tag: 'md', text: before }] : []),
-        { tag: 'at', user_id: activation.openId },
-        ...(markdown.length > before.length + matched.length
-          ? [{ tag: 'md', text: markdown.slice(before.length + matched.length) }]
-          : []),
-      ];
-      return { zh_cn: { title: '', content: [...owner, peerRow] } };
+    const rendered = renderedOmpReplyMarkdown(input, 'omit');
+    const markdown = rendered.markdown;
+    const renderedInput = rendered.input;
+    const renderedActivation =
+      isImReplyPlan(renderedInput) && renderedInput.invocationKind === 'ordinary'
+        ? renderedInput.peerActivation
+        : undefined;
+    if (renderedActivation && isImReplyPlan(renderedInput)) {
+      const body = sanitizeImAnswer(ompReplyPresentation(renderedInput.state).finalReply);
+      const before = maskEmails(`**回复**\n\n${body.slice(0, renderedActivation.start)}`);
+      const matched = maskEmails(body.slice(renderedActivation.start, renderedActivation.end));
+      if (
+        markdown.startsWith(before) &&
+        markdown.slice(before.length, before.length + matched.length) === matched
+      ) {
+        const peerRow = [
+          ...(before ? [{ tag: 'md', text: before }] : []),
+          { tag: 'at', user_id: renderedActivation.openId },
+          ...(markdown.length > before.length + matched.length
+            ? [{ tag: 'md', text: markdown.slice(before.length + matched.length) }]
+            : []),
+        ];
+        return { zh_cn: { title: '', content: [...owner, peerRow] } };
+      }
+      if (owner.length > 0) {
+        return {
+          zh_cn: {
+            title: '',
+            content: [...owner, [{ tag: 'md', text: markdown }]],
+          },
+        };
+      }
     }
   }
   const targetOpenIds = substitutionMentionOpenIds(input);
@@ -298,6 +414,10 @@ export function renderOmpReplyMarkdownPost(
 
 function withinMarkdownBudget(markdown: string): boolean {
   return Buffer.byteLength(JSON.stringify(markdownPost(markdown))) <= MAX_CARD_BYTES;
+}
+
+function withinPeerMarkdownBudget(markdown: string): boolean {
+  return Buffer.byteLength(JSON.stringify(markdown)) <= MAX_CARD_BYTES - 512;
 }
 
 function markdownPost(markdown: string): object {

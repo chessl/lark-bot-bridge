@@ -142,6 +142,35 @@ describe('sender identity in bridge_context', () => {
     expect(context.senderType).toBe('user');
   });
 
+  it('maps a human structured peer Mention to its frozen alias without leaking the peer ID', async () => {
+    const h = await createHarness();
+    h.profileConfig.collaboration.trustedPeerBots.push({
+      alias: 'Hermes',
+      openId: 'ou_hermes',
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_human_peer_mention',
+        content: '请协助处理',
+        rawSenderType: 'user',
+        mentions: [
+          { key: '@_user_2', openId: 'ou_hermes', name: 'HermesBot', isBot: true },
+        ],
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    const context = readSection(prompt, 'bridge_context') as {
+      mentions?: Array<{ name?: string; openId?: string; isBot?: boolean }>;
+    };
+    expect(context.mentions).toEqual([{ name: '@Hermes', isBot: true }]);
+    expect(prompt).toContain('@Hermes');
+    expect(prompt).not.toContain('ou_hermes');
+  });
+
   it('silently drops untrusted, indirect, and Bot Command traffic', async () => {
     vi.useFakeTimers();
     const h = await createHarness();

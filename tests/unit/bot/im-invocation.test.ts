@@ -443,7 +443,11 @@ describe('ordinary IM Invocation creation', () => {
       { alias: 'Atlas', openId: 'ou_atlas' },
     ];
     const plan = ordinaryPlan(
-      imMessage({ senderType: 'user', rawSenderId: 'ou_sender' }),
+      imMessage({
+        senderType: 'user',
+        rawSenderId: 'ou_sender',
+        mentions: [{ key: '@_user_2', openId: 'ou_hermes', name: 'HermesBot', isBot: true }],
+      }),
       CHAT_SCOPE,
       trustedPeerBots,
     );
@@ -456,6 +460,9 @@ describe('ordinary IM Invocation creation', () => {
     });
     expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_hermes');
     expect(JSON.stringify(invocation.promptPolicy)).not.toContain('ou_atlas');
+    expect(invocation.promptPolicy.messages[0].mentions).toEqual([
+      { key: '@_user_2', name: '@Hermes', isBot: true },
+    ]);
     expect(invocation.trustedPeers).toEqual([
       { alias: 'Hermes', openId: 'ou_hermes' },
       { alias: 'Atlas', openId: 'ou_atlas' },

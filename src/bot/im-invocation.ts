@@ -500,8 +500,10 @@ export function createImInvocation(
   const sourceMessages = nonEmpty(sources);
   const [firstSource, ...remainingSources] = sourceMessages;
   const last = remainingSources[remainingSources.length - 1] ?? firstSource;
-  const promptMessages = nonEmpty(sourceMessages.map(toPromptMessage));
   const target = replyTarget(last.message);
+  const promptMessages = nonEmpty(
+    sourceMessages.map((source) => toPromptMessage(source, first.trustedPeers)),
+  );
   const replyPolicy = Object.freeze({
     invocationKind: 'ordinary',
     scope: first.scope,
@@ -842,7 +844,10 @@ function parseSender(message: NormalizedMessage): ImSenderIdentity {
   return Object.freeze({ kind: 'unknown', reason: 'unknown-sender-type' });
 }
 
-function toPromptMessage(source: ImSourceMessage): ImPromptMessage {
+function toPromptMessage(
+  source: ImSourceMessage,
+  trustedPeers: readonly ImTrustedPeer[],
+): ImPromptMessage {
   const message = source.message;
   const interactiveCard = readInteractiveCard(message);
   return Object.freeze({
@@ -853,14 +858,21 @@ function toPromptMessage(source: ImSourceMessage): ImPromptMessage {
     content: message.content,
     resourceFileKeys: Object.freeze(message.resources.map((resource) => resource.fileKey)),
     mentions: Object.freeze(
-      (message.mentions ?? []).map((mention) =>
-        Object.freeze({
+      (message.mentions ?? []).map((mention) => {
+        const trustedPeer = mention.openId
+          ? trustedPeers.find((peer) => peer.openId === mention.openId)
+          : undefined;
+        return Object.freeze({
           key: mention.key,
-          ...(mention.openId ? { openId: mention.openId } : {}),
-          ...(mention.name ? { name: mention.name } : {}),
-          ...(mention.isBot === undefined ? {} : { isBot: mention.isBot }),
-        }),
-      ),
+          ...(trustedPeer
+            ? { name: `@${trustedPeer.alias}`, isBot: true }
+            : {
+                ...(mention.openId ? { openId: mention.openId } : {}),
+                ...(mention.name ? { name: mention.name } : {}),
+                ...(mention.isBot === undefined ? {} : { isBot: mention.isBot }),
+              }),
+        });
+      }),
     ),
     ...(interactiveCard === undefined ? {} : { interactiveCard }),
   });
