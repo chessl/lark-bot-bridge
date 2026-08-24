@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>/config Mention 配置原型</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2329; background: #eef0f3; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px 16px 96px; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .page { display: grid; grid-template-columns: minmax(320px, 440px) minmax(260px, 360px); gap: 20px; justify-content: center; align-items: start; }
+    .card { background: #fff; border: 1px solid #dee0e3; border-radius: 12px; box-shadow: 0 6px 24px #1f232914; overflow: hidden; }
+    .card-head { padding: 18px 20px 14px; border-top: 4px solid #3370ff; }
+    .card-head h1 { margin: 0 0 6px; font-size: 18px; }
+    .card-head p, .hint { margin: 0; color: #646a73; font-size: 13px; line-height: 1.55; }
+    .section { padding: 16px 20px; border-top: 1px solid #eff0f1; }
+    .section h2 { margin: 0 0 5px; font-size: 15px; }
+    .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .scope { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: #f2f6ff; color: #245bdb; font-size: 13px; line-height: 1.5; }
+    .row { display: grid; gap: 8px; margin-top: 12px; padding: 12px; border: 1px solid #dee0e3; border-radius: 9px; }
+    .row.bot { grid-template-columns: 110px 1fr auto; }
+    .row.person { grid-template-columns: 1fr auto; }
+    .row input, textarea { width: 100%; border: 1px solid #bbbfc4; border-radius: 7px; padding: 8px 10px; background: #fff; }
+    .row input:focus, textarea:focus { outline: 2px solid #3370ff40; border-color: #3370ff; }
+    .status { grid-column: 1 / -1; font-size: 12px; color: #646a73; }
+    .status.ok { color: #138a51; }
+    .status.bad { color: #d13f3f; }
+    .icon { border: 0; background: transparent; color: #8f959e; padding: 6px; }
+    .ghost, .primary, .secondary { border-radius: 7px; padding: 8px 13px; border: 1px solid #3370ff; }
+    .ghost { color: #245bdb; background: #fff; }
+    .primary { color: #fff; background: #3370ff; }
+    .secondary { color: #1f2329; background: #fff; border-color: #bbbfc4; }
+    .actions { display: flex; gap: 8px; margin-top: 14px; }
+    .switch { position: relative; width: 38px; height: 22px; border: 0; border-radius: 999px; background: #c9cdd4; }
+    .switch::after { content: ""; position: absolute; width: 18px; height: 18px; top: 2px; left: 2px; border-radius: 50%; background: #fff; transition: transform .15s; }
+    .switch.on { background: #3370ff; }
+    .switch.on::after { transform: translateX(16px); }
+    details.collaboration { padding: 0; }
+    details.collaboration > summary { cursor: pointer; list-style: none; padding: 16px 20px; font-weight: 650; }
+    details.collaboration > summary::-webkit-details-marker { display: none; }
+    details.collaboration > summary::after { content: "⌄"; float: right; color: #8f959e; }
+    details.collaboration[open] > summary::after { content: "⌃"; }
+    details.collaboration > .section { border-top: 1px solid #eff0f1; }
+    .preview { margin-top: 12px; border-left: 3px solid #3370ff; background: #f7f8fa; padding: 10px 12px; font-size: 13px; line-height: 1.65; }
+    .summary-grid { display: grid; gap: 10px; margin-top: 12px; }
+    .summary-item { border: 1px solid #dee0e3; border-radius: 9px; padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .summary-item strong { display: block; font-size: 14px; }
+    .summary-item span { color: #646a73; font-size: 12px; }
+    .textarea-label { display: block; margin-top: 12px; font-size: 13px; font-weight: 600; }
+    textarea { min-height: 110px; resize: vertical; margin-top: 6px; line-height: 1.5; }
+    .result { padding: 24px 20px; text-align: center; }
+    .result h2 { font-size: 18px; }
+    .result p { color: #646a73; font-size: 13px; line-height: 1.6; }
+    .state { background: #202124; color: #dce1e8; border-radius: 10px; padding: 14px; position: sticky; top: 16px; }
+    .state h2 { margin: 0 0 8px; font-size: 14px; color: #fff; }
+    .state p { color: #aeb6c2; font-size: 12px; line-height: 1.5; }
+    .state pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
+    .prototype-bar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 8px 10px; color: #fff; background: #15171a; border-radius: 999px; box-shadow: 0 8px 28px #0005; z-index: 10; }
+    .prototype-bar button { width: 32px; height: 32px; border: 0; border-radius: 50%; color: #fff; background: #34373c; }
+    .prototype-bar strong { min-width: 188px; text-align: center; font-size: 13px; }
+    .badge { display: inline-block; border-radius: 999px; padding: 2px 7px; background: #e8f3ff; color: #245bdb; font-size: 11px; }
+    @media (max-width: 760px) { .page { grid-template-columns: minmax(0, 440px); } .state { position: static; } body { padding-inline: 10px; } }
+  </style>
+</head>
+<body>
+  <!-- Three throwaway variants of the existing /config CardKit surface, switchable via ?variant=. -->
+  <main class="page">
+    <section id="prototype" class="card" aria-live="polite"></section>
+    <aside class="state">
+      <h2>原型状态（每次操作即时可见）</h2>
+      <p>只模拟 CardKit 回调与服务端身份解析；不写配置、不调用飞书。</p>
+      <pre id="state"></pre>
+    </aside>
+  </main>
+  <nav class="prototype-bar" aria-label="原型方案切换">
+    <button data-action="prev" aria-label="上一个方案">←</button>
+    <strong id="variant-label"></strong>
+    <button data-action="next" aria-label="下一个方案">→</button>
+  </nav>
+  <script>
+    const variants = [
+      { key: 'A', name: '单卡内联行' },
+      { key: 'B', name: '单卡分步编辑' },
+      { key: 'C', name: '批量文本输入' },
+    ];
+    const initial = {
+      enabled: false,
+      aliases: [{ alias: 'review', id: 'ou_bot_reviewer' }],
+      targets: [{ identity: 'alice@example.com' }, { identity: 'bob@example.com' }],
+      screen: 'home', outcome: null, errors: [],
+    };
+    let state = structuredClone(initial);
+
+    const esc = (value) => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const currentVariant = () => {
+      const key = new URL(location.href).searchParams.get('variant')?.toUpperCase() ?? 'A';
+      return variants.find(v => v.key === key) ?? variants[0];
+    };
+    const maskId = (id) => `…${id.slice(-6)}`;
+    const resolveBot = (id) => id === 'ou_bot_reviewer' ? 'Code Reviewer Bot' : id.startsWith('ou_') ? '格式有效；当前群未发现（模拟）' : null;
+    const resolvePerson = (email) => {
+      const known = {
+        'alice@example.com': 'ou_person_alice',
+        'bob@example.com': 'ou_person_bob',
+      };
+      return known[email.toLowerCase()] ?? null;
+    };
+    function validate() {
+      const errors = [];
+      const aliases = new Set();
+      const botIds = new Set();
+      state.aliases.forEach((item, i) => {
+        const key = item.alias.normalize('NFKC').toLowerCase();
+        if (!/^[\p{L}\p{N}_-]{1,32}$/u.test(item.alias) || ['all', 'everyone', 'here'].includes(key)) {
+          errors.push(`Bot ${i + 1}: alias 须为 1–32 位 Unicode 字母、数字、_、-，且不能是保留词`);
+        }
+        if (aliases.has(key)) errors.push(`Bot ${i + 1}: 规范化 alias 重复`);
+        aliases.add(key);
+        if (!/^ou_[a-z0-9_]+$/i.test(item.id)) errors.push(`Bot ${i + 1}: 请输入 app-scoped Bot open_id`);
+        if (botIds.has(item.id)) errors.push(`Bot ${i + 1}: open_id 重复`);
+        botIds.add(item.id);
+      });
+      const targetIds = new Set();
+      state.targets.forEach((item, i) => {
+        const resolved = resolvePerson(item.identity);
+        if (!resolved) errors.push(`替身对象 ${i + 1}: 邮箱无法解析；请检查 contact:user.id:readonly 与通讯录数据范围`);
+        else if (targetIds.has(resolved)) errors.push(`替身对象 ${i + 1}: 与已有对象重复`);
+        else targetIds.add(resolved);
+      });
+      if (state.enabled && state.targets.length === 0) errors.push('启用个人替身前至少配置一个有效对象');
+      state.errors = errors;
+      return errors.length === 0;
+    }
+    const botStatus = item => {
+      const name = resolveBot(item.id);
+      return name ? `<span class="status ok">✓ ${esc(name)} · ${esc(maskId(item.id))}</span>` : `<span class="status bad">未解析：请输入发送应用视角 Bot open_id</span>`;
+    };
+    const personStatus = item => {
+      const id = resolvePerson(item.identity);
+      return id ? `<span class="status ok">✓ 用户身份已确认 · ${esc(maskId(id))}</span>` : `<span class="status bad">未解析：只接受可由 Contact API 确认的企业邮箱</span>`;
+    };
+    const toggle = () => `<button class="switch ${state.enabled ? 'on' : ''}" data-action="toggle" role="switch" aria-checked="${state.enabled}" aria-label="启停个人替身"></button>`;
+    const scopeCopy = () => `<div class="scope"><strong>作用范围</strong>：当前 profile 的所有已授权普通群和话题群。<br><strong>回复语义</strong>：成功非空答案会披露“AI 代答”并真实 @ 每个有效对象；控制、报错和运行中消息不 @。</div>`;
+    const errors = () => state.errors.length ? `<div class="scope" style="background:#fff1f0;color:#d13f3f"><strong>请修正后再保存</strong><br>${state.errors.map(esc).join('<br>')}</div>` : '';
+    const actions = () => `<div class="actions"><button class="primary" data-action="save">保存</button><button class="secondary" data-action="cancel">取消</button></div>`;
+
+    function rowsEditor() {
+      const addBot = state.aliases.length >= 10 ? '<span class="hint">已达 10 项上限</span>' : '<button class="ghost" data-action="add-bot">＋ 添加</button>';
+      const addTarget = state.targets.length >= 10 ? '<span class="hint">已达 10 项上限</span>' : '<button class="ghost" data-action="add-target">＋ 添加</button>';
+      return `
+        <div class="section"><div class="section-title"><div><h2>可信 Bot 别名</h2><p class="hint">Agent 正文可写 @别名；只信任显式 alias → Bot open_id。最多 10 项。</p></div>${addBot}</div>
+          ${state.aliases.map((item, i) => `<div class="row bot"><input aria-label="Bot 别名 ${i+1}" data-kind="bot-alias" data-index="${i}" value="${esc(item.alias)}" placeholder="review"><input aria-label="Bot open_id ${i+1}" data-kind="bot-id" data-index="${i}" value="${esc(item.id)}" placeholder="ou_..."><button class="icon" data-action="remove-bot" data-index="${i}" aria-label="删除 Bot ${i+1}">✕</button>${state.errors.length ? botStatus(item) : '<span class="status">保存时整批校验</span>'}</div>`).join('') || '<p class="hint">未配置；Agent 写出的 @别名不会被投递。</p>'}
+        </div>
+        <div class="section"><div class="section-title"><div><h2>个人替身对象</h2><p class="hint">只输入企业邮箱；保存时解析并仅持久化 app-scoped open_id。最多 10 人。</p></div>${addTarget}</div>
+          ${state.targets.map((item, i) => `<div class="row person"><input aria-label="替身对象 ${i+1}" data-kind="target" data-index="${i}" value="${esc(item.identity)}" placeholder="name@example.com"><button class="icon" data-action="remove-target" data-index="${i}" aria-label="删除替身对象 ${i+1}">✕</button>${state.errors.length ? personStatus(item) : '<span class="status">保存时通过 Contact API 解析</span>'}</div>`).join('') || '<p class="hint">未配置替身对象。</p>'}
+        </div>`;
+    }
+
+    function variantA() {
+      const expanded = state.enabled || state.errors.length > 0 ? ' open' : '';
+      return `<div class="card-head"><h1>⚙️ 偏好设置</h1><p>现有 /config 表单；群聊协作是同一表单内的折叠区。</p></div>
+        <details class="collaboration"${expanded}><summary>群聊协作（${state.enabled ? '已启用' : '已停用'} · ${state.aliases.length} Bot · ${state.targets.length} 人）</summary>
+        <div class="section"><div class="section-title"><div><h2>个人替身</h2><p class="hint">仅真人结构化直 @ 已配置对象时触发。</p></div>${toggle()}</div>${scopeCopy()}</div>
+        ${rowsEditor()}</details><div class="section">${errors()}<p class="hint">添加/删除会提交整份草稿并重建同一张卡；只有“保存”写配置。</p>${actions()}</div>`;
+    }
+
+    function variantB() {
+      if (state.screen === 'bots') return `<div class="card-head"><h1>← 可信 Bot 别名</h1><p>单独编辑；返回总览前只保存在当前卡片草稿。</p></div>${rowsEditor().split('<div class="section">')[1] ? '<div class="section">' + rowsEditor().split('<div class="section">')[1] : ''}<div class="section"><button class="primary" data-action="home">完成编辑</button></div>`;
+      if (state.screen === 'targets') return `<div class="card-head"><h1>← 个人替身对象</h1><p>逐项展示身份解析结果。</p></div><div class="section"><div class="section-title"><h2>对象列表</h2><button class="ghost" data-action="add-target">＋ 添加</button></div>${state.targets.map((item, i) => `<div class="row person"><input data-kind="target" data-index="${i}" value="${esc(item.identity)}"><button class="icon" data-action="remove-target" data-index="${i}">✕</button>${personStatus(item)}</div>`).join('')}</div><div class="section"><button class="primary" data-action="home">完成编辑</button></div>`;
+      return `<div class="card-head"><h1>⚙️ 群聊协作</h1><p>总览先解释影响，再进入两个短编辑页；最终统一保存。</p></div>
+        <div class="section"><div class="section-title"><div><h2>个人替身</h2><p class="hint">${state.enabled ? '已启用' : '已停用'}</p></div>${toggle()}</div>${scopeCopy()}</div>
+        <div class="section"><div class="summary-grid"><div class="summary-item"><div><strong>可信 Bot 别名</strong><span>${state.aliases.length} 个映射</span></div><button class="ghost" data-action="screen-bots">编辑</button></div><div class="summary-item"><div><strong>个人替身对象</strong><span>${state.targets.length} 个对象</span></div><button class="ghost" data-action="screen-targets">编辑</button></div></div>${errors()}${actions()}</div>`;
+    }
+
+    function variantC() {
+      const aliasText = state.aliases.map(x => `${x.alias} = ${x.id}`).join('\n');
+      const targetText = state.targets.map(x => x.identity).join('\n');
+      return `<div class="card-head"><h1>⚙️ 群聊协作</h1><p>最短表单：一行一项，提交后整卡显示解析结果。</p></div>
+        <div class="section"><div class="section-title"><div><h2>个人替身</h2><p class="hint">${state.enabled ? '已启用' : '已停用'}</p></div>${toggle()}</div>${scopeCopy()}
+          <label class="textarea-label">可信 Bot 别名 <span class="badge">alias = Bot open_id</span><textarea data-kind="aliases-batch" spellcheck="false">${esc(aliasText)}</textarea></label>
+          <label class="textarea-label">个人替身对象 <span class="badge">企业邮箱</span><textarea data-kind="targets-batch" spellcheck="false">${esc(targetText)}</textarea></label>
+          <p class="hint">每行一项；空行忽略。保存时统一解析为 app-scoped open_id，并只回显掩码。</p>${errors()}${actions()}
+        </div>`;
+    }
+
+    function resultView() {
+      if (state.outcome === 'cancelled') return `<div class="result"><h2>已取消</h2><p>未做任何修改。草稿已丢弃，不另发消息。</p><button class="ghost" data-action="edit">返回原型</button></div>`;
+      const people = state.targets.map(x => resolvePerson(x.identity)).filter(Boolean).map(maskId);
+      return `<div class="result"><h2>✅ 群聊协作设置已保存</h2><p>个人替身：<strong>${state.enabled ? '已启用' : '已停用'}</strong><br>可信 Bot 别名：${state.aliases.length} 个<br>替身对象：${people.map(esc).join('、') || '无'}<br><br>未显示真实 Mention、邮箱或完整 ID。下个新回合开始生效；当前运行不重算。</p><button class="ghost" data-action="edit">继续编辑</button></div>`;
+    }
+
+    function render() {
+      const variant = currentVariant();
+      document.querySelector('#variant-label').textContent = `${variant.key} · ${variant.name}`;
+      document.querySelector('#prototype').innerHTML = state.outcome ? resultView() : variant.key === 'A' ? variantA() : variant.key === 'B' ? variantB() : variantC();
+      document.querySelector('#state').textContent = JSON.stringify({ variant: variant.key, ...state }, null, 2);
+    }
+    function changeVariant(delta) {
+      const current = variants.findIndex(v => v.key === currentVariant().key);
+      const next = variants[(current + delta + variants.length) % variants.length];
+      const url = new URL(location.href); url.searchParams.set('variant', next.key); history.replaceState({}, '', url); state.screen = 'home'; state.outcome = null; state.errors = []; render();
+    }
+    document.addEventListener('input', event => {
+      const el = event.target; const index = Number(el.dataset.index);
+      if (el.dataset.kind === 'bot-alias') state.aliases[index].alias = el.value;
+      if (el.dataset.kind === 'bot-id') state.aliases[index].id = el.value.trim();
+      if (el.dataset.kind === 'target') state.targets[index].identity = el.value.trim();
+      if (el.dataset.kind === 'aliases-batch') state.aliases = el.value.split('\n').map(s => s.trim()).filter(Boolean).map(line => { const [alias, id = ''] = line.split('=').map(s => s.trim()); return { alias, id }; });
+      if (el.dataset.kind === 'targets-batch') state.targets = el.value.split('\n').map(identity => ({ identity: identity.trim() })).filter(x => x.identity);
+      document.querySelector('#state').textContent = JSON.stringify({ variant: currentVariant().key, ...state }, null, 2);
+    });
+    document.addEventListener('click', event => {
+      const button = event.target.closest('[data-action]'); if (!button) return;
+      const action = button.dataset.action; const index = Number(button.dataset.index);
+      if (action === 'prev') return changeVariant(-1); if (action === 'next') return changeVariant(1);
+      if (action === 'toggle') state.enabled = !state.enabled;
+      if (action === 'add-bot' && state.aliases.length < 10) state.aliases.push({ alias: '', id: '' });
+      if (action === 'remove-bot') state.aliases.splice(index, 1);
+      if (action === 'add-target' && state.targets.length < 10) state.targets.push({ identity: '' });
+      if (action === 'remove-target') state.targets.splice(index, 1);
+      if (action === 'screen-bots') state.screen = 'bots';
+      if (action === 'screen-targets') state.screen = 'targets';
+      if (action === 'home') state.screen = 'home';
+      if (action === 'save' && validate()) state.outcome = 'saved';
+      if (action === 'cancel') { state = structuredClone(initial); state.outcome = 'cancelled'; }
+      if (action === 'edit') state.outcome = null;
+      render();
+    });
+    document.addEventListener('keydown', event => {
+      if (['INPUT','TEXTAREA'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return;
+      if (event.key === 'ArrowLeft') changeVariant(-1); if (event.key === 'ArrowRight') changeVariant(1);
+    });
+    render();
+  </script>
+</body>
+</html>
