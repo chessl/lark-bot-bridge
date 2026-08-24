@@ -961,6 +961,13 @@ function directSubstitutionMentions(
   const targets: ImSubstitutionTarget[] = [];
   let invalidTargetCount = 0;
   for (const rawMention of raw.message.mentions) {
+    const rawKey =
+      rawMention &&
+      typeof rawMention === 'object' &&
+      'key' in rawMention &&
+      typeof rawMention.key === 'string'
+        ? rawMention.key
+        : undefined;
     const rawId =
       rawMention &&
       typeof rawMention === 'object' &&
@@ -972,27 +979,30 @@ function directSubstitutionMentions(
       rawMention.id.open_id
         ? rawMention.id.open_id
         : undefined;
-    if (!rawId) {
+    const normalized = rawKey
+      ? (message.mentions ?? []).filter((mention) => mention.key === rawKey)
+      : [];
+    const identity =
+      normalized.length === 1 &&
+      normalized[0]?.openId === rawId &&
+      normalized[0].isBot === false
+        ? normalized[0]
+        : undefined;
+    if (
+      !rawId ||
+      !identity ||
+      rawId === senderOpenId ||
+      !configured.has(rawId)
+    ) {
       invalidTargetCount++;
       continue;
     }
     if (seen.has(rawId)) continue;
     seen.add(rawId);
-
-    const normalized = (message.mentions ?? []).filter((mention) => mention.openId === rawId);
-    if (
-      rawId === senderOpenId ||
-      !configured.has(rawId) ||
-      normalized.length === 0 ||
-      normalized.some((mention) => mention.isBot === true)
-    ) {
-      invalidTargetCount++;
-      continue;
-    }
     targets.push(
       Object.freeze({
         openId: verifiedHumanId(rawId),
-        displayAlias: safeDisplayAlias(normalized[0]?.name, rawId),
+        displayAlias: safeDisplayAlias(identity.name, rawId),
       }),
     );
   }

@@ -254,9 +254,11 @@ describe('personal substitution planning', () => {
         mentions: [
           { key: '@_user_1', openId: 'ou_second', name: 'Second', isBot: false },
           { key: '@_user_2', openId: 'ou_unknown', name: 'Unknown', isBot: false },
-          { key: '@_user_3', openId: 'ou_first', name: 'First', isBot: false },
-          { key: '@_user_4', openId: 'ou_sender', name: 'Self', isBot: false },
-          { key: '@_user_5', openId: 'ou_bot_target', name: 'Bot', isBot: true },
+          { key: '@_user_3', openId: 'ou_second', name: 'Duplicate', isBot: false },
+          { key: '@_user_4', openId: 'ou_first', name: 'First', isBot: false },
+          { key: '@_user_5', openId: 'ou_sender', name: 'Self', isBot: false },
+          { key: '@_user_6', openId: 'ou_bot_target', name: 'Bot', isBot: true },
+          { key: '@_user_7', name: 'Missing', isBot: false },
         ],
         rawMentions: [
           { id: { open_id: 'ou_second' } },
@@ -306,6 +308,35 @@ describe('personal substitution planning', () => {
       lane: 'control',
       reason: 'personal-substitution-invalid-targets',
       scope: TOPIC_SCOPE,
+      invalidTargetCount: 2,
+    });
+  });
+
+  it('counts swapped-key and undefined-type identity contradictions as invalid', () => {
+    const plan = planImMessage({
+      message: imMessage({
+        senderType: 'user',
+        rawSenderId: 'ou_sender',
+        mentions: [
+          { key: '@_user_1', openId: 'ou_other', name: 'Swapped', isBot: false },
+          { key: '@_user_2', openId: 'ou_target', name: 'Unknown type' },
+        ],
+        rawMentions: [
+          { key: '@_user_1', id: { open_id: 'ou_target' } },
+          { key: '@_user_2', id: { open_id: 'ou_target' } },
+        ],
+      }),
+      scope: CHAT_SCOPE,
+      authorized: true,
+      duplicate: false,
+      mentionRequired: true,
+      recognizedCommand: false,
+      personalSubstitution: { enabled: true, targetOpenIds: ['ou_target'] },
+    });
+
+    expect(plan).toMatchObject({
+      lane: 'control',
+      reason: 'personal-substitution-invalid-targets',
       invalidTargetCount: 2,
     });
   });
@@ -813,6 +844,7 @@ function imMessage(
     threadId?: string;
     mentions?: Array<{ key: string; openId?: string; name?: string; isBot?: boolean }>;
     rawMentions?: Array<{
+      key?: string;
       id: { open_id?: string };
     }>;
     mentionedBot?: boolean;
@@ -849,7 +881,16 @@ function imMessage(
                 ? {}
                 : { sender_id: { open_id: input.rawSenderId } }),
             },
-            ...(input.rawMentions ? { message: { mentions: input.rawMentions } } : {}),
+            ...(input.rawMentions
+              ? {
+                  message: {
+                    mentions: input.rawMentions.map((mention, index) => ({
+                      ...mention,
+                      key: mention.key ?? input.mentions?.[index]?.key ?? `@_user_${index + 1}`,
+                    })),
+                  },
+                }
+              : {}),
           },
         }),
     ...(input.threadId ? { threadId: input.threadId } : {}),
