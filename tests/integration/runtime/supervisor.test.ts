@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createLarkChannel } from '@larksuite/channel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OmpAdapter } from '../../../src/agent/omp/adapter';
 import { OmpDeliveryJournal } from '../../../src/bot/omp-delivery-journal';
@@ -11,7 +12,7 @@ import {
   loadRootConfig,
   saveRootConfig,
 } from '../../../src/config/profile-store';
-import { Supervisor } from '../../../src/runtime/supervisor';
+import { Supervisor, type SupervisorOptions } from '../../../src/runtime/supervisor';
 
 const roots: string[] = [];
 const started: string[] = [];
@@ -23,25 +24,39 @@ let root: string;
 let sup: Supervisor;
 
 function app(id: string) {
-  return { id, secret: '${APP_SECRET}', tenant: 'feishu' as const };
+  return { id, secret: `\${APP_SECRET}`, tenant: 'feishu' as const };
 }
 
-// Stub startChannel — no network, records lifecycle, returns a minimal bridge.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const stubStartChannel: any = async (deps: any) => {
-  started.push(deps.appPaths.profile);
+function stubChannel(profile: string) {
+  const channel = createLarkChannel({
+    appId: `cli_${profile}`,
+    appSecret: 'test-secret',
+  });
+  Object.defineProperty(channel, 'botIdentity', {
+    configurable: true,
+    value: { name: `bot-${profile}` },
+  });
+  return channel;
+}
+
+// Stub startChannel: no network, records lifecycle, returns a minimal bridge.
+const stubStartChannel: NonNullable<SupervisorOptions['startChannelFn']> = async (deps) => {
+  const profile = deps.controls.profile;
+  const deliveryJournal = deps.deliveryJournal;
+  if (!deliveryJournal) throw new Error('missing delivery journal');
+  started.push(profile);
   const generation = started.length;
-  deliveryJournals.push(deps.deliveryJournal);
+  deliveryJournals.push(deliveryJournal);
   bridgeControls.push(deps.controls);
   lifecycle.push(`start:${generation}:${deps.deferDeliveryRecovery ? 'deferred' : 'active'}`);
   return {
-    channel: { botIdentity: { name: `bot-${deps.appPaths.profile}` } },
+    channel: stubChannel(profile),
     activateDeliveryRecovery: async () => {
       lifecycle.push(`activate:${generation}`);
     },
     disconnect: async () => {
       lifecycle.push(`disconnect:${generation}`);
-      disconnected.push(deps.appPaths.profile);
+      disconnected.push(profile);
     },
   };
 };
@@ -62,7 +77,8 @@ beforeEach(async () => {
     createRootConfig('personal', createDefaultProfileConfig({ app: app('cli_a') })),
     configPath,
   );
-  const rc = (await loadRootConfig(configPath))!;
+  const rc = await loadRootConfig(configPath);
+  if (!rc) throw new Error('missing root config');
   for (const [name, id] of [
     ['work', 'cli_b'],
     ['dup', 'cli_b'],
@@ -134,10 +150,20 @@ describe('Supervisor', () => {
     await seeded.load();
     await seeded.put({
       runId: 'run_before_restart',
-      target: {
-        chatId: 'oc_restart',
-        messageId: 'om_trigger',
-        replyInThread: false,
+      replyPolicy: {
+        invocationKind: 'ordinary',
+        scope: {
+          kind: 'chat',
+          id: 'oc_restart',
+          chatId: 'oc_restart',
+          mode: 'group',
+        },
+        target: {
+          chatId: 'oc_restart',
+          messageId: 'om_trigger',
+          replyInThread: false,
+        },
+        senderOwnership: { kind: 'none', reason: 'verified-bot-sender' },
       },
       messageId: 'om_existing',
       transport: 'inline',

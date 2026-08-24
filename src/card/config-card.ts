@@ -1,6 +1,10 @@
 import { modelLabel, supportedModels } from '../agent/models';
 import type { KnownChat } from '../bot/lark-info';
-import type { ProfileMode } from '../config/profile-schema';
+import type { ProfileMode, TrustedPeerBot } from '../config/profile-schema';
+export type PersonalSubstitutionDraft = Readonly<{
+  enabled: boolean;
+  targetOpenIds: readonly string[];
+}>;
 
 export interface ConfigFormOpts {
   /** Deployment mode: 'personal' (default) or 'team'. */
@@ -15,15 +19,21 @@ export interface ConfigFormOpts {
   allowedChats: string[];
   admins: string[];
   knownChats: KnownChat[];
+  trustedPeerBots?: TrustedPeerBot[];
+  personalSubstitution?: PersonalSubstitutionDraft;
+  collaborationExpanded?: boolean;
+  collaborationError?: string;
+  maskTrustedPeerIds?: boolean;
+  maskPersonalSubstitutionIds?: boolean;
   /** URL of the running local web console (supervisor `--web-ui` mode). Shown
    * at the top of the card when present; omitted when no console is running. */
   consoleUrl?: string;
 }
 
-function collapsedAccessPanel(title: string, elements: object[]): object {
+function collapsedAccessPanel(title: string, elements: object[], expanded = false): object {
   return {
     tag: 'collapsible_panel',
-    expanded: false,
+    expanded,
     header: {
       title: { tag: 'markdown', content: title },
       vertical_align: 'center',
@@ -53,6 +63,207 @@ function chatList(chatIds: string[], knownChats: KnownChat[]): string {
   return chatIds
     .map((id) => `- **${nameMap.get(id) ?? '(未知群)'}**（...${id.slice(-6)}）`)
     .join('\n');
+}
+
+function trustedPeerPanel(opts: ConfigFormOpts): object {
+  const peers = opts.trustedPeerBots ?? [];
+  const substitution = opts.personalSubstitution ?? { enabled: false, targetOpenIds: [] };
+  const substitutionTargets = substitution.targetOpenIds;
+  const rows = peers.flatMap((peer, index) => [
+    {
+      tag: 'column_set',
+      flex_mode: 'flow',
+      horizontal_spacing: 'small',
+      columns: [
+        {
+          tag: 'column',
+          width: 'weighted',
+          weight: 1,
+          elements: [
+            {
+              tag: 'input',
+              name: `trusted_peer_alias_${index}`,
+              default_value: peer.alias,
+              placeholder: { tag: 'plain_text', content: 'alias' },
+              input_type: 'text',
+            },
+          ],
+        },
+        {
+          tag: 'column',
+          width: 'weighted',
+          weight: 2,
+          elements: [
+            {
+              tag: 'input',
+              name: `trusted_peer_open_id_${index}`,
+              default_value:
+                opts.maskTrustedPeerIds === false || !peer.openId.startsWith('ou_')
+                  ? peer.openId
+                  : `…${peer.openId.slice(-6)}`,
+              input_type: 'text',
+            },
+          ],
+        },
+        {
+          tag: 'column',
+          width: 'auto',
+          elements: [
+            {
+              tag: 'button',
+              name: `trusted_peer_delete_${index}`,
+              text: { tag: 'plain_text', content: '删除' },
+              form_action_type: 'submit',
+              behaviors: [
+                {
+                  type: 'callback',
+                  value: {
+                    cmd: 'config.peer-delete',
+                    arg: `${peers.length},${substitutionTargets.length},${index}`,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    { tag: 'hr' },
+  ]);
+  const substitutionRows = substitutionTargets.flatMap((target, index) => [
+    {
+      tag: 'column_set',
+      flex_mode: 'flow',
+      horizontal_spacing: 'small',
+      columns: [
+        {
+          tag: 'column',
+          width: 'weighted',
+          weight: 1,
+          elements: [
+            {
+              tag: 'input',
+              name: `personal_substitution_target_${index}`,
+              default_value:
+                opts.maskPersonalSubstitutionIds === false || !target.startsWith('ou_')
+                  ? target
+                  : `…${target.slice(-6)}`,
+              placeholder: { tag: 'plain_text', content: 'name@example.com' },
+              input_type: 'text',
+            },
+          ],
+        },
+        {
+          tag: 'column',
+          width: 'auto',
+          elements: [
+            {
+              tag: 'button',
+              name: `personal_substitution_delete_${index}`,
+              text: { tag: 'plain_text', content: '删除' },
+              form_action_type: 'submit',
+              behaviors: [
+                {
+                  type: 'callback',
+                  value: {
+                    cmd: 'config.substitution-delete',
+                    arg: `${peers.length},${substitutionTargets.length},${index}`,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    { tag: 'hr' },
+  ]);
+  return collapsedAccessPanel(
+    `**群聊协作**（${peers.length} Bot，点击展开）`,
+    [
+      {
+        tag: 'markdown',
+        content:
+          '_可信 peer 只有以 verified Bot 身份直接结构化 @ 当前 Bot 时才会建立隔离 Invocation。personal substitution 只有已授权真人直接结构化 @ 已配置目标时生效。配置只影响之后的新 Invocation。_',
+      },
+      ...(opts.collaborationError
+        ? [{ tag: 'markdown', content: `**未保存：** ${opts.collaborationError}` }]
+        : []),
+      ...rows,
+      ...(peers.length < 10
+        ? [
+            {
+              tag: 'button',
+              name: 'trusted_peer_add',
+              text: { tag: 'plain_text', content: '添加 trusted peer' },
+              form_action_type: 'submit',
+              behaviors: [
+                {
+                  type: 'callback',
+                  value: {
+                    cmd: 'config.peer-add',
+                    arg: `${peers.length},${substitutionTargets.length}`,
+                  },
+                },
+              ],
+            },
+          ]
+        : [{ tag: 'markdown', content: '_已达到 10 个 trusted peer 上限。_' }]),
+      { tag: 'hr' },
+      {
+        tag: 'markdown',
+        content:
+          '**Personal substitution**\n_目标输入企业邮箱；保存后只显示 app-scoped open ID 的末 6 位。禁用不会删除已保存目标。_',
+      },
+      {
+        tag: 'select_static',
+        name: 'personal_substitution_enabled',
+        initial_option: substitution.enabled ? 'yes' : 'no',
+        options: [
+          { text: { tag: 'plain_text', content: '启用' }, value: 'yes' },
+          { text: { tag: 'plain_text', content: '禁用' }, value: 'no' },
+        ],
+      },
+      ...substitutionRows,
+      ...(substitutionTargets.length < 10
+        ? [
+            {
+              tag: 'button',
+              name: 'personal_substitution_add',
+              text: { tag: 'plain_text', content: '添加代答对象' },
+              form_action_type: 'submit',
+              behaviors: [
+                {
+                  type: 'callback',
+                  value: {
+                    cmd: 'config.substitution-add',
+                    arg: `${peers.length},${substitutionTargets.length}`,
+                  },
+                },
+              ],
+            },
+          ]
+        : [{ tag: 'markdown', content: '_已达到 10 个 personal substitution target 上限。_' }]),
+    ],
+    opts.collaborationExpanded ?? false,
+  );
+}
+
+function safePeerSummary(peers: readonly TrustedPeerBot[], includeAliases: boolean): string {
+  if (peers.length === 0) return '0 Bot';
+  if (!includeAliases) return `${peers.length} Bot（ID 已隐藏）`;
+  return peers
+    .map((peer) => {
+      const alias = includeAliases ? `${peer.alias.replace(/[_-]/g, '\\$&')} ` : '';
+      return `${alias}(...${peer.openId.slice(-6)})`;
+    })
+    .join('、');
+}
+
+function safeSubstitutionSummary(config: PersonalSubstitutionDraft | undefined): string {
+  const enabled = config?.enabled === true;
+  const count = config?.targetOpenIds.length ?? 0;
+  return `${enabled ? '启用' : '禁用'}（${count} 个已保存目标）`;
 }
 
 /** Form card for `/config`. */
@@ -207,6 +418,7 @@ export function configFormCard(opts: ConfigFormOpts): object {
                 { text: { tag: 'plain_text', content: '否' }, value: 'no' },
               ],
             },
+            trustedPeerPanel(opts),
             collapsedAccessPanel('🔒 **访问控制**（点击展开）', accessElements),
             {
               tag: 'column_set',
@@ -223,7 +435,15 @@ export function configFormCard(opts: ConfigFormOpts): object {
                       text: { tag: 'plain_text', content: '提交' },
                       type: 'primary',
                       form_action_type: 'submit',
-                      behaviors: [{ type: 'callback', value: { cmd: 'config.submit' } }],
+                      behaviors: [
+                        {
+                          type: 'callback',
+                          value: {
+                            cmd: 'config.submit',
+                            arg: `${(opts.trustedPeerBots ?? []).length},${(opts.personalSubstitution?.targetOpenIds ?? []).length}`,
+                          },
+                        },
+                      ],
                     },
                   ],
                 },
@@ -264,7 +484,9 @@ export function configSavedCard(opts: ConfigFormOpts): object {
             `**模型**:\`${modelLabel(opts.model)}\`\n` +
             `**并发上限**:\`${opts.maxConcurrentRuns}\`\n` +
             `**run 探活**:\`${opts.runIdleTimeoutMinutes > 0 ? `${opts.runIdleTimeoutMinutes} 分钟` : '关闭'}\`\n` +
-            `**群里需要 @ bot**:\`${opts.requireMentionInGroup ? '是' : '否'}\`\n\n` +
+            `**群里需要 @ bot**:\`${opts.requireMentionInGroup ? '是' : '否'}\`\n` +
+            `**trusted peer Bot**:${safePeerSummary(opts.trustedPeerBots ?? [], true)}\n` +
+            `**personal substitution**:${safeSubstitutionSummary(opts.personalSubstitution)}\n\n` +
             '🔒 **访问控制**' +
             (opts.mode === 'team' ? '（_团队版下不生效,任何人可用_）' : '') +
             '\n' +
@@ -335,12 +557,27 @@ export function configCancelledCard(): object {
   };
 }
 
-export function configFailedCard(reason: string): object {
+export function configFailedCard(
+  reason: string,
+  trustedPeerBots: readonly TrustedPeerBot[] = [],
+  substitutionTargetCount = 0,
+): object {
+  const safeReason = reason
+    .replace(/\bou_[A-Za-z0-9_-]+\b/g, '已隐藏 ID')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '已隐藏邮箱');
   return {
     schema: '2.0',
     config: { summary: { content: '保存失败' } },
     body: {
-      elements: [{ tag: 'markdown', content: `保存失败：${reason}` }],
+      elements: [
+        {
+          tag: 'markdown',
+          content:
+            `保存失败：${safeReason}\n\n` +
+            `trusted peer 草稿：${safePeerSummary(trustedPeerBots, false)}\n` +
+            `personal substitution 草稿：${substitutionTargetCount} 个目标（内容已隐藏）`,
+        },
+      ],
     },
   };
 }

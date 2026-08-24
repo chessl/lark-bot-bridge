@@ -4,8 +4,9 @@ import * as lockfile from 'proper-lockfile';
 import { writeFileAtomic } from '../platform/atomic-write';
 import { resolveAppPaths } from './app-paths';
 import { normalizeProfileConfig, type ProfileConfig, type RootConfig } from './profile-schema';
+
 interface RawRootConfig {
-  schemaVersion: 2;
+  schemaVersion: 3;
   activeProfile: string;
   profiles: Record<string, unknown>;
 }
@@ -13,6 +14,14 @@ interface RawRootConfig {
 export async function loadRootConfig(path: string): Promise<RootConfig | undefined> {
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'schemaVersion' in parsed &&
+      parsed.schemaVersion !== 3
+    ) {
+      throw new Error('incompatible Root Config format: expected schemaVersion 3');
+    }
     return isRootConfig(parsed) ? normalizeRootConfig(parsed) : undefined;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
@@ -26,7 +35,7 @@ function normalizeRootConfig(root: RawRootConfig): RootConfig {
     profiles[name] = normalizeProfileConfig(profile);
   }
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     activeProfile: root.activeProfile,
     profiles,
   };
@@ -75,7 +84,7 @@ export function runtimeProfileConfig(root: RootConfig, profile: string): Profile
 
 export function createRootConfig(profile: string, cfg: ProfileConfig): RootConfig {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     activeProfile: profile,
     profiles: { [profile]: cfg },
   };
@@ -84,7 +93,7 @@ export function createRootConfig(profile: string, cfg: ProfileConfig): RootConfi
 export function isRootConfig(value: unknown): value is RawRootConfig {
   if (!value || typeof value !== 'object') return false;
   const root = value as Partial<RawRootConfig>;
-  return root.schemaVersion === 2 && Boolean(root.profiles && typeof root.profiles === 'object');
+  return root.schemaVersion === 3 && Boolean(root.profiles && typeof root.profiles === 'object');
 }
 
 export interface RemoveProfileOptions {

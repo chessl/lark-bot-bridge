@@ -67,7 +67,7 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
     });
     await mkdir(join(root, 'profiles', name), { recursive: true });
   }
-  await writeJson(join(root, 'config.json'), { schemaVersion: 2, activeProfile, profiles });
+  await writeJson(join(root, 'config.json'), { schemaVersion: 3, activeProfile, profiles });
 }
 
 function processEntry(overrides: Partial<ProcessEntry>): ProcessEntry {

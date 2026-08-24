@@ -214,7 +214,7 @@ export async function runProfileExport(
     );
   }
   const exported: RootConfig = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     activeProfile: name,
     profiles: {
       [name]: profile,

@@ -233,7 +233,13 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
 export async function applyConfig(rt: UiRuntime, body: unknown): Promise<ConfigView> {
   const p = parseConfigBody(rt, body);
   try {
-    await savePreferencesConfig(rt, p.nextPreferences, p.requireMentionInGroup, p.mode, p.meeting);
+    await savePreferencesConfig({
+      state: rt,
+      preferences: p.nextPreferences,
+      requireMentionInGroup: p.requireMentionInGroup,
+      mode: p.mode,
+      meeting: p.meeting,
+    });
   } catch (err) {
     throw new ApiError(500, `保存失败：${err instanceof Error ? err.message : String(err)}`);
   }
@@ -248,13 +254,13 @@ export async function applyConfigToDisk(
 ): Promise<ConfigView> {
   const p = parseConfigBody(state, body);
   try {
-    await savePreferencesConfig(
+    await savePreferencesConfig({
       state,
-      p.nextPreferences,
-      p.requireMentionInGroup,
-      p.mode,
-      p.meeting,
-    );
+      preferences: p.nextPreferences,
+      requireMentionInGroup: p.requireMentionInGroup,
+      mode: p.mode,
+      meeting: p.meeting,
+    });
   } catch (err) {
     throw new ApiError(500, `保存失败：${err instanceof Error ? err.message : String(err)}`);
   }

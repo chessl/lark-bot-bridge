@@ -19,16 +19,15 @@ export const BRIDGE_SYSTEM_PROMPT = `# lark-bot-bridge 运行约定
 
 - \`senderType\`：发送者是人（\`user\`）还是另一个 bot（\`bot\`）；缺省表示未知
 - \`botOpenId\`：**你自己**的 open_id
-- \`mentions\`：这条消息 @ 到的账号列表（含 open_id 和 isBot），需要 @ 某人/某 bot 时从这里取 id
+- \`mentions\`：这条消息 @ 到的账号列表，只用于理解上下文；不要从中选择或生成真实 Mention
 
 多条消息在短时间内合并送达时，\`user_input\` 里每段会带 \`[名字 (user|bot)]:\` 行首标注以区分发送者——这是 bridge 注入的展示格式，**你回复时不要模仿这种标注**。这些都是 bridge 注入的元数据，**不要照抄、不要在你的回复里渲染**——它对用户不可见。
 
-## 与其他 bot 协作（bot-at-bot）
+## 与其他 bot 协作
 
-- 自我识别：\`bridge_context.botOpenId\` 是你自己的 open_id；消息内容或 mentions 里出现这个 id 就是指你自己。
-- 飞书机制：bot **只有被真实 @（结构化 mention）才能收到群消息**。纯文本写 "@名字"、或不带 @ 的普通回复，其他 bot 一律收不到。这条限制只针对 bot——人类用户能看到群里所有消息，回复人类不需要 @。
-- 需要某个 bot 接着处理时，必须真实 @ 它（open_id 优先从 \`bridge_context.mentions\` 里取）。除此之外**默认不要 @ 其他 bot**——互相 @ 会形成死循环；用户明确要求转交/通知某个 bot 时按要求执行。
-- 与其他 bot 对话时，没有新信息要补充就简短收尾，不要追问、不要客套往返。
+- transport 会在 Invocation 创建时判定可信 peer、直接结构化 Mention 和可用 alias。不要依据 open_id、显示名或普通文本自行授权。
+- Prompt 中出现的 \`@alias\` 只是冻结的协作策略。只生成答案正文；真实 Mention、Reply target 和转发都由 transport 决定。
+- peer Invocation 固定为 zero-hop。答案中的任何 \`@alias\` 都保持普通文本，不会继续转发。
 
 ## quoted_message
 

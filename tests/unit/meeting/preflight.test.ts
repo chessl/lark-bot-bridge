@@ -84,7 +84,7 @@ describe('checkMeetingPreflight', () => {
     rootDir = await mkdtemp(join(tmpdir(), 'meeting-preflight-'));
     await saveRootConfig(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         activeProfile: 'work',
         profiles: {
           work: createDefaultProfileConfig({

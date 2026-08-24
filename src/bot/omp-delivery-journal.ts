@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { log } from '../core/logger';
 import { writeFileAtomic } from '../platform/atomic-write';
+import type { ImReplyPolicy } from './im-invocation';
 
 const ReplyTargetSchema = z.discriminatedUnion('replyInThread', [
   z.object({
@@ -16,6 +17,64 @@ const ReplyTargetSchema = z.discriminatedUnion('replyInThread', [
     replyInThread: z.literal(true),
   }),
 ]);
+const ConversationScopeSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('chat'),
+    id: z.string().min(1),
+    chatId: z.string().min(1),
+    mode: z.enum(['p2p', 'group', 'topic']),
+  }),
+  z.object({
+    kind: z.literal('topic'),
+    id: z.string().min(1),
+    chatId: z.string().min(1),
+    threadId: z.string().min(1),
+    mode: z.literal('topic'),
+  }),
+]);
+const SenderOwnershipSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('mention'), openId: z.string().min(1) }),
+  z.object({
+    kind: z.literal('none'),
+    reason: z.enum([
+      'missing-raw-sender',
+      'missing-sender-id',
+      'contradictory-sender-id',
+      'invalid-sender-id',
+      'contradictory-sender-type',
+      'unknown-sender-type',
+      'direct-message',
+      'verified-bot-sender',
+    ]),
+  }),
+]);
+const ReplyPolicyBaseSchema = z.object({
+  scope: ConversationScopeSchema,
+  target: ReplyTargetSchema,
+  senderOwnership: SenderOwnershipSchema,
+});
+const ReplyPolicySchema = z.discriminatedUnion('invocationKind', [
+  ReplyPolicyBaseSchema.extend({ invocationKind: z.literal('ordinary') }),
+  ReplyPolicyBaseSchema.extend({ invocationKind: z.literal('peer') }),
+  ReplyPolicyBaseSchema.extend({
+    invocationKind: z.literal('substitution'),
+    substitutionTargets: z
+      .tuple(
+        [
+          z.object({
+            openId: z.string().regex(/^ou_[A-Za-z0-9_-]+$/),
+            displayAlias: z.string().min(1),
+          }),
+        ],
+        z.object({
+          openId: z.string().regex(/^ou_[A-Za-z0-9_-]+$/),
+          displayAlias: z.string().min(1),
+        }),
+      )
+      .refine((targets) => targets.length <= 10),
+    invalidTargetCount: z.number().int().nonnegative(),
+  }),
+]) satisfies z.ZodType<ImReplyPolicy>;
 const DeliveryStateSchema = z.enum([
   'no_message',
   'unknown',
@@ -53,6 +112,23 @@ const PatchRequestSchema = z.object({
   path: z.object({ message_id: z.string().min(1) }),
   data: z.object({ content: z.string() }),
 });
+const MentionFallbackSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('reply'),
+    transport: z.literal('markdown'),
+    terminal: z.literal(true),
+    uuid: z.string().min(1),
+    sequence: z.literal(0),
+    request: ReplyRequestSchema,
+  }),
+  z.object({
+    kind: z.literal('patch'),
+    terminal: z.literal(true),
+    uuid: z.string().min(1),
+    sequence: z.literal(0),
+    request: PatchRequestSchema,
+  }),
+]);
 const PendingOperationSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('reply'),
@@ -61,6 +137,7 @@ const PendingOperationSchema = z.discriminatedUnion('kind', [
     uuid: z.string().min(1),
     sequence: z.literal(0),
     request: ReplyRequestSchema,
+    mentionFallback: MentionFallbackSchema.optional(),
   }),
   z.object({
     kind: z.literal('update'),
@@ -68,6 +145,7 @@ const PendingOperationSchema = z.discriminatedUnion('kind', [
     uuid: z.string().min(1),
     sequence: z.number().int().nonnegative(),
     request: UpdateRequestSchema,
+    mentionFallback: MentionFallbackSchema.optional(),
   }),
   z.object({
     kind: z.literal('close'),
@@ -82,11 +160,12 @@ const PendingOperationSchema = z.discriminatedUnion('kind', [
     uuid: z.string().min(1),
     sequence: z.literal(0),
     request: PatchRequestSchema,
+    mentionFallback: MentionFallbackSchema.optional(),
   }),
 ]);
 const ActiveDeliverySchema = z.object({
   runId: z.string().min(1),
-  target: ReplyTargetSchema,
+  replyPolicy: ReplyPolicySchema,
   cardId: z.string().min(1).optional(),
   messageId: z.string().min(1).optional(),
   transport: ReplyTransportSchema.optional(),
@@ -98,18 +177,23 @@ const ActiveDeliverySchema = z.object({
   }),
   pending: PendingOperationSchema.optional(),
 });
-const JournalFileSchema = z.object({ version: z.literal(1), entries: z.array(z.unknown()) });
+const JournalFileSchema = z.object({ version: z.literal(2), entries: z.array(z.unknown()) });
 
 export type DeliveryState = z.infer<typeof DeliveryStateSchema>;
 export type ReplyTransport = z.infer<typeof ReplyTransportSchema>;
 export type DurablePendingOperation = z.infer<typeof PendingOperationSchema>;
-export type ActiveDelivery = z.infer<typeof ActiveDeliverySchema>;
+export type DurableMentionFallback = z.infer<typeof MentionFallbackSchema>;
+export type ActiveDelivery = Omit<z.infer<typeof ActiveDeliverySchema>, 'replyPolicy'> & {
+  replyPolicy: ImReplyPolicy;
+};
 
 export type DeliveryFailureReason =
   | 'journal-read-failed'
+  | 'incompatible-journal-version'
   | 'corrupt-journal-json'
   | 'corrupt-journal-shape'
   | 'corrupt-journal-entry'
+  | 'recovery-scan-failed'
   | 'recovery-timestamp-in-future'
   | 'initial-uuid-window-expired'
   | 'message-update-window-expired'
@@ -176,6 +260,10 @@ export class OmpDeliveryJournal {
       this.recordFailure(undefined, 'corrupt-journal-json');
       return;
     }
+    if (typeof raw === 'object' && raw !== null && 'version' in raw && raw.version !== 2) {
+      this.recordFailure(undefined, 'incompatible-journal-version');
+      return;
+    }
     const file = JournalFileSchema.safeParse(raw);
     if (!file.success) {
       this.recordFailure(undefined, 'corrupt-journal-shape');
@@ -226,9 +314,9 @@ export class OmpDeliveryJournal {
     if (this.#scanner) return;
     this.#scanner = setInterval(() => {
       const result = this.#scannerWork.then(scan);
-      this.#scannerWork = result.catch((error) =>
-        log.fail('reply-recovery', error, { step: 'scan' }),
-      );
+      this.#scannerWork = result.catch(() => {
+        this.recordFailure(undefined, 'recovery-scan-failed');
+      });
     }, intervalMs);
   }
 
@@ -249,7 +337,7 @@ export class OmpDeliveryJournal {
   private enqueue(change: () => void): Promise<void> {
     const result = this.#writer.then(async () => {
       change();
-      const file = { version: 1, entries: [...this.#entries.values()] } satisfies z.input<
+      const file = { version: 2, entries: [...this.#entries.values()] } satisfies z.input<
         typeof JournalFileSchema
       >;
       await writeFileAtomic(this.#path, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 });
@@ -281,14 +369,31 @@ function isConsistentActiveDelivery(entry: ActiveDelivery): boolean {
     return false;
   }
   if (!pending) return true;
+  const mentionFallback = pending.kind === 'close' ? undefined : pending.mentionFallback;
+  if (
+    mentionFallback?.kind === 'reply' &&
+    (mentionFallback.uuid !== mentionFallback.request.data.uuid ||
+      mentionFallback.request.path.message_id !== entry.replyPolicy.target.messageId ||
+      mentionFallback.request.data.reply_in_thread !== entry.replyPolicy.target.replyInThread)
+  ) {
+    return false;
+  }
+  if (
+    mentionFallback?.kind === 'patch' &&
+    (!entry.messageId ||
+      entry.time.messageKnownAtMs === undefined ||
+      mentionFallback.request.path.message_id !== entry.messageId)
+  ) {
+    return false;
+  }
 
   if (pending.kind === 'reply') {
     return (
       entry.transport === pending.transport &&
       entry.messageId === undefined &&
       pending.uuid === pending.request.data.uuid &&
-      pending.request.path.message_id === entry.target.messageId &&
-      pending.request.data.reply_in_thread === entry.target.replyInThread
+      pending.request.path.message_id === entry.replyPolicy.target.messageId &&
+      pending.request.data.reply_in_thread === entry.replyPolicy.target.replyInThread
     );
   }
   if (pending.kind === 'patch') {

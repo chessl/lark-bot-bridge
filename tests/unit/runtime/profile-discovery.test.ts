@@ -26,7 +26,7 @@ function profile(appId: string) {
 }
 
 async function writeRootConfig(rootDir: string, rootConfig: Omit<RootConfig, 'schemaVersion'>) {
-  await saveRootConfig({ schemaVersion: 2, ...rootConfig }, join(rootDir, 'config.json'));
+  await saveRootConfig({ schemaVersion: 3, ...rootConfig }, join(rootDir, 'config.json'));
 }
 
 describe('profile discovery', () => {

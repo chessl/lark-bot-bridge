@@ -1,7 +1,11 @@
 import pkg from '../../package.json';
 import { OmpAdapter } from '../agent/omp/adapter';
 import type { OmpRunEngine } from '../agent/types';
-import { type BridgeChannel, startChannel as realStartChannel } from '../bot/channel';
+import {
+  type BridgeChannel,
+  startChannel as realStartChannel,
+  type StartChannelDeps,
+} from '../bot/channel';
 import { OmpDeliveryJournal } from '../bot/omp-delivery-journal';
 import type { Controls } from '../commands';
 import type { AppPaths } from '../config/app-paths';
@@ -20,7 +24,7 @@ import {
 import { resolveProfileRuntime } from './profile-runtime';
 import { type ProcessEntry, register, unregister, unregisterSync, updateEntry } from './registry';
 
-type StartChannelFn = typeof realStartChannel;
+type StartChannelFn = (deps: StartChannelDeps) => Promise<BridgeChannel>;
 
 export interface SupervisorOptions {
   /** Root config path (config.json). */

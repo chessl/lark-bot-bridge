@@ -4,8 +4,14 @@ import type * as LarkChannelModule from '@larksuite/channel';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { AgentEvent } from '../../../src/agent/types.js';
+import type {
+  ImReplyPlan,
+  ImReplyPolicy,
+  ImReplyTarget,
+  VerifiedBotId,
+} from '../../../src/bot/im-invocation.js';
 import { OmpReplyController } from '../../../src/bot/omp-reply-controller.js';
-import { createRunState, type RunState } from '../../../src/card/run-state.js';
+import { createRunState, finalizeIfRunning, type RunState } from '../../../src/card/run-state.js';
 import type { Controls } from '../../../src/commands/index.js';
 import {
   createDefaultProfileConfig,
@@ -53,6 +59,7 @@ interface FakeLarkChannel {
         message: {
           get: Mock<(...args: unknown[]) => Promise<unknown>>;
           reply: Mock<(input: unknown) => Promise<unknown>>;
+          patch: Mock<(input: unknown) => Promise<unknown>>;
         };
         messageReaction: {
           create: Mock<(...args: unknown[]) => Promise<unknown>>;
@@ -293,7 +300,7 @@ describe('P2P OMP Reply', () => {
       const elements = cardElements(finalUpdate?.card);
       expect(elements).toMatchObject([
         ...(expectedReasoning ? [{ element_id: 'reasoning', expanded: false }] : []),
-        { element_id: 'answer', content: expectedAnswer },
+        { element_id: 'answer', content: `<at id="ou_user"></at>\n\n${expectedAnswer}` },
         { element_id: 'metrics' },
         ...(unfinishedTool ? [{ element_id: 'tools', expanded: false }] : []),
       ]);
@@ -564,11 +571,11 @@ describe('P2P OMP Reply', () => {
 
     await new OmpReplyController({
       channel: exactChannel as unknown as LarkChannel,
-      target,
+      replyPolicy: testReplyPolicy(target),
     }).open(exactState);
     await new OmpReplyController({
       channel: overChannel as unknown as LarkChannel,
-      target,
+      replyPolicy: testReplyPolicy(target),
     }).open(overState);
 
     const exact = exactChannel.createdCards[0];
@@ -586,6 +593,223 @@ describe('P2P OMP Reply', () => {
     expect(exactChannel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
     expect(overChannel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
   });
+
+  it('rejects a Final Reply plan that differs from the Progress Reply target', async () => {
+    const channel = createFakeLarkChannel();
+    const progressTarget = {
+      chatId: 'oc_final_plan',
+      messageId: 'om_progress_target',
+      replyInThread: false,
+    } as const;
+    const controller = new OmpReplyController({
+      channel: channel as unknown as LarkChannel,
+      replyPolicy: testReplyPolicy(progressTarget),
+    });
+    await controller.open(createRunState());
+    const plan: ImReplyPlan = {
+      invocationKind: 'ordinary',
+      reason: 'run-completed',
+      scope: {
+        kind: 'chat',
+        id: 'oc_final_plan',
+        chatId: 'oc_final_plan',
+        mode: 'group',
+      },
+      target: {
+        chatId: 'oc_final_plan',
+        messageId: 'om_final_target',
+        replyInThread: false,
+      },
+      senderOwnership: { kind: 'none', reason: 'verified-bot-sender' },
+      state: finalizeIfRunning(createRunState()),
+    };
+
+    await expect(controller.finish(plan)).rejects.toThrow(
+      'Final IM Reply policy differs from the frozen Progress Reply policy',
+    );
+  });
+
+  it('projects sender and peer ownership together, then degrades both inside the known Reply', async () => {
+    const target = {
+      chatId: 'oc_sender_owner',
+      messageId: 'om_sender_owner',
+      replyInThread: false,
+    } as const;
+    const replyPolicy: ImReplyPolicy = {
+      ...testReplyPolicy(target),
+      senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+    };
+    const channel = createFakeLarkChannel({
+      update: async () => ({ code: 230001, msg: 'mention rejected' }),
+    });
+    const controller = new OmpReplyController({
+      channel: channel as unknown as LarkChannel,
+      replyPolicy,
+    });
+    await controller.open(createRunState());
+    const state: RunState = {
+      ...finalizeIfRunning(createRunState()),
+      finalText: 'before @Hermes after',
+    };
+
+    await controller.finish({
+      ...replyPolicy,
+      reason: 'run-completed',
+      state,
+      peerActivation: {
+        alias: 'Hermes',
+        openId: 'ou_peer' as VerifiedBotId,
+        start: 7,
+        end: 14,
+      },
+    });
+
+    expect(channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+    expect(channel.rawClient.cardkit.v1.card.update).toHaveBeenCalledOnce();
+    const rendered: object = JSON.parse(
+      updateCardData(channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0]) ?? '{}',
+    );
+    expect(
+      cardElements(rendered).find(
+        (element) => 'element_id' in element && element.element_id === 'answer',
+      ),
+    ).toMatchObject({
+      content: '<at id="ou_sender"></at>\n\nbefore <at id="ou_peer">@Hermes</at> after',
+    });
+    expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledOnce();
+    const patch = JSON.stringify(channel.rawClient.im.v1.message.patch.mock.calls[0]?.[0]);
+    expect(patch).toContain('om_reply_1');
+    expect(patch).toContain('Mention 不可用');
+    expect(patch).toContain('\\\\@请求者');
+    expect(patch).toContain('\\\\@Hermes');
+    expect(patch).toContain('Peer 未通知');
+    expect(patch).not.toContain('<at');
+    expect(channel.sent).toEqual([]);
+  });
+  it.each(['update', 'close'] satisfies Array<'update' | 'close'>)(
+    'degrades the managed %s fallback patch after Mention rejection',
+    async (branch) => {
+      const target: ImReplyTarget = {
+        chatId: `oc_${branch}_fallback`,
+        messageId: `om_${branch}_fallback`,
+        replyInThread: false,
+      };
+      const replyPolicy: ImReplyPolicy = {
+        ...testReplyPolicy(target),
+        senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+      };
+      let patchAttempt = 0;
+      const patch = async () => {
+        patchAttempt++;
+        return patchAttempt === 1 ? { code: 230001, msg: 'mention rejected' } : { code: 0 };
+      };
+      const channel = createFakeLarkChannel(
+        branch === 'update'
+          ? { update: async () => ({ code: 230002, msg: 'update rejected' }), patch }
+          : { close: async () => ({ code: 230002, msg: 'close rejected' }), patch },
+      );
+      const controller = new OmpReplyController({
+        channel: channel as unknown as LarkChannel,
+        replyPolicy,
+      });
+      await controller.open(createRunState());
+      await controller.finish({
+        ...replyPolicy,
+        reason: 'run-completed',
+        state: { ...finalizeIfRunning(createRunState()), finalText: 'finished' },
+      });
+
+      expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledTimes(2);
+      const degraded = JSON.stringify(channel.rawClient.im.v1.message.patch.mock.calls.at(-1)?.[0]);
+      expect(degraded).toContain('Mention 不可用');
+      expect(degraded).toContain('\\\\@请求者');
+      expect(degraded).not.toContain('<at');
+    },
+  );
+
+  it('keeps combined substitution ownership and peer degradation inside one managed Reply', async () => {
+    const target = {
+      chatId: 'oc_substitution',
+      messageId: 'om_substitution',
+      replyInThread: false,
+    } as const;
+    const replyPolicy: ImReplyPolicy = {
+      invocationKind: 'substitution',
+      scope: {
+        kind: 'chat',
+        id: target.chatId,
+        chatId: target.chatId,
+        mode: 'group',
+      },
+      target,
+      senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+      substitutionTargets: [
+        { openId: 'ou_target', displayAlias: 'Target' },
+        { openId: 'ou_second', displayAlias: 'Second' },
+      ],
+      invalidTargetCount: 2,
+    };
+    const channel = createFakeLarkChannel({
+      update: async () => ({ code: 230001, msg: 'mention rejected' }),
+    });
+    const controller = new OmpReplyController({
+      channel: channel as unknown as LarkChannel,
+      replyPolicy,
+    });
+    await controller.open(createRunState());
+    const state: RunState = {
+      ...finalizeIfRunning(createRunState()),
+      finalText: 'before @Hermes after',
+    };
+
+    await controller.finish({
+      ...replyPolicy,
+      reason: 'run-completed',
+      state,
+      peerActivation: {
+        alias: 'Hermes',
+        openId: 'ou_peer' as VerifiedBotId,
+        start: 7,
+        end: 14,
+      },
+    });
+
+    const update = JSON.stringify(channel.rawClient.cardkit.v1.card.update.mock.calls[0]?.[0]);
+    expect(update.match(/ou_sender/g)).toHaveLength(1);
+    expect(update.match(/ou_target/g)).toHaveLength(1);
+    expect(update.match(/ou_second/g)).toHaveLength(1);
+    expect(update.match(/ou_peer/g)).toHaveLength(1);
+    expect(update).toContain('AI 代');
+    expect(update).toContain('回答（已在本回复中点名）');
+    expect(update).toContain('另有 2 个对象身份无法确认');
+    expect(channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+    expect(channel.rawClient.im.v1.message.patch).toHaveBeenCalledOnce();
+    const patch = JSON.stringify(channel.rawClient.im.v1.message.patch.mock.calls[0]?.[0]);
+    expect(patch).toContain('\\\\@请求者');
+    expect(patch).toContain('\\\\@Target');
+    expect(patch).toContain('\\\\@Second');
+    expect(patch).toContain('\\\\@Hermes');
+    expect(patch).toContain('Peer 未通知');
+    expect(patch).toContain('Mention 不可用');
+    expect(patch).not.toMatch(/ou_sender|ou_target|ou_second|ou_peer|<at/);
+    expect(channel.sent).toEqual([]);
+  });
+
+  function testReplyPolicy(
+    target: ImReplyTarget,
+  ): Extract<ImReplyPolicy, { invocationKind: 'ordinary' }> {
+    return {
+      invocationKind: 'ordinary',
+      scope: {
+        kind: 'chat',
+        id: target.chatId,
+        chatId: target.chatId,
+        mode: 'group',
+      },
+      target,
+      senderOwnership: { kind: 'none', reason: 'verified-bot-sender' },
+    };
+  }
 
   it('captures an exact 30 KB terminal card with metrics, marker, and one IM Reply', async () => {
     const h = await createHarness({
@@ -957,6 +1181,26 @@ describe('P2P OMP Reply', () => {
     expect(rejection.channel.rawClient.im.v1.message.reply).not.toHaveBeenCalled();
     expect(rejection.channel.sent[0]?.options).toMatchObject({ replyTo: 'om_rejection' });
   });
+
+  it('creates one Invocation, Run, and Reply for duplicate IM deliveries', async () => {
+    const h = await createHarness();
+    await startTestBridge(h);
+    const duplicate = message('om_duplicate', 'run once');
+
+    await h.channel.handlers.message?.(duplicate);
+    await h.channel.handlers.message?.(duplicate);
+    await waitFor(() =>
+      h.channel.operations.some((operation) => operation.startsWith('card:close:')),
+    );
+
+    expect(h.agent.runOptions).toHaveLength(1);
+    expect(h.channel.createdCards).toHaveLength(1);
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledOnce();
+    expect(h.channel.rawClient.im.v1.message.reply.mock.calls[0]?.[0]).toMatchObject({
+      path: { message_id: 'om_duplicate' },
+    });
+  });
+
   it('renders model, configuration, total duration, usage, and TPS in one footer', async () => {
     const h = await createHarness({
       wallNow: clock(1_000_500),
@@ -1261,6 +1505,7 @@ function createFakeLarkChannel(
     reply?: (input: unknown) => Promise<unknown>;
     update?: (input: unknown) => Promise<unknown>;
     close?: (input: unknown) => Promise<unknown>;
+    patch?: (input: unknown) => Promise<unknown>;
   } = {},
 ): FakeLarkChannel {
   const handlers: MessageHandlerMap = {};
@@ -1289,6 +1534,10 @@ function createFakeLarkChannel(
     operations.push(`card:close:${sequence}`);
     return options.close ? options.close(input) : { code: 0 };
   });
+  const patch = vi.fn(async (input: unknown) => {
+    operations.push('im:patch');
+    return options.patch ? options.patch(input) : { code: 0 };
+  });
 
   return {
     handlers,
@@ -1312,6 +1561,7 @@ function createFakeLarkChannel(
           message: {
             get: vi.fn(async () => ({ data: { items: [] } })),
             reply: replyMock,
+            patch,
           },
           messageReaction: {
             create: vi.fn(async (input: unknown) => {
@@ -1385,6 +1635,13 @@ function message(
     contentType: 'text',
     resources: [],
     mentionedBot: false,
+    raw: {
+      sender: {
+        sender_id: { open_id: 'ou_user' },
+        sender_type: 'user',
+      },
+      message: { message_id: messageId },
+    },
     ...(createTime === null ? {} : { createTime }),
   } as unknown as NormalizedMessage;
 }

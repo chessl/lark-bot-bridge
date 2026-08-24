@@ -22,7 +22,7 @@ import {
   type RunState,
   reduceWithClock,
 } from '../card/run-state';
-import { type Controls, tryHandleCommand } from '../commands';
+import { type Controls, isKnownTextCommand, tryHandleCommand } from '../commands';
 import type { AppPaths } from '../config/app-paths';
 import type { ProfileConfig } from '../config/profile-schema';
 import { getAgentStopGraceMs, getMaxConcurrentRuns, getRunIdleTimeoutMs } from '../config/schema';
@@ -43,14 +43,20 @@ import type { WorkspaceStore } from '../workspace/store';
 import { ActiveRuns } from './active-runs';
 import { type ChatMode, ChatModeCache } from './chat-mode-cache';
 import { handleCommentMention } from './comments';
+import {
+  createImInvocation,
+  finalizeImReply,
+  type ImConversationScope,
+  type ImInvocation,
+  type ImMessagePlan,
+  type ImOrdinaryMessagePlan,
+  type ImPromptMessage,
+  planImMessage,
+} from './im-invocation';
 import { startKeepalive } from './keepalive';
 import { fetchKnownChats } from './lark-info';
 import { OmpDeliveryJournal } from './omp-delivery-journal';
-import {
-  activateOmpReplyRecovery,
-  deriveOmpReplyTarget,
-  OmpReplyController,
-} from './omp-reply-controller';
+import { activateOmpReplyRecovery, OmpReplyController } from './omp-reply-controller';
 import { PendingQueue } from './pending-queue';
 import { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
@@ -179,6 +185,8 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   const wallNow = deps.wallNow ?? Date.now;
   const monoNow = deps.monoNow ?? performance.now.bind(performance);
   const messageReceipts = new WeakMap<NormalizedMessage, RunMetricReceipt>();
+  const imPlans = new WeakMap<NormalizedMessage, ImOrdinaryMessagePlan>();
+  const seenImMessageIds = new Set<string>();
   const activeRuns = new ActiveRuns();
   // ChatModeCache stays per-bridge-instance — invalidated on restart along
   // with everything else. Topic-mode chats only need one chat.get() call ever.
@@ -293,56 +301,134 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // unblock arms a fresh quiet-window timer. Net effect: at most one run per
   // chat in flight, and everything sent during a run merges into the next
   // batch (only flushed once 600ms of silence has passed *after* the run).
+  const scopeRunTails = new Map<string, Promise<void>>();
+  const scopeRunCounts = new Map<string, number>();
   const pending = new PendingQueue(DEBOUNCE_MS, (scope, batch) => {
     const firstMsg = batch[0];
     if (!firstMsg) return;
-    pending.block(scope);
-    void withTrace({ chatId: firstMsg.chatId }, async () => {
-      log.info('flush', 'start', {
-        scope,
-        batchSize: batch.length,
-        chatId: firstMsg.chatId,
-        threadId: firstMsg.threadId,
-        msgId: firstMsg.messageId,
-      });
-      try {
-        const resolvedMode = await chatModeCache.resolve(channel, firstMsg.chatId);
-        // Feishu/Lark converted topic groups may still resolve as `group` from
-        // the chat info API/cache, while message events already carry threadId.
-        // Treat threadId as authoritative for IM messages so scope and replies
-        // stay isolated per topic.
-        const mode = firstMsg.threadId ? 'topic' : resolvedMode;
-        if (firstMsg.threadId && resolvedMode !== 'topic') {
-          chatModeCache.invalidate(firstMsg.chatId);
-          logThreadModeOverride({
-            chatId: firstMsg.chatId,
-            resolvedMode,
-            threadId: firstMsg.threadId,
-          });
-        }
-        await runAgentBatch({
-          channel,
-          scopedRuns,
-          sessions,
-          sessionCatalog,
-          media,
-          deliveryJournal,
-          batch,
-          controls,
-          lastRunModelByScope,
-          messageReceipts,
-          monoNow,
+    enqueueScopeRun(scope, () =>
+      withTrace({ chatId: firstMsg.chatId }, async () => {
+        log.info('flush', 'start', {
           scope,
-          mode,
+          batchSize: batch.length,
+          chatId: firstMsg.chatId,
+          threadId: firstMsg.threadId,
+          msgId: firstMsg.messageId,
         });
-      } catch (err) {
-        log.fail('flush', err);
-      } finally {
-        pending.unblock(scope);
-        log.info('flush', 'end');
-      }
-    });
+        try {
+          const resolvedMode = await chatModeCache.resolve(channel, firstMsg.chatId);
+          // Feishu/Lark converted topic groups may still resolve as `group` from
+          // the chat info API/cache, while message events already carry threadId.
+          // Treat threadId as authoritative for IM messages so scope and replies
+          // stay isolated per topic.
+          const mode = firstMsg.threadId ? 'topic' : resolvedMode;
+          if (firstMsg.threadId && resolvedMode !== 'topic') {
+            chatModeCache.invalidate(firstMsg.chatId);
+            logThreadModeOverride({
+              chatId: firstMsg.chatId,
+              resolvedMode,
+              threadId: firstMsg.threadId,
+            });
+          }
+          const plans = batch.map((message) => {
+            const existing = imPlans.get(message);
+            if (existing) return existing;
+            const fallback = planImMessage({
+              message,
+              scope: conversationScope(scope, message.chatId, mode, message.threadId),
+              authorized: true,
+              duplicate: false,
+              mentionRequired: false,
+              recognizedCommand: false,
+              currentBotOpenId: channel.botIdentity?.openId,
+              trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
+            });
+            if (fallback.lane !== 'ordinary') {
+              throw new Error('queued IM message did not produce an ordinary plan');
+            }
+            return fallback;
+          });
+          const firstPlan = plans[0];
+          if (!firstPlan) return;
+          const invocation = createImInvocation([firstPlan, ...plans.slice(1)], {
+            ...(channel.botIdentity ? { botIdentity: channel.botIdentity } : {}),
+            trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
+            personalSubstitutionTargetOpenIds:
+              controls.cfg.collaboration.personalSubstitution.targetOpenIds,
+          });
+          await runAgentBatch({
+            channel,
+            scopedRuns,
+            sessions,
+            sessionCatalog,
+            media,
+            deliveryJournal,
+            invocation,
+            controls,
+            lastRunModelByScope,
+            messageReceipts,
+            monoNow,
+          });
+        } finally {
+          log.info('flush', 'end');
+        }
+      }),
+    );
   });
+
+  function enqueueScopeRun(scope: string, task: () => Promise<void>): void {
+    const count = (scopeRunCounts.get(scope) ?? 0) + 1;
+    scopeRunCounts.set(scope, count);
+    if (count === 1) pending.block(scope);
+
+    const previous = scopeRunTails.get(scope) ?? Promise.resolve();
+    const next = previous
+      .catch(() => {})
+      .then(task)
+      .catch((err) => log.fail('flush', err, { scope }))
+      .finally(() => {
+        const remaining = (scopeRunCounts.get(scope) ?? 1) - 1;
+        if (remaining === 0) {
+          scopeRunCounts.delete(scope);
+          pending.unblock(scope);
+        } else {
+          scopeRunCounts.set(scope, remaining);
+        }
+        if (scopeRunTails.get(scope) === next) scopeRunTails.delete(scope);
+      });
+    scopeRunTails.set(scope, next);
+  }
+
+  const enqueueInvocation = (invocation: ImInvocation): void => {
+    enqueueScopeRun(invocation.scope.id, () =>
+      runAgentBatch({
+        channel,
+        scopedRuns,
+        sessions,
+        sessionCatalog,
+        media,
+        deliveryJournal,
+        invocation,
+        controls,
+        lastRunModelByScope,
+        messageReceipts,
+        monoNow,
+      }),
+    );
+  };
+
+  const intakeTails = new Map<string, Promise<void>>();
+  function enqueueIntake(chatId: string, task: () => Promise<void>): Promise<void> {
+    const previous = intakeTails.get(chatId) ?? Promise.resolve();
+    const next = previous
+      .catch(() => {})
+      .then(task)
+      .finally(() => {
+        if (intakeTails.get(chatId) === next) intakeTails.delete(chatId);
+      });
+    intakeTails.set(chatId, next);
+    return next;
+  }
 
   // Counter for stdout reconnect escalation; reset on `reconnected`.
   let consecutiveReconnects = 0;
@@ -356,20 +442,26 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         receivedAtMono,
         ...(Number.isFinite(msg.createTime) ? { messageCreatedAtWall: msg.createTime } : {}),
       });
-      await withTrace({ chatId: msg.chatId, msgId: msg.messageId }, () =>
-        intakeMessage({
-          channel,
-          agent,
-          sessions,
-          sessionCatalog,
-          workspaces,
-          pending,
-          msg,
-          controls,
-          chatModeCache,
-          logThreadModeOverride,
-          scopedRuns,
-        }),
+      await enqueueIntake(msg.chatId, () =>
+        withTrace({ chatId: msg.chatId, msgId: msg.messageId }, () =>
+          intakeMessage({
+            channel,
+            agent,
+            sessions,
+            sessionCatalog,
+            workspaces,
+            pending,
+            msg,
+            controls,
+            chatModeCache,
+            logThreadModeOverride,
+            scopedRuns,
+            imPlans,
+            seenImMessageIds,
+            messageReceipts,
+            enqueueInvocation,
+          }),
+        ),
       ).catch((err) => log.fail('intake', err));
     },
     reject: (evt) => {
@@ -615,6 +707,20 @@ async function sendForwardFetchFailedHint(
   }
 }
 
+async function sendInvalidSubstitutionTargetsReply(
+  channel: LarkChannel,
+  plan: Extract<ImMessagePlan, { lane: 'control' }>,
+): Promise<void> {
+  await channel.send(
+    plan.source.message.chatId,
+    { text: `无法确认这 ${plan.invalidTargetCount} 个代答对象的身份，未启动代答。` },
+    {
+      replyTo: plan.source.message.messageId,
+      ...(plan.scope.kind === 'topic' ? { replyInThread: true } : {}),
+    },
+  );
+}
+
 interface IntakeDeps {
   channel: LarkChannel;
   agent: OmpRunEngine;
@@ -627,6 +733,10 @@ interface IntakeDeps {
   chatModeCache: ChatModeCache;
   logThreadModeOverride: LogThreadModeOverride;
   scopedRuns: ScopedRuns;
+  imPlans: WeakMap<NormalizedMessage, ImOrdinaryMessagePlan>;
+  seenImMessageIds: Set<string>;
+  messageReceipts: WeakMap<NormalizedMessage, RunMetricReceipt>;
+  enqueueInvocation: (invocation: ImInvocation) => void;
 }
 
 type LogThreadModeOverride = (input: {
@@ -634,6 +744,17 @@ type LogThreadModeOverride = (input: {
   resolvedMode: ChatMode;
   threadId: string;
 }) => void;
+
+function conversationScope(
+  id: string,
+  chatId: string,
+  mode: ChatMode,
+  threadId: string | undefined,
+): ImConversationScope {
+  return mode === 'topic' && threadId
+    ? Object.freeze({ kind: 'topic', id, chatId, threadId, mode })
+    : Object.freeze({ kind: 'chat', id, chatId, mode });
+}
 
 async function intakeMessage(deps: IntakeDeps): Promise<void> {
   const {
@@ -648,8 +769,11 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     chatModeCache,
     logThreadModeOverride,
     scopedRuns,
+    imPlans,
+    seenImMessageIds,
+    messageReceipts,
+    enqueueInvocation,
   } = deps;
-  const preview = msg.content.length > 80 ? `${msg.content.slice(0, 80)}…` : msg.content;
   // Resolve scope (and underlying chat mode) once at intake — every
   // downstream consumer keys off these.
   const resolvedMode = await chatModeCache.resolve(channel, msg.chatId);
@@ -671,13 +795,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
       });
     }
   }
-  // Carry the (possibly backfilled) threadId on the message so the batched
-  // flush — which reads `firstMsg.threadId` for reply routing and topic scope —
-  // sees it.
   const emsg: NormalizedMessage = threadId === msg.threadId ? msg : { ...msg, threadId };
-  // Some groups are converted into topic groups after creation. In that state
-  // getChatMode can lag behind the message event shape, so threadId is the
-  // stronger signal for topic-scoped sessions and reply routing.
   const chatMode = threadId ? 'topic' : resolvedMode;
   if (threadId && resolvedMode !== 'topic') {
     chatModeCache.invalidate(msg.chatId);
@@ -695,8 +813,6 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     resolvedMode,
     threadId,
     msgId: msg.messageId,
-    sender: msg.senderId,
-    preview,
     resources: msg.resources.length,
   });
 
@@ -704,13 +820,36 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     msg.chatType === 'p2p'
       ? canUseDm(controls.cfg, controls, msg.senderId)
       : canUseGroup(controls.cfg, controls, msg.chatId, msg.senderId);
-  if (!accessDecision.ok) {
-    log.info('intake', 'skip-not-allowed-user', {
-      scope,
-      sender: msg.senderId.slice(-6),
-      reason: accessDecision.reason,
-    });
-    if (msg.chatType !== 'p2p' && accessDecision.reason === 'denied-chat' && msg.mentionedBot) {
+  const plan = planImMessage({
+    message: emsg,
+    scope: conversationScope(scope, msg.chatId, chatMode, threadId),
+    authorized: accessDecision.ok,
+    duplicate: seenImMessageIds.has(msg.messageId),
+    mentionRequired: msg.chatType !== 'p2p' && requireMentionForChat(controls.cfg, msg.chatId),
+    recognizedCommand: isKnownTextCommand(msg.content),
+    currentBotOpenId: channel.botIdentity?.openId,
+    trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
+    personalSubstitution: controls.cfg.collaboration.personalSubstitution,
+  });
+  log.info('intake.route', plan.reason, {
+    scope,
+    lane: plan.lane,
+    ...(plan.lane === 'ordinary' || plan.lane === 'peer' || plan.lane === 'substitution'
+      ? { kind: plan.lane }
+      : {}),
+    ...(plan.lane === 'peer' ? { alias: plan.peer.alias } : {}),
+    ...(plan.lane === 'control' ? { invalidTargetCount: plan.invalidTargetCount } : {}),
+  });
+
+  if (plan.lane === 'drop') {
+    if (
+      plan.allowAccessHint &&
+      plan.reason === 'access-denied' &&
+      !accessDecision.ok &&
+      msg.chatType !== 'p2p' &&
+      accessDecision.reason === 'denied-chat' &&
+      msg.mentionedBot
+    ) {
       void sendNonAllowedGroupHint(channel, msg.chatId, msg.messageId).catch((err) =>
         log.warn('intake', 'non-allowed-hint-failed', { err: String(err) }),
       );
@@ -718,21 +857,15 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     return;
   }
 
-  // Group-mention policy. p2p is always unrestricted; in groups (regular and
-  // topic) we drop messages that don't @bot when the user has opted into the
-  // quiet-by-default behavior. A per-chat override (set from /config's group
-  // picker) takes priority over the global setting, so one group can respond
-  // to everything while others stay @-only (or vice versa). Slash commands are
-  // NOT exempt — the user chose strict mode so the group stays uniformly quiet
-  // unless mentioned. @全员 is already filtered by SDK
-  // (`respondToMentionAll: false`), so any event reaching here is either
-  // targeted or undirected chatter.
-  if (
-    msg.chatType !== 'p2p' &&
-    requireMentionForChat(controls.cfg, msg.chatId) &&
-    !msg.mentionedBot
-  ) {
-    log.info('intake', 'skip-no-mention', { scope, chatType: msg.chatType });
+  seenImMessageIds.add(msg.messageId);
+  const plannedMessage = plan.source.message;
+  const receipt = messageReceipts.get(msg);
+  if (receipt) messageReceipts.set(plannedMessage, receipt);
+
+  if (plan.lane === 'control') {
+    await sendInvalidSubstitutionTargetsReply(channel, plan).catch((err) =>
+      log.warn('intake', 'substitution-control-reply-failed', { err: String(err) }),
+    );
     return;
   }
 
@@ -741,45 +874,75 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   // fetch_failed sentinel. Feeding it to the agent would read as an empty
   // forward, so surface a recoverable hint and skip the run — the user can
   // resend once the upstream recovers.
-  if (isForwardFetchFailed(emsg)) {
+  if (
+    plan.lane !== 'peer' &&
+    plan.lane !== 'substitution' &&
+    isForwardFetchFailed(plannedMessage)
+  ) {
     log.warn('intake', 'forward-fetch-failed', {
       scope,
-      msgId: emsg.messageId,
-      chatType: emsg.chatType,
+      msgId: plannedMessage.messageId,
+      chatType: plannedMessage.chatType,
     });
-    await sendForwardFetchFailedHint(channel, emsg.chatId, emsg.messageId).catch((err) =>
-      log.warn('intake', 'forward-fetch-failed-hint-failed', { err: String(err) }),
-    );
+    await sendForwardFetchFailedHint(
+      channel,
+      plannedMessage.chatId,
+      plannedMessage.messageId,
+    ).catch((err) => log.warn('intake', 'forward-fetch-failed-hint-failed', { err: String(err) }));
     return;
   }
 
-  const handled = await tryHandleCommand({
-    channel,
-    msg: emsg,
-    scope,
-    chatMode,
-    sessions,
-    workspaces,
-    agent,
-    sessionCatalog,
-    sessionCatalogIdentity: await commandSessionCatalogIdentity({
-      msg: emsg,
+  if (plan.lane === 'peer' || plan.lane === 'substitution') {
+    const policy = {
+      ...(channel.botIdentity ? { botIdentity: channel.botIdentity } : {}),
+      trustedPeerBots: controls.cfg.collaboration.trustedPeerBots,
+      personalSubstitutionTargetOpenIds:
+        controls.cfg.collaboration.personalSubstitution.targetOpenIds,
+    };
+    const invocation =
+      plan.lane === 'peer'
+        ? createImInvocation([plan], policy)
+        : createImInvocation([plan], policy);
+    enqueueInvocation(invocation);
+    log.info('intake', 'isolated-enqueued', {
       scope,
-      mode: chatMode,
-      workspaces,
-      controls,
-      access: accessDecision,
-    }),
-    scopedRuns,
-    controls,
-  });
-  if (handled) {
-    const dropped = pending.cancel(scope);
-    log.info('intake', 'command', { scope, droppedPending: dropped.length });
+      kind: invocation.kind,
+      ...(invocation.kind === 'peer' ? { alias: invocation.peerAlias } : {}),
+    });
     return;
   }
 
-  const size = pending.push(scope, emsg);
+  if (plan.lane === 'command') {
+    const handled = await tryHandleCommand({
+      channel,
+      msg: plannedMessage,
+      scope,
+      chatMode,
+      sessions,
+      workspaces,
+      agent,
+      sessionCatalog,
+      sessionCatalogIdentity: await commandSessionCatalogIdentity({
+        msg: plannedMessage,
+        scope,
+        mode: chatMode,
+        workspaces,
+        controls,
+        access: accessDecision,
+      }),
+      scopedRuns,
+      controls,
+    });
+    if (handled) {
+      const dropped = pending.cancel(scope);
+      log.info('intake', 'command', { scope, droppedPending: dropped.length });
+      return;
+    }
+    throw new Error('recognized human Command was not handled');
+  }
+
+  imPlans.set(plannedMessage, plan);
+  const size = pending.push(scope, plannedMessage);
   log.info('intake', 'queued', { scope, queueSize: size, debounceMs: DEBOUNCE_MS });
 }
 
@@ -789,14 +952,12 @@ interface RunBatchDeps {
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   media: MediaCache;
-  batch: NormalizedMessage[];
+  invocation: ImInvocation;
   controls: Controls;
   deliveryJournal?: OmpDeliveryJournal;
   lastRunModelByScope: Map<string, string>;
   messageReceipts: WeakMap<NormalizedMessage, RunMetricReceipt>;
   monoNow: () => number;
-  scope: string;
-  mode: ChatMode;
 }
 
 async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
@@ -806,24 +967,23 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     sessions,
     sessionCatalog,
     media,
-    batch,
+    invocation,
     controls,
     deliveryJournal,
     lastRunModelByScope,
     messageReceipts,
     monoNow,
-    scope,
-    mode,
   } = deps;
-  if (batch.length === 0) return;
-  const firstMsg = batch[0];
-  const lastMsg = batch[batch.length - 1];
-  if (!firstMsg || !lastMsg) return;
-
-  const replyTarget = deriveOmpReplyTarget(lastMsg);
-
-  const chatId = firstMsg.chatId;
-  const threadId = firstMsg.threadId;
+  const [firstSource, ...remainingSources] = invocation.sourceMessages;
+  const lastSource = remainingSources[remainingSources.length - 1] ?? firstSource;
+  const batch = [firstSource, ...remainingSources].map((source) => source.message);
+  const firstMsg = firstSource.message;
+  const lastMsg = lastSource.message;
+  const scope = invocation.scope.id;
+  const mode = invocation.scope.mode;
+  const replyTarget = invocation.replyTarget;
+  const chatId = invocation.scope.chatId;
+  const threadId = invocation.scope.kind === 'topic' ? invocation.scope.threadId : undefined;
 
   const resourceItems = batch.flatMap((m) =>
     m.resources.map((r) => ({ messageId: m.messageId, resource: r })),
@@ -833,13 +993,16 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // quoted by multiple messages in one batch only fetches once. Filter out
   // ids that are themselves in the batch — those are already in the prompt.
   const batchIds = new Set(batch.map((m) => m.messageId));
-  const quoteTargets = [
-    ...new Set(
-      batch
-        .map((m) => replyQuoteTargetForMessage(m, mode))
-        .filter((id): id is string => Boolean(id) && !batchIds.has(id!)),
-    ),
-  ];
+  const quoteTargets =
+    invocation.kind === 'ordinary'
+      ? [
+          ...new Set(
+            batch
+              .map((m) => replyQuoteTargetForMessage(m, mode))
+              .filter((id): id is string => id !== undefined && !batchIds.has(id)),
+          ),
+        ]
+      : [];
   const quotes: QuotedContext[] = [];
   for (const targetId of quoteTargets) {
     const q = await fetchQuotedContext(channel, targetId);
@@ -879,7 +1042,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const hasTopicSession = sessionCatalog
     ?.entries()
     .some((entry) => entry.scopeId === scope && entry.status === 'active');
-  if (mode === 'topic' && threadId && !hasTopicSession) {
+  if (invocation.kind === 'ordinary' && mode === 'topic' && threadId && !hasTopicSession) {
     const exclude = new Set([...batchIds, ...quoteTargets]);
     topicContext = await fetchTopicContext(channel, threadId, {
       maxMessages: 40,
@@ -913,15 +1076,11 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       ]
     : undefined;
 
-  const prompt = buildPrompt(
-    batch,
-    attachments,
-    quotes,
-    topicContext,
-    channel.botIdentity,
-    extraInstructions,
-  );
-  log.info('prompt', 'built', {
+  const prompt = buildPrompt(invocation, attachments, quotes, topicContext, extraInstructions);
+  log.info('prompt.invocation', invocation.promptPolicy.reason, {
+    kind: invocation.kind,
+    scope,
+    batchSize: invocation.sourceMessages.length,
     promptChars: prompt.length,
     quotes: quotes.length,
     topicContext: topicContext.length,
@@ -953,7 +1112,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     chatId,
     chatType: firstMsg.chatType,
     messageId: lastMsg.messageId,
-    actorId: firstMsg.senderId,
+    actorId: lastMsg.senderId,
     ...(threadId ? { threadId } : {}),
   };
   const flow = await scopedRuns.start({
@@ -998,7 +1157,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const state = createRunState(messageReceipts.get(lastMsg));
   const reply = new OmpReplyController({
     channel,
-    target: replyTarget,
+    replyPolicy: invocation.replyPolicy,
     ...(deliveryJournal
       ? {
           journal: deliveryJournal,
@@ -1020,7 +1179,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       state,
       monoNow,
     );
-    await reply.finish(finalState);
+    await reply.finish(finalizeImReply(invocation, finalState));
     if (onItReactionId) {
       await removeMessageReaction(channel, lastMsg.messageId, onItReactionId);
       onItReactionId = undefined;
@@ -1199,28 +1358,25 @@ async function processAgentStream(
 }
 
 function buildPrompt(
-  batch: NormalizedMessage[],
+  invocation: ImInvocation,
   attachments: LocalAttachment[],
   quotes: QuotedContext[] = [],
   topicContext: QuotedContext[] = [],
-  botIdentity?: { openId: string; name?: string },
   extraInstructions?: string[],
 ): string {
-  const first = batch[0];
-  if (!first) return '';
-
-  const fileKeys = batch.flatMap((m) => m.resources.map((r) => r.fileKey));
-  // When the debounce window merged messages (possibly from several senders —
-  // common in bot-at-bot group chats), annotate each segment with its sender
-  // so the agent can tell who said what. Single-message batches stay verbatim.
-  const annotate = batch.length > 1;
-  const texts = batch
-    .map((m) => {
-      const text = stripAttachmentRefs(m.content, fileKeys).trim();
-      if (!text) return '';
-      return annotate ? `${senderAnnotation(m)} ${text}` : text;
-    })
-    .filter(Boolean);
+  const policy = invocation.promptPolicy;
+  const promptMessages = policy.kind === 'ordinary' ? policy.messages : [policy.message];
+  const fileKeys = promptMessages.flatMap((message) => message.resourceFileKeys);
+  const texts =
+    policy.kind === 'ordinary'
+      ? policy.messages
+          .map((message) => {
+            const text = stripAttachmentRefs(message.content, fileKeys).trim();
+            if (!text) return '';
+            return policy.messages.length > 1 ? `${senderAnnotation(message)} ${text}` : text;
+          })
+          .filter(Boolean)
+      : [stripAttachmentRefs(policy.message.content, fileKeys).trim()].filter(Boolean);
   const userPart =
     texts.length > 0
       ? texts.join('\n\n')
@@ -1228,59 +1384,90 @@ function buildPrompt(
         ? '请看下面的附件。'
         : '（对方发来一条没有正文的消息——通常是只 @ 了你的唤醒（ping）。请简短回应。）';
 
-  const senderType = senderTypeOf(first);
-  const mentions = mergeMentions(batch);
+  const invocationContext =
+    policy.kind === 'ordinary'
+      ? (() => {
+          const first = policy.messages[0];
+          const senderType: 'user' | 'bot' | undefined =
+            first.sender.kind === 'human'
+              ? 'user'
+              : first.sender.kind === 'bot'
+                ? 'bot'
+                : undefined;
+          const mentions = mergeMentions(policy.messages);
+          return {
+            senderId: first.senderId,
+            ...(first.senderName ? { senderName: first.senderName } : {}),
+            ...(senderType ? { senderType } : {}),
+            ...(policy.botIdentity?.openId ? { botOpenId: policy.botIdentity.openId } : {}),
+            ...(mentions.length > 0 ? { mentions } : {}),
+            messageIds: policy.messages.map((message) => message.messageId),
+          };
+        })()
+      : policy.kind === 'peer'
+        ? {
+            senderId: `@${policy.message.senderAlias}`,
+            senderName: policy.message.senderAlias,
+            senderType: 'bot' as const,
+            messageIds: [policy.message.messageId],
+          }
+        : {
+            senderId: 'verified-human-requester',
+            senderType: 'user' as const,
+            messageIds: [policy.message.messageId],
+          };
+  const collaborationInstructions =
+    policy.kind === 'peer'
+      ? [
+          `本次是可信 peer @${policy.message.senderAlias} 发起的隔离调用。冻结的可信 alias 为: ${
+            policy.trustedPeerAliases.map((alias) => `@${alias}`).join('、') || '无'
+          }。只返回答案正文;transport 不会激活任何 alias,本次保持 zero-hop。`,
+        ]
+      : policy.kind === 'substitution'
+        ? [
+            `本次是 personal substitution 隔离调用，显示目标依次为「${policy.targetAliases.join('、')}」。另有 ${policy.invalidTargetCount} 个对象身份无法确认。显示名只用于本次可读上下文，不是授权事实。可信 peer 协作策略：oneHop=${String(policy.oneHop)}，maxActivePeers=1，aliases=[${
+              policy.trustedPeerAliases.map((alias) => `@${alias}`).join('、') || '无'
+            }]。只返回答案正文；发送者归属、替身披露、目标 Mention 和首个合格 peer 激活由 transport 固定生成。`,
+          ]
+        : [
+            `可信 peer 协作策略：oneHop=${String(policy.oneHop)}，maxActivePeers=1，aliases=[${
+              policy.trustedPeerAliases.map((alias) => `@${alias}`).join('、') || '无'
+            }]。只返回答案正文；transport 只会在成功的最终答案中激活第一个合格 alias。`,
+          ];
 
   return buildAgentPrompt({
     context: {
-      chatId: first.chatId,
-      chatType: first.chatType,
-      senderId: first.senderId,
-      ...(first.senderName ? { senderName: first.senderName } : {}),
-      ...(senderType ? { senderType } : {}),
-      ...(botIdentity?.openId ? { botOpenId: botIdentity.openId } : {}),
-      ...(mentions.length > 0 ? { mentions } : {}),
-      ...(first.threadId ? { threadId: first.threadId } : {}),
-      messageIds: batch.map((m) => m.messageId),
+      chatId: invocation.scope.chatId,
+      chatType: invocation.scope.mode === 'p2p' ? 'p2p' : 'group',
+      ...invocationContext,
+      ...(invocation.scope.kind === 'topic' ? { threadId: invocation.scope.threadId } : {}),
       source: 'im',
     },
-    instructions:
-      extraInstructions && extraInstructions.length > 0
-        ? [...BRIDGE_AGENT_INSTRUCTIONS, ...extraInstructions]
-        : BRIDGE_AGENT_INSTRUCTIONS,
+    instructions: [
+      ...BRIDGE_AGENT_INSTRUCTIONS,
+      ...collaborationInstructions,
+      ...(extraInstructions ?? []),
+    ],
     userInput: userPart,
     ...(topicContext.length > 0 ? { topicContext: topicContext.map(toPromptTopicMessage) } : {}),
     quotedMessages: quotes.map(toPromptQuote),
-    interactiveCards: batch.map(toPromptInteractiveCard).filter(isDefined),
+    interactiveCards: promptMessages.map(toPromptInteractiveCard).filter(isDefined),
     attachments: attachments.map(toPromptAttachment),
   });
 }
 
-/**
- * Classify the sender as human or bot from the raw Feishu event
- * (`sender.sender_type`: 'user' = human, 'app' = bot). The normalizer drops
- * this field, so read it off `msg.raw` (`includeRawEvent: true` above).
- * Unknown / missing values return undefined — omit rather than guess.
- */
-function senderTypeOf(msg: NormalizedMessage): 'user' | 'bot' | undefined {
-  const raw = msg.raw as { sender?: { sender_type?: unknown } } | undefined;
-  const senderType = raw?.sender?.sender_type;
-  if (senderType === 'user') return 'user';
-  if (senderType === 'app' || senderType === 'bot') return 'bot';
-  return undefined;
-}
-
-function senderAnnotation(msg: NormalizedMessage): string {
-  const name = msg.senderName ?? msg.senderId;
-  const type = senderTypeOf(msg);
+function senderAnnotation(message: ImPromptMessage): string {
+  const name = message.senderName ?? message.senderId;
+  const type =
+    message.sender.kind === 'human' ? 'user' : message.sender.kind === 'bot' ? 'bot' : undefined;
   return type ? `[${name} (${type})]:` : `[${name}]:`;
 }
 
-function mergeMentions(batch: NormalizedMessage[]): BridgePromptMention[] {
+function mergeMentions(batch: readonly ImPromptMessage[]): BridgePromptMention[] {
   const seen = new Set<string>();
   const out: BridgePromptMention[] = [];
-  for (const msg of batch) {
-    for (const mention of msg.mentions ?? []) {
+  for (const message of batch) {
+    for (const mention of message.mentions) {
       const dedupeKey = mention.openId ?? `${mention.name ?? ''}:${mention.key}`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
@@ -1306,7 +1493,7 @@ function replyQuoteTargetForMessage(msg: NormalizedMessage, mode: ChatMode): str
   return replyTo;
 }
 
-function stripAttachmentRefs(text: string, fileKeys: string[]): string {
+function stripAttachmentRefs(text: string, fileKeys: readonly string[]): string {
   if (!text || fileKeys.length === 0) return text;
   let out = text;
   for (const key of fileKeys) {
@@ -1346,22 +1533,15 @@ function toPromptTopicMessage(q: QuotedContext): BridgePromptTopicMessage {
   };
 }
 
-function toPromptInteractiveCard(m: NormalizedMessage): BridgePromptInteractiveCard | undefined {
-  if (m.rawContentType !== 'interactive') return undefined;
-  const rawContent = (m.raw as { message?: { content?: unknown } } | undefined)?.message?.content;
-  if (typeof rawContent !== 'string' || rawContent.length === 0) return undefined;
+function toPromptInteractiveCard(message: {
+  messageId: string;
+  interactiveCard?: unknown;
+}): BridgePromptInteractiveCard | undefined {
+  if (message.interactiveCard === undefined) return undefined;
   return {
-    messageId: m.messageId,
-    content: parseJsonOrRaw(rawContent),
+    messageId: message.messageId,
+    content: message.interactiveCard,
   };
-}
-
-function parseJsonOrRaw(input: string): unknown {
-  try {
-    return JSON.parse(input) as unknown;
-  } catch {
-    return input;
-  }
 }
 
 function isDefined<T>(value: T | undefined): value is T {

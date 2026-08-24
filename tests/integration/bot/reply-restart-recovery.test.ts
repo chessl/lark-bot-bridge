@@ -2,6 +2,7 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { LarkChannel } from '@larksuite/channel';
 import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
+import type { ImReplyPolicy } from '../../../src/bot/im-invocation.js';
 import {
   type ActiveDelivery,
   type DeliveryFailure,
@@ -22,6 +23,29 @@ const TARGET = {
   threadId: 'omt_topic',
   replyInThread: true,
 } as const;
+const REPLY_POLICY: ImReplyPolicy = {
+  invocationKind: 'ordinary',
+  scope: {
+    kind: 'topic',
+    id: 'oc_restart:omt_topic',
+    chatId: 'oc_restart',
+    threadId: 'omt_topic',
+    mode: 'topic',
+  },
+  target: TARGET,
+  senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+};
+const SUBSTITUTION_REPLY_POLICY: ImReplyPolicy = {
+  invocationKind: 'substitution',
+  scope: REPLY_POLICY.scope,
+  target: TARGET,
+  senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+  substitutionTargets: [
+    { openId: 'ou_target', displayAlias: 'Target' },
+    { openId: 'ou_second', displayAlias: 'Second' },
+  ],
+  invalidTargetCount: 2,
+};
 const cleanups: Array<() => Promise<void>> = [];
 const journals: OmpDeliveryJournal[] = [];
 
@@ -57,7 +81,7 @@ describe('OMP Reply restart recovery', () => {
     });
     const reply = new OmpReplyController({
       channel: fake.channel,
-      target: TARGET,
+      replyPolicy: REPLY_POLICY,
       journal,
       runId: 'run_atomic',
       now: () => NOW,
@@ -67,7 +91,7 @@ describe('OMP Reply restart recovery', () => {
 
     expect(reserved).toMatchObject({
       runId: 'run_atomic',
-      target: TARGET,
+      replyPolicy: REPLY_POLICY,
       cardId: 'card_recovery',
       transport: 'managed',
       deliveryState: 'unknown',
@@ -88,15 +112,15 @@ describe('OMP Reply restart recovery', () => {
       'deliveryState',
       'nextSequence',
       'pending',
+      'replyPolicy',
       'runId',
-      'target',
       'time',
       'transport',
     ]);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
 
-  it('deletes no-message, delivered, and not-sent entries without network calls', async () => {
+  it('recovers no-message and not-sent entries as one terminal Reply each', async () => {
     const tmp = await temporaryProfile();
     const path = join(tmp.profile, 'active-deliveries.json');
     await seed(path, [
@@ -110,10 +134,108 @@ describe('OMP Reply restart recovery', () => {
     await activateOmpReplyRecovery({ channel: fake.channel, journal: restarted, now: () => NOW });
 
     expect(restarted.entries()).toEqual([]);
-    expect(fake.reply).not.toHaveBeenCalled();
+    expect(fake.reply).toHaveBeenCalledTimes(2);
+    for (const call of fake.reply.mock.calls) {
+      const payload = JSON.stringify(replyPayload(call[0]));
+      expect(payload).toContain('"tag":"at"');
+      expect(payload.match(/ou_sender/g)).toHaveLength(1);
+    }
     expect(fake.update).not.toHaveBeenCalled();
     expect(fake.close).not.toHaveBeenCalled();
     expect(fake.patch).not.toHaveBeenCalled();
+  });
+
+  it('recovers substitution interruption with sender ownership only', async () => {
+    const tmp = await temporaryProfile();
+    const path = join(tmp.profile, 'substitution-interrupted.json');
+    await seed(path, [
+      {
+        runId: 'run_substitution_interrupted',
+        replyPolicy: SUBSTITUTION_REPLY_POLICY,
+        deliveryState: 'no_message',
+        nextSequence: 1,
+        time: { openedAtMs: NOW - 1_000 },
+      },
+    ]);
+    const fake = fakeChannel();
+    const restarted = trackedJournal(path);
+
+    await activateOmpReplyRecovery({ channel: fake.channel, journal: restarted, now: () => NOW });
+
+    expect(fake.reply).toHaveBeenCalledOnce();
+    const payload = JSON.stringify(replyPayload(fake.reply.mock.calls[0]?.[0]));
+    expect(payload.match(/ou_sender/g)).toHaveLength(1);
+    expect(payload).not.toMatch(/ou_target|ou_second|另有 2 个|AI 代|回答（已在本回复中点名）/);
+    expect(restarted.entries()).toEqual([]);
+  });
+
+  it('exact-retries a durable combined substitution terminal request without recomputing policy', async () => {
+    const tmp = await temporaryProfile();
+    const path = join(tmp.profile, 'substitution-exact-retry.json');
+    const pending: DurablePendingOperation = {
+      kind: 'reply',
+      transport: 'markdown',
+      terminal: true,
+      uuid: 'uuid_substitution_exact',
+      sequence: 0,
+      request: {
+        path: { message_id: TARGET.messageId },
+        data: {
+          msg_type: 'post',
+          content: JSON.stringify({
+            zh_cn: {
+              title: '',
+              content: [
+                [{ tag: 'at', user_id: 'ou_sender' }],
+                [
+                  { tag: 'text', text: 'AI 代 ' },
+                  { tag: 'at', user_id: 'ou_target' },
+                  { tag: 'text', text: '、' },
+                  { tag: 'at', user_id: 'ou_second' },
+                  { tag: 'text', text: ' 回答（已在本回复中点名）' },
+                ],
+                [{ tag: 'text', text: '另有 2 个对象身份无法确认，未代答。' }],
+                [
+                  { tag: 'md', text: 'before ' },
+                  { tag: 'at', user_id: 'ou_peer' },
+                  { tag: 'md', text: ' after' },
+                ],
+              ],
+            },
+          }),
+          reply_in_thread: true,
+          uuid: 'uuid_substitution_exact',
+        },
+      },
+    };
+    await seed(path, [
+      {
+        runId: 'run_substitution_exact',
+        replyPolicy: SUBSTITUTION_REPLY_POLICY,
+        transport: 'markdown',
+        deliveryState: 'unknown',
+        nextSequence: 1,
+        time: { openedAtMs: NOW - 1_000 },
+        pending,
+      },
+    ]);
+    const fake = fakeChannel();
+    const restarted = trackedJournal(path);
+
+    await activateOmpReplyRecovery({ channel: fake.channel, journal: restarted, now: () => NOW });
+
+    expect(fake.reply).toHaveBeenCalledOnce();
+    expect(fake.reply.mock.calls[0]?.[0]).toEqual(pending.request);
+    const replay = JSON.stringify(fake.reply.mock.calls[0]?.[0]);
+    expect(replay.match(/ou_sender/g)).toHaveLength(1);
+    expect(replay.match(/ou_target/g)).toHaveLength(1);
+    expect(replay.match(/ou_second/g)).toHaveLength(1);
+    expect(replay.match(/ou_peer/g)).toHaveLength(1);
+    expect(replay.indexOf('ou_target')).toBeLessThan(replay.indexOf('ou_second'));
+    expect(replay).toContain('另有 2 个对象身份无法确认');
+    expect(fake.update).not.toHaveBeenCalled();
+    expect(fake.patch).not.toHaveBeenCalled();
+    expect(restarted.entries()).toEqual([]);
   });
 
   it('exact-retries an unknown initial submission inside one hour and interrupts the recovered binding', async () => {
@@ -145,6 +267,49 @@ describe('OMP Reply restart recovery', () => {
       path: { card_id: 'card_original' },
       data: { sequence: 2 },
     });
+    expect(restarted.entries()).toEqual([]);
+  });
+
+  it('replays the frozen plain fallback after an exact terminal Mention rejection', async () => {
+    const tmp = await temporaryProfile();
+    const path = join(tmp.profile, 'mention-fallback.json');
+    const mentionFallback = {
+      kind: 'patch',
+      terminal: true,
+      uuid: 'uuid_plain_fallback',
+      sequence: 0,
+      request: {
+        path: { message_id: 'om_known_peer' },
+        data: { content: '{"plain":"\\\\@Hermes","status":"Peer 未通知"}' },
+      },
+    } as const;
+    const pending = {
+      ...updateOperation(7),
+      mentionFallback,
+    } satisfies DurablePendingOperation;
+    await seed(path, [
+      {
+        ...knownDelivery('run_peer_fallback'),
+        cardId: 'card_gap',
+        messageId: 'om_known_peer',
+        transport: 'managed',
+        deliveryState: 'unknown',
+        nextSequence: 8,
+        pending,
+      },
+    ]);
+    const fake = fakeChannel({
+      update: async () => ({ code: 230001, msg: 'mention rejected' }),
+    });
+    const restarted = trackedJournal(path);
+
+    await activateOmpReplyRecovery({ channel: fake.channel, journal: restarted, now: () => NOW });
+
+    expect(fake.update).toHaveBeenCalledOnce();
+    expect(fake.update.mock.calls[0]?.[0]).toEqual(pending.request);
+    expect(fake.patch).toHaveBeenCalledOnce();
+    expect(fake.patch.mock.calls[0]?.[0]).toEqual(mentionFallback.request);
+    expect(fake.reply).not.toHaveBeenCalled();
     expect(restarted.entries()).toEqual([]);
   });
 
@@ -180,12 +345,13 @@ describe('OMP Reply restart recovery', () => {
     const managedPayload = updatePayload(fake.update.mock.calls[0]?.[0]);
     const inlinePayload = JSON.stringify(fake.patch.mock.calls[0]?.[0]);
     for (const payload of [managedPayload, inlinePayload]) {
+      expect(payload.match(/ou_sender/g)).toHaveLength(1);
       expect(payload).not.toContain('调用工具 0 次');
       expect(payload).not.toContain('工具 0');
     }
   });
 
-  it('recovers reservations in the final-update and close crash windows', async () => {
+  it('exact-retries reservations in the final-update and close crash windows', async () => {
     const tmp = await temporaryProfile();
     const updatePath = join(tmp.profile, 'update-gap.json');
     const finalUpdate = updateOperation(7);
@@ -208,12 +374,10 @@ describe('OMP Reply restart recovery', () => {
       journal: updateRestart,
       now: () => NOW,
     });
-
+    expect(updateFake.update).toHaveBeenCalledOnce();
     expect(updateFake.update.mock.calls[0]?.[0]).toEqual(finalUpdate.request);
-    expect(updateFake.update).toHaveBeenCalledTimes(2);
-    expect(updateFake.update.mock.calls[1]?.[0]).toMatchObject({ data: { sequence: 8 } });
-    expect(updatePayload(updateFake.update.mock.calls[1]?.[0])).toContain('运行已中断');
-    expect(updateFake.close.mock.calls[0]?.[0]).toMatchObject({ data: { sequence: 9 } });
+    expect(updateFake.close).toHaveBeenCalledOnce();
+    expect(updateFake.close.mock.calls[0]?.[0]).toMatchObject({ data: { sequence: 8 } });
     expect(updateRestart.entries()).toEqual([]);
 
     const closePath = join(tmp.profile, 'close-gap.json');
@@ -238,11 +402,9 @@ describe('OMP Reply restart recovery', () => {
       now: () => NOW,
     });
 
+    expect(closeFake.close).toHaveBeenCalledOnce();
     expect(closeFake.close.mock.calls[0]?.[0]).toEqual(finalClose.request);
-    expect(closeFake.update).toHaveBeenCalledOnce();
-    expect(closeFake.update.mock.calls[0]?.[0]).toMatchObject({ data: { sequence: 9 } });
-    expect(updatePayload(closeFake.update.mock.calls[0]?.[0])).toContain('运行已中断');
-    expect(closeFake.close.mock.calls[1]?.[0]).toMatchObject({ data: { sequence: 10 } });
+    expect(closeFake.update).not.toHaveBeenCalled();
     expect(closeRestart.entries()).toEqual([]);
   });
 
@@ -333,7 +495,7 @@ describe('OMP Reply restart recovery', () => {
     await writeFile(
       mismatchPath,
       JSON.stringify({
-        version: 1,
+        version: 2,
         entries: [
           {
             ...knownDelivery('run_identity_mismatch'),
@@ -391,6 +553,13 @@ describe('OMP Reply restart recovery', () => {
     expect(fake.update).not.toHaveBeenCalled();
     expect(fake.close).not.toHaveBeenCalled();
     expect(fake.patch).not.toHaveBeenCalled();
+
+    const oldPath = join(tmp.profile, 'old-journal.json');
+    await writeFile(oldPath, JSON.stringify({ version: 1, entries: [] }), { mode: 0o600 });
+    const oldFailures: DeliveryFailure[] = [];
+    const old = trackedJournal(oldPath, oldFailures);
+    await activateOmpReplyRecovery({ channel: fake.channel, journal: old, now: () => NOW });
+    expect(oldFailures).toEqual([{ reason: 'incompatible-journal-version' }]);
   });
 });
 
@@ -419,7 +588,7 @@ async function seed(path: string, entries: readonly ActiveDelivery[]): Promise<v
 function delivery(runId: string, deliveryState: ActiveDelivery['deliveryState']): ActiveDelivery {
   return {
     runId,
-    target: TARGET,
+    replyPolicy: REPLY_POLICY,
     deliveryState,
     nextSequence: 1,
     time: { openedAtMs: NOW - 1_000 },
@@ -454,7 +623,7 @@ function initialReplyOperation(): DurablePendingOperation {
   };
 }
 
-function updateOperation(sequence: number): DurablePendingOperation {
+function updateOperation(sequence: number): Extract<DurablePendingOperation, { kind: 'update' }> {
   return {
     kind: 'update',
     terminal: true,
@@ -488,7 +657,13 @@ function closeOperation(sequence: number): DurablePendingOperation {
   };
 }
 
-function fakeChannel(options: { reply?: (input: unknown) => Promise<unknown> } = {}): {
+function fakeChannel(
+  options: {
+    reply?: (input: unknown) => Promise<unknown>;
+    update?: (input: unknown) => Promise<unknown>;
+    patch?: (input: unknown) => Promise<unknown>;
+  } = {},
+): {
   channel: LarkChannel;
   reply: Mock;
   update: Mock;
@@ -498,9 +673,9 @@ function fakeChannel(options: { reply?: (input: unknown) => Promise<unknown> } =
   const reply = vi.fn(
     options.reply ?? (async () => ({ code: 0, data: { message_id: 'om_reply' } })),
   );
-  const update = vi.fn(async () => ({ code: 0 }));
+  const update = vi.fn(options.update ?? (async () => ({ code: 0 })));
   const close = vi.fn(async () => ({ code: 0 }));
-  const patch = vi.fn(async () => ({ code: 0 }));
+  const patch = vi.fn(options.patch ?? (async () => ({ code: 0 })));
   const channel = {
     rawClient: {
       im: { v1: { message: { reply, patch } } },
@@ -529,4 +704,19 @@ function updatePayload(input: unknown): string {
     return '';
   }
   return input.data.card.data;
+}
+
+function replyPayload(input: unknown): unknown {
+  if (
+    typeof input !== 'object' ||
+    input === null ||
+    !('data' in input) ||
+    typeof input.data !== 'object' ||
+    input.data === null ||
+    !('content' in input.data) ||
+    typeof input.data.content !== 'string'
+  ) {
+    return undefined;
+  }
+  return JSON.parse(input.data.content);
 }
