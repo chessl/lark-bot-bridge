@@ -351,8 +351,42 @@ export function renderOmpReplyMarkdownPost(
   input: ReplyInput,
   mentionMode: ReplyMentionMode = 'mention',
 ): object {
+  const state = replyState(input);
+  if (state.terminal === 'running') {
+    throw new Error('cannot render a running OMP Reply as terminal Markdown');
+  }
+  const finalText = ompReplyPresentation(state).finalReply;
+  const full = buildOmpReplyMarkdownPost(input, finalText, mentionMode);
+  if (withinPostBudget(full) || state.terminal !== 'done') return full;
+
+  let lower = 0;
+  let upper = finalText.length;
+  let best = buildOmpReplyMarkdownPost(input, TRUNCATION_MARKER, mentionMode);
+  while (lower < upper) {
+    let middle = codePointBoundary(finalText, Math.floor((lower + upper + 1) / 2));
+    if (middle <= lower) middle = upper;
+    const candidate = buildOmpReplyMarkdownPost(
+      input,
+      `${finalText.slice(0, middle)}${TRUNCATION_MARKER}`,
+      mentionMode,
+    );
+    if (withinPostBudget(candidate)) {
+      lower = middle;
+      best = candidate;
+    } else {
+      upper = previousCodePointBoundary(finalText, middle);
+    }
+  }
+  return best;
+}
+
+function buildOmpReplyMarkdownPost(
+  input: ReplyInput,
+  finalText: string,
+  mentionMode: ReplyMentionMode,
+): object {
   if (!isImReplyPlan(input) || mentionMode === 'plain') {
-    return markdownPost(renderOmpReplyMarkdown(input, mentionMode));
+    return markdownPost(buildOmpReplyMarkdown(input, finalText, mentionMode));
   }
   const activation = input.invocationKind === 'ordinary' ? input.peerActivation : undefined;
   if (activation) {
@@ -407,9 +441,15 @@ export function renderOmpReplyMarkdownPost(
     ]);
     content.push([{ tag: 'text', text: '' }]);
   }
-  if (content.length === 0) return markdownPost(renderOmpReplyMarkdown(input, mentionMode));
-  content.push([{ tag: 'md', text: renderOmpReplyMarkdown(input, 'omit') }]);
+  if (content.length === 0) {
+    return markdownPost(buildOmpReplyMarkdown(input, finalText, mentionMode));
+  }
+  content.push([{ tag: 'md', text: buildOmpReplyMarkdown(input, finalText, 'omit') }]);
   return { zh_cn: { title: '', content } };
+}
+
+function withinPostBudget(post: object): boolean {
+  return Buffer.byteLength(JSON.stringify(post)) <= MAX_CARD_BYTES;
 }
 
 function withinMarkdownBudget(markdown: string): boolean {

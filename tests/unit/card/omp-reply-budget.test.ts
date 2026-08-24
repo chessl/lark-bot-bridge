@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ImReplyPlan } from '../../../src/bot/im-invocation.js';
 import {
   renderOmpReplyCard,
   renderOmpReplyMarkdown,
@@ -121,6 +122,35 @@ describe('OMP Reply CardKit budget', () => {
     expect(markerIndex).toBeGreaterThan(0);
     expect(markdown).not.toContain('�');
     expect(markdown.slice(0, markerIndex)).not.toMatch(/[\uD800-\uDBFF]$/);
+  });
+
+  it('budgets the final structured substitution Post with fixed Mention rows intact', () => {
+    const state = terminalState('界🚀"\\\n'.repeat(10_000));
+    const plan: ImReplyPlan = {
+      invocationKind: 'substitution',
+      reason: 'run-completed',
+      scope: { kind: 'chat', id: 'oc_group', chatId: 'oc_group', mode: 'group' },
+      target: { chatId: 'oc_group', messageId: 'om_source', replyInThread: false },
+      senderOwnership: { kind: 'mention', openId: 'ou_sender' },
+      substitutionTargetOpenIds: ['ou_target'],
+      state,
+    };
+
+    const post = JSON.stringify(renderOmpReplyMarkdownPost(plan));
+    expect(Buffer.byteLength(post)).toBeLessThanOrEqual(MAX_CARD_BYTES);
+    expect(post).toContain(TRUNCATION_MARKER);
+    expect(post.match(/ou_sender/g)).toHaveLength(1);
+    expect(post.match(/ou_target/g)).toHaveLength(1);
+    expect(post).toContain('AI 代');
+    expect(post).toContain('回答（已在本回复中点名）');
+    expect(post).not.toContain('�');
+
+    const degraded = JSON.stringify(renderOmpReplyMarkdownPost(plan, 'plain'));
+    expect(Buffer.byteLength(degraded)).toBeLessThanOrEqual(MAX_CARD_BYTES);
+    expect(degraded).toContain(TRUNCATION_MARKER);
+    expect(degraded).toContain('\\\\@请求者');
+    expect(degraded).toContain('\\\\@目标');
+    expect(degraded).not.toMatch(/ou_sender|ou_target|<at|"tag":"at"/);
   });
 
   it('removes all oldest Reasoning before oldest Tools and retains the metrics unit', () => {
