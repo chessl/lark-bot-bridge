@@ -1,8 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { realpath, stat } from 'node:fs/promises';
+import { mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { LarkChannel } from '@larksuite/channel';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -292,6 +292,38 @@ export class NativeLarkServer implements NativeToolProvider {
           });
           assertApiResponse(response, 'List messages failed');
           return response.data ?? {};
+        }),
+    );
+    server.registerTool(
+      'lark_download_message_resource',
+      {
+        description:
+          'Download an attachment from a listed Lark message into this run workspace. Use the message_id, file_key, file_name, and message type returned by lark_list_messages.',
+        inputSchema: {
+          messageId: z.string().min(1).max(128),
+          fileKey: z.string().min(1).max(1024),
+          fileName: z.string().min(1).max(180),
+          resourceType: z.enum(['file', 'image']).default('file'),
+        },
+        annotations: { readOnlyHint: true },
+      },
+      async ({ messageId, fileKey, fileName, resourceType }) =>
+        this.toolResult(async () => {
+          const directory = join(access.cwd, '.lark-downloads');
+          await mkdir(directory, { recursive: true });
+          const path = join(directory, `${randomUUID()}-${safeFileName(fileName)}`);
+          try {
+            const result = await this.options.channel.downloadResourceToFile(
+              messageId,
+              fileKey,
+              resourceType,
+              path,
+            );
+            return { path, ...result };
+          } catch (error) {
+            await rm(path, { force: true });
+            throw error;
+          }
         }),
     );
     server.registerTool(
@@ -693,6 +725,12 @@ async function workspaceImagePath(cwd: string, input: string): Promise<string> {
   if (info.size === 0) throw new Error('Image file is empty');
   if (info.size > MAX_IMAGE_BYTES) throw new Error('Image exceeds the 10 MB Lark limit');
   return image;
+}
+
+function safeFileName(input: string): string {
+  const name = basename(input.replaceAll('\\', '/'));
+  if (!name || name === '.' || name === '..') throw new Error('Invalid attachment file name');
+  return name;
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {

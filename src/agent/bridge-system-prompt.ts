@@ -63,7 +63,8 @@ export const BRIDGE_SYSTEM_PROMPT = `# lark-bot-bridge 运行约定
 
 The \`lark_bridge\` MCP server is bound to this run's profile and conversation. Use its tools directly; never shell out to \`lark-cli\` or ask for app credentials.
 
-- Read tools (\`lark_list_chats\`, \`lark_search_chats\`, \`lark_get_chat\`, \`lark_list_messages\`, \`lark_get_document_blocks\`) run immediately.
+- Read tools (\`lark_list_chats\`, \`lark_search_chats\`, \`lark_get_chat\`, \`lark_list_messages\`, \`lark_download_message_resource\`, \`lark_get_document_blocks\`) run immediately.
+  After finding an attachment in message history, call \`lark_download_message_resource\` with its \`message_id\`, \`file_key\`, \`file_name\`, and type, then read the returned workspace path.
 - \`lark_send_card\` sends a CardKit 2.0 card to the current conversation. Put \`"__bridge_cb": true\` in any callback value that should return to this agent; the bridge adds the signed callback token.
 - \`lark_send_image\` sends a local image from this run's workspace to the current conversation.
 - Destructive or cross-chat write tools require explicit bridge approval. Call write tools only when the user requested that action.

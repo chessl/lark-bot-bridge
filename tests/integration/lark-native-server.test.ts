@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LarkChannel } from '@larksuite/channel';
@@ -24,6 +24,12 @@ describe('NativeLarkServer', () => {
       code: 0,
       data: { items: [{ block_id: 'doc_1', block_type: 1 }] },
     }));
+    const downloadResourceToFile = vi.fn(
+      async (_messageId: string, _fileKey: string, _type: string, path: string) => {
+        await writeFile(path, 'historical logs');
+        return { contentType: 'application/zip', bytesWritten: 15 };
+      },
+    );
     const channel = {
       rawClient: {
         im: {
@@ -35,6 +41,7 @@ describe('NativeLarkServer', () => {
         request: readDocument,
       },
       send,
+      downloadResourceToFile,
     } as unknown as LarkChannel;
     const callbackAuth = {
       sign: vi.fn(({ action }: { action: string }) => `signed:${action}`),
@@ -76,6 +83,7 @@ describe('NativeLarkServer', () => {
           'lark_search_chats',
           'lark_get_chat',
           'lark_list_messages',
+          'lark_download_message_resource',
           'lark_get_document_blocks',
           'lark_user_auth_logout',
           'lark_user_auth_status',
@@ -99,6 +107,26 @@ describe('NativeLarkServer', () => {
           page_size: 10,
         },
       });
+      const download = await client.callTool({
+        name: 'lark_download_message_resource',
+        arguments: {
+          messageId: 'om_historical',
+          fileKey: 'file_historical',
+          fileName: 'logs.zip',
+        },
+      });
+      const content = download.structuredContent;
+      const downloadedPath =
+        content && typeof content === 'object' && 'path' in content ? content.path : undefined;
+      expect(downloadedPath).toEqual(expect.any(String));
+      if (typeof downloadedPath !== 'string') throw new Error('download path missing');
+      expect(await readFile(downloadedPath, 'utf8')).toBe('historical logs');
+      expect(downloadResourceToFile).toHaveBeenCalledWith(
+        'om_historical',
+        'file_historical',
+        'file',
+        downloadedPath,
+      );
       expect(
         await client.callTool({
           name: 'lark_get_document_blocks',
