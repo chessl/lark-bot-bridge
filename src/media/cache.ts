@@ -8,7 +8,6 @@ import { log } from '../core/logger';
 import {
   type AttachmentCandidate,
   type AttachmentKind,
-  type AttachmentPolicyOptions,
   type NormalizedAttachment,
   normalizeAttachments,
   safeExtensionForMime,
@@ -16,7 +15,7 @@ import {
 
 export type LocalAttachment = NormalizedAttachment;
 
-export interface MediaResolveOptions extends Partial<AttachmentPolicyOptions> {
+export interface MediaResolveOptions {
   cacheMaxBytes?: number;
 }
 
@@ -50,7 +49,7 @@ export class MediaCache {
         log.fail('media', err, { fileKey: item.resource.fileKey });
       }
     }
-    const normalized = normalizeAttachments(candidates, options);
+    const normalized = normalizeAttachments(candidates);
     await removeRejectedResolvedFiles(normalized);
     if (typeof options.cacheMaxBytes === 'number') {
       await enforceCacheMaxBytes(
@@ -81,11 +80,9 @@ export class MediaCache {
     // downloadResourceToFile hits im.v1.messageResource.get under the hood —
     // the endpoint required for resources that arrived in user messages. It
     // maps image resources to 'image' and everything else (file/audio/video)
-    // to 'file'. We stream straight to disk (not via a full Buffer) because the
-    // size limit is only enforced after download: a large attachment would
-    // otherwise sit entirely in the JS heap before being rejected. It returns
-    // the server content-type so we can pick an accurate extension, falling
-    // back to defaultMime(kind) when absent.
+    // to 'file'. Stream straight to disk instead of holding the whole attachment
+    // in the JS heap. The method returns the server content-type so we can pick
+    // an accurate extension, falling back to defaultMime(kind) when absent.
     const { contentType } = await this.channel.downloadResourceToFile(
       messageId,
       r.fileKey,

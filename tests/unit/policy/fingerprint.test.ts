@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import {
   accessPolicyDigest,
-  attachmentPolicyConfigDigest,
   digestCanonical,
   policyFingerprint,
   resourceScopeDigest,
@@ -14,14 +13,12 @@ describe('policy fingerprint', () => {
       cwdRealpath: '/repo',
       accessPolicyDigest: digestCanonical('access'),
       resourceScopeDigest: digestCanonical('scope'),
-      attachmentPolicyShapeDigest: digestCanonical('attachments'),
     };
     expect(policyFingerprint(base)).toBe(policyFingerprint({ ...base }));
     for (const changed of [
       { cwdRealpath: '/other' },
       { accessPolicyDigest: digestCanonical('other-access') },
       { resourceScopeDigest: digestCanonical('other-scope') },
-      { attachmentPolicyShapeDigest: digestCanonical('other-attachments') },
     ]) {
       expect(policyFingerprint({ ...base, ...changed })).not.toBe(policyFingerprint(base));
     }
@@ -43,20 +40,6 @@ describe('policy fingerprint', () => {
     );
     expect(resourceScopeDigest({ source: 'comment', resourceBindings: ['b', 'a'] })).toBe(
       resourceScopeDigest({ source: 'comment', resourceBindings: ['a', 'b'] }),
-    );
-  });
-
-  it('includes executable attachment limits but excludes cache details', () => {
-    const profile = createDefaultProfileConfig({
-      app: { id: 'cli_test', secret: 'secret', tenant: 'feishu' },
-      omp: { binaryPath: '/usr/local/bin/omp' },
-    });
-    const baseline = attachmentPolicyConfigDigest(profile.attachments);
-    expect(
-      attachmentPolicyConfigDigest({ ...profile.attachments, cacheTtlMs: 1, cacheMaxBytes: 2 }),
-    ).toBe(baseline);
-    expect(attachmentPolicyConfigDigest({ ...profile.attachments, maxCount: 1 })).not.toBe(
-      baseline,
     );
   });
 });

@@ -48,37 +48,28 @@ describe('attachment policy normalization', () => {
     ]);
   });
 
-  it('enforces max count, per-file bytes, run bytes, and image bytes', () => {
-    const out = normalizeAttachments(
-      [
-        candidate({ hash: '1', size: 5 }),
-        candidate({ kind: 'file', mime: 'text/plain', hash: '2', size: 5 }),
-        candidate({ kind: 'file', mime: 'text/plain', hash: '3', size: 5 }),
-        candidate({ kind: 'file', mime: 'text/plain', hash: '4', size: 1 }),
-        candidate({ kind: 'file', mime: 'text/plain', hash: '5', size: 1 }),
-      ],
-      {
-        maxCount: 3,
-        maxBytes: 12,
-        maxFileBytes: 10,
-        imageMaxBytes: 4,
-      },
+  it('does not limit attachment count or size', () => {
+    const candidates = Array.from({ length: 11 }, (_, index) =>
+      candidate({
+        kind: 'file',
+        mime: 'application/vnd.rar',
+        hash: String(index),
+        size: 101 * 1024 * 1024,
+      }),
+    );
+    candidates.push(
+      candidate({
+        kind: 'image',
+        mime: 'image/png',
+        hash: 'large-image',
+        size: 101 * 1024 * 1024,
+      }),
     );
 
-    expect(out.map((item) => item.decision)).toEqual([
-      'rejected',
-      'accepted',
-      'accepted',
-      'accepted',
-      'rejected',
-    ]);
-    expect(out.map((item) => item.rejectionReason ?? '')).toEqual([
-      'image-too-large',
-      '',
-      '',
-      '',
-      'too-many-attachments',
-    ]);
+    const out = normalizeAttachments(candidates);
+
+    expect(out).toHaveLength(12);
+    expect(out.every((item) => item.decision === 'accepted')).toBe(true);
   });
 
   it('uses MIME-derived safe extensions and never original names', () => {

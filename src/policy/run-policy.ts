@@ -1,11 +1,6 @@
 import type { ProfileConfig } from '../config/profile-schema';
 import type { AccessDecision } from './access';
-import {
-  accessPolicyDigest,
-  attachmentPolicyConfigDigest,
-  policyFingerprint,
-  resourceScopeDigest,
-} from './fingerprint';
+import { accessPolicyDigest, policyFingerprint, resourceScopeDigest } from './fingerprint';
 
 export interface ScopeContext {
   source: 'im' | 'card' | 'comment' | 'meeting';
@@ -96,7 +91,6 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     commentScopeId: input.scope.commentScopeId,
     resourceBindings: input.scope.resourceBindings?.map((binding) => binding.id),
   });
-  const attachmentDigest = attachmentPolicyConfigDigest(input.profileConfig.attachments);
   const accessDigest =
     input.scope.source === 'comment' && input.access.reason === 'comment-mention'
       ? 'comment-mention'
@@ -115,7 +109,6 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
       cwdRealpath: input.cwdRealpath,
       accessPolicyDigest: accessDigest,
       resourceScopeDigest: resourceDigest,
-      attachmentPolicyShapeDigest: attachmentDigest,
     }),
   };
 }

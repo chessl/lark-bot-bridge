@@ -20,10 +20,6 @@ export interface OmpConfig {
 }
 
 export interface AttachmentConfig {
-  maxCount: number;
-  maxBytes: number;
-  maxFileBytes: number;
-  imageMaxBytes: number;
   cacheTtlMs: number;
   cacheMaxBytes: number;
 }
@@ -156,10 +152,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     workspaces,
     omp: normalizeOmp(raw.omp),
     attachments: {
-      maxCount: numberOr(raw.attachments?.maxCount, 10),
-      maxBytes: numberOr(raw.attachments?.maxBytes, 100 * 1024 * 1024),
-      maxFileBytes: numberOr(raw.attachments?.maxFileBytes, 25 * 1024 * 1024),
-      imageMaxBytes: numberOr(raw.attachments?.imageMaxBytes, 25 * 1024 * 1024),
       cacheTtlMs: numberOr(raw.attachments?.cacheTtlMs, 24 * 60 * 60 * 1000),
       cacheMaxBytes: numberOr(raw.attachments?.cacheMaxBytes, 512 * 1024 * 1024),
     },

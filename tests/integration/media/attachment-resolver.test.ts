@@ -68,30 +68,27 @@ describe('hash media attachment resolver', () => {
     await expect(stat(attachment!.absPath)).resolves.toMatchObject({ size: bytes.length });
   });
 
-  it('removes current files that attachment policy rejects', async () => {
+  it('removes files with unsupported image MIME', async () => {
     const root = await tempDir();
-    const bytes = Buffer.from('oversized-image');
-    const cache = new MediaCache(fakeChannel(bytes), root);
+    const bytes = Buffer.from('unsupported-image');
+    const cache = new MediaCache(fakeChannel(bytes, 'image/svg+xml'), root);
 
-    const [attachment] = await cache.resolve(
-      [
-        {
-          messageId: 'om_1',
-          resource: { type: 'image', fileKey: 'img_secret_key' } as never,
-        },
-      ],
-      { imageMaxBytes: bytes.length - 1, cacheMaxBytes: bytes.length - 1 },
-    );
+    const [attachment] = await cache.resolve([
+      {
+        messageId: 'om_1',
+        resource: { type: 'image', fileKey: 'img_secret_key' } as never,
+      },
+    ]);
 
     expect(attachment).toMatchObject({
       decision: 'rejected',
-      rejectionReason: 'image-too-large',
+      rejectionReason: 'unsupported-image-mime',
     });
     await expect(stat(attachment!.absPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
 
-function fakeChannel(bytes: Buffer) {
+function fakeChannel(bytes: Buffer, contentType = 'image/png') {
   return {
     async downloadResourceToFile(
       _messageId: string,
@@ -100,7 +97,7 @@ function fakeChannel(bytes: Buffer) {
       destPath: string,
     ) {
       await writeFile(destPath, bytes);
-      return { contentType: 'image/png', bytesWritten: bytes.length };
+      return { contentType, bytesWritten: bytes.length };
     },
   } as never;
 }

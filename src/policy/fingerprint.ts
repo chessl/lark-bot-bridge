@@ -6,7 +6,6 @@ export interface FingerprintInputV2 {
   cwdRealpath: string;
   accessPolicyDigest: string;
   resourceScopeDigest: string;
-  attachmentPolicyShapeDigest: string;
 }
 
 export interface ResourceScopeDigestInput {
@@ -24,7 +23,6 @@ export function policyFingerprint(input: FingerprintInputV2): string {
     cwdRealpath: input.cwdRealpath,
     accessPolicyDigest: input.accessPolicyDigest,
     resourceScopeDigest: input.resourceScopeDigest,
-    attachmentPolicyShapeDigest: input.attachmentPolicyShapeDigest,
   });
 }
 
@@ -45,15 +43,6 @@ export function resourceScopeDigest(input: ResourceScopeDigestInput): string {
     threadId: input.threadId ?? null,
     commentScopeId: input.commentScopeId ?? null,
     resourceBindings: [...(input.resourceBindings ?? [])].sort(),
-  });
-}
-
-export function attachmentPolicyConfigDigest(input: ProfileConfig['attachments']): string {
-  return digestCanonical({
-    maxCount: input.maxCount,
-    maxBytes: input.maxBytes,
-    maxFileBytes: input.maxFileBytes,
-    imageMaxBytes: input.imageMaxBytes,
   });
 }
 

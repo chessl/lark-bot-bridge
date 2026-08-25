@@ -41,9 +41,12 @@ describe('OMP profile schema', () => {
     expect(cfg.preferences).toEqual({ model: 'custom-model', maxConcurrentRuns: 4 });
   });
 
-  it('provides attachment and meeting defaults', () => {
+  it('provides attachment cache and meeting defaults', () => {
     const cfg = createDefaultProfileConfig({ app, omp });
-    expect(cfg.attachments.maxCount).toBeGreaterThan(0);
+    expect(cfg.attachments).toEqual({
+      cacheTtlMs: 24 * 60 * 60 * 1000,
+      cacheMaxBytes: 512 * 1024 * 1024,
+    });
     expect(cfg.meeting).toMatchObject({ enabled: false, respondIn: 'meeting' });
   });
 

@@ -23,20 +23,6 @@ export interface NormalizedAttachment extends AttachmentCandidate {
   rejectionReason?: string;
 }
 
-export interface AttachmentPolicyOptions {
-  maxCount: number;
-  maxBytes: number;
-  maxFileBytes: number;
-  imageMaxBytes: number;
-}
-
-const DEFAULT_POLICY: AttachmentPolicyOptions = {
-  maxCount: 10,
-  maxBytes: 100 * 1024 * 1024,
-  maxFileBytes: 25 * 1024 * 1024,
-  imageMaxBytes: 25 * 1024 * 1024,
-};
-
 const IMAGE_MIME_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -55,12 +41,7 @@ const MIME_EXT: Record<string, string> = {
 
 export function normalizeAttachments(
   candidates: readonly AttachmentCandidate[],
-  options: Partial<AttachmentPolicyOptions> = {},
 ): NormalizedAttachment[] {
-  const policy = { ...DEFAULT_POLICY, ...options };
-  let acceptedCount = 0;
-  let acceptedBytes = 0;
-
   return candidates.map((candidate) => {
     const base = {
       ...candidate,
@@ -68,24 +49,7 @@ export function normalizeAttachments(
       requiredness: 'optional' as const,
     };
     const early = earlyDecision(candidate);
-    if (early) return { ...base, ...early };
-
-    if (acceptedCount >= policy.maxCount) {
-      return reject(base, 'too-many-attachments');
-    }
-    if (candidate.size > policy.maxFileBytes) {
-      return reject(base, 'file-too-large');
-    }
-    if (candidate.kind === 'image' && candidate.size > policy.imageMaxBytes) {
-      return reject(base, 'image-too-large');
-    }
-    if (acceptedBytes + candidate.size > policy.maxBytes) {
-      return reject(base, 'run-too-large');
-    }
-
-    acceptedCount++;
-    acceptedBytes += candidate.size;
-    return { ...base, decision: 'accepted' as const };
+    return early ? { ...base, ...early } : { ...base, decision: 'accepted' as const };
   });
 }
 
@@ -133,11 +97,4 @@ function earlyDecision(
     return { decision: 'rejected', rejectionReason: 'unsupported-image-mime' };
   }
   return undefined;
-}
-
-function reject(
-  base: Omit<NormalizedAttachment, 'decision' | 'rejectionReason'>,
-  reason: string,
-): NormalizedAttachment {
-  return { ...base, decision: 'rejected', rejectionReason: reason };
 }
