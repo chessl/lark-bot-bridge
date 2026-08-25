@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, realpath, rm, stat } from 'node:fs/promises';
+import { mkdir, realpath, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -16,6 +16,7 @@ import type {
 import type { CallbackAuth } from '../card/callback-auth';
 import type { ProfileConfig } from '../config/profile-schema';
 import { log } from '../core/logger';
+import { downloadLarkResourceToFile } from '../media/cache';
 import {
   ADD_BOT_SCOPES,
   addBotToChat,
@@ -298,12 +299,12 @@ export class NativeLarkServer implements NativeToolProvider {
       'lark_download_message_resource',
       {
         description:
-          'Download an attachment from a listed Lark message into this run workspace. Use the message_id, file_key, file_name, and message type returned by lark_list_messages.',
+          'Download any attachment from a listed Lark message into this run workspace. Use message_id and file_key from lark_list_messages; file_name is optional.',
         inputSchema: {
           messageId: z.string().min(1).max(128),
           fileKey: z.string().min(1).max(1024),
-          fileName: z.string().min(1).max(180),
-          resourceType: z.enum(['file', 'image']).default('file'),
+          fileName: z.string().min(1).max(180).optional(),
+          resourceType: z.enum(['image', 'file', 'audio', 'video', 'sticker']).default('file'),
         },
         annotations: { readOnlyHint: true },
       },
@@ -311,19 +312,17 @@ export class NativeLarkServer implements NativeToolProvider {
         this.toolResult(async () => {
           const directory = join(access.cwd, '.lark-downloads');
           await mkdir(directory, { recursive: true });
-          const path = join(directory, `${randomUUID()}-${safeFileName(fileName)}`);
-          try {
-            const result = await this.options.channel.downloadResourceToFile(
+          const name = safeFileName(fileName ?? defaultResourceFileName(resourceType));
+          const path = join(directory, `${randomUUID()}-${name}`);
+          const result = await downloadLarkResourceToFile(
+            this.options.channel,
+            {
               messageId,
-              fileKey,
-              resourceType,
-              path,
-            );
-            return { path, ...result };
-          } catch (error) {
-            await rm(path, { force: true });
-            throw error;
-          }
+              resource: { type: resourceType, fileKey, ...(fileName ? { fileName } : {}) },
+            },
+            path,
+          );
+          return { path, ...result };
         }),
     );
     server.registerTool(
@@ -725,6 +724,19 @@ async function workspaceImagePath(cwd: string, input: string): Promise<string> {
   if (info.size === 0) throw new Error('Image file is empty');
   if (info.size > MAX_IMAGE_BYTES) throw new Error('Image exceeds the 10 MB Lark limit');
   return image;
+}
+
+function defaultResourceFileName(type: 'image' | 'file' | 'audio' | 'video' | 'sticker'): string {
+  switch (type) {
+    case 'image':
+      return 'image.png';
+    case 'audio':
+      return 'audio.ogg';
+    case 'video':
+      return 'video.mp4';
+    default:
+      return 'attachment.bin';
+  }
 }
 
 function safeFileName(input: string): string {

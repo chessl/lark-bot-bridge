@@ -1,5 +1,5 @@
-import type { AgentAttachment as PolicyAttachment } from '../policy/run-policy';
 import type { BridgePromptAttachment } from '../agent/prompt';
+import type { AgentAttachment as PolicyAttachment } from '../policy/run-policy';
 
 export type AttachmentKind = 'image' | 'file' | 'audio' | 'video' | 'sticker';
 export type AttachmentDecision = 'accepted' | 'rejected' | 'skipped';
@@ -42,15 +42,18 @@ const MIME_EXT: Record<string, string> = {
 export function normalizeAttachments(
   candidates: readonly AttachmentCandidate[],
 ): NormalizedAttachment[] {
-  return candidates.map((candidate) => {
-    const base = {
-      ...candidate,
-      path: candidate.absPath,
-      requiredness: 'optional' as const,
-    };
-    const early = earlyDecision(candidate);
-    return early ? { ...base, ...early } : { ...base, decision: 'accepted' as const };
-  });
+  return candidates.map((candidate) => ({
+    ...candidate,
+    // Non-raster images cannot use the model image-input lane, but remain
+    // available as ordinary files for workspace inspection.
+    kind:
+      candidate.kind === 'image' && !IMAGE_MIME_EXT[candidate.mime.toLowerCase()]
+        ? 'file'
+        : candidate.kind,
+    path: candidate.absPath,
+    requiredness: 'optional',
+    decision: 'accepted',
+  }));
 }
 
 export function safeExtensionForMime(mime: string): string {
@@ -82,19 +85,4 @@ export function toPromptAttachment(attachment: NormalizedAttachment): BridgeProm
     decision: attachment.decision,
     ...(attachment.rejectionReason ? { rejectionReason: attachment.rejectionReason } : {}),
   };
-}
-
-function earlyDecision(
-  candidate: AttachmentCandidate,
-): Pick<NormalizedAttachment, 'decision' | 'rejectionReason'> | undefined {
-  if (candidate.kind === 'sticker') {
-    return { decision: 'skipped', rejectionReason: 'sticker' };
-  }
-  if (candidate.kind === 'audio' || candidate.kind === 'video') {
-    return { decision: 'skipped', rejectionReason: 'unsupported-kind' };
-  }
-  if (candidate.kind === 'image' && !IMAGE_MIME_EXT[candidate.mime.toLowerCase()]) {
-    return { decision: 'rejected', rejectionReason: 'unsupported-image-mime' };
-  }
-  return undefined;
 }

@@ -127,6 +127,26 @@ describe('NativeLarkServer', () => {
         'file',
         downloadedPath,
       );
+      const audioDownload = await client.callTool({
+        name: 'lark_download_message_resource',
+        arguments: {
+          messageId: 'om_audio',
+          fileKey: 'audio_historical',
+          resourceType: 'audio',
+        },
+      });
+      const audioContent = audioDownload.structuredContent;
+      const audioPath =
+        audioContent && typeof audioContent === 'object' && 'path' in audioContent
+          ? audioContent.path
+          : undefined;
+      expect(audioPath).toMatch(/audio\.ogg$/);
+      expect(downloadResourceToFile).toHaveBeenLastCalledWith(
+        'om_audio',
+        'audio_historical',
+        'file',
+        audioPath,
+      );
       expect(
         await client.callTool({
           name: 'lark_get_document_blocks',

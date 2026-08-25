@@ -279,6 +279,49 @@ describe('topic message quote handling', () => {
     expect(topicBlock).not.toContain('om_at_in_topic');
   });
 
+  it('downloads attachments found only in initial topic history', async () => {
+    const h = await createHarness({
+      threadMessages: [
+        {
+          message_id: 'om_topic_file',
+          msg_type: 'file',
+          body: { content: JSON.stringify({ file_key: 'file_topic', file_name: 'topic.zip' }) },
+          sender: { id: 'ou_asker', sender_type: 'user' },
+          create_time: '1760000000000',
+          thread_id: 'omt_topic',
+        },
+        {
+          message_id: 'om_at_in_topic',
+          msg_type: 'text',
+          body: { content: JSON.stringify({ text: '@Bridge 分析前文附件' }) },
+          sender: { id: 'ou_user', sender_type: 'user' },
+          create_time: '1760000001000',
+          thread_id: 'omt_topic',
+        },
+      ],
+    });
+
+    await startTestBridge(h);
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_at_in_topic',
+        rootId: 'om_topic_file',
+        parentId: 'om_topic_file',
+        threadId: 'omt_topic',
+        content: '@Bridge 分析前文附件',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.channel.downloadResourceToFile).toHaveBeenCalledWith(
+      'om_topic_file',
+      'file_topic',
+      'file',
+      expect.any(String),
+    );
+    expect(h.agent.runOptions[0]?.prompt).toContain('"sourceMessageId":"om_topic_file"');
+  });
+
   it('skips a group message that does not mention the bot (requireMention default)', async () => {
     const h = await createHarness({ chatMode: 'group' });
 
@@ -360,6 +403,33 @@ describe('topic message quote handling', () => {
     expect(prompt).toContain('"sourceMessageId":"om_zip"');
     expect(prompt).toMatch(/"path":"[^"]+\.zip"/);
     expect(prompt).toContain('"decision":"accepted"');
+  });
+
+  it('does not start an incomplete run after attachment retries are exhausted', async () => {
+    const h = await createHarness({
+      chatMode: 'group',
+      quotedFiles: {
+        om_zip: { fileKey: 'file_zip', fileName: 'logs.zip' },
+      },
+      downloadFailures: 3,
+    });
+
+    await startTestBridge(h);
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_zip_reply',
+        rootId: 'om_zip',
+        parentId: 'om_zip',
+        content: '@Bridge 分析附件',
+      }),
+    );
+    await waitFor(() => h.channel.sent.length === 1, 3_000);
+
+    expect(h.channel.downloadResourceToFile).toHaveBeenCalledTimes(3);
+    expect(h.agent.runOptions).toHaveLength(0);
+    expect(h.channel.sent[0]?.content).toMatchObject({
+      markdown: expect.stringContaining('本次未启动分析'),
+    });
   });
 
   it('downloads a file inside a reply-quoted merge_forward using its parent message id', async () => {
@@ -485,6 +555,7 @@ async function createHarness(
     rawThreadIds?: Record<string, string>;
     threadMessages?: Array<Record<string, unknown>>;
     agentEvents?: AgentEvent[];
+    downloadFailures?: number;
   } = {},
 ): Promise<{
   tmp: TmpProfile;
@@ -572,6 +643,7 @@ function createFakeLarkChannel(
     quotedForwardedFiles?: Record<string, QuotedForwardedFile>;
     rawThreadIds?: Record<string, string>;
     threadMessages?: Array<Record<string, unknown>>;
+    downloadFailures?: number;
   } = {},
 ): FakeLarkChannel & { handlers: MessageHandlerMap } {
   const handlers: MessageHandlerMap = {};
@@ -585,6 +657,7 @@ function createFakeLarkChannel(
   const quotedForwardedFiles = options.quotedForwardedFiles ?? {};
   const rawThreadIds = options.rawThreadIds ?? {};
   const threadMessages = options.threadMessages ?? [];
+  let downloadAttempts = 0;
   return {
     handlers,
     sent,
@@ -654,6 +727,10 @@ function createFakeLarkChannel(
     }),
     downloadResourceToFile: vi.fn(
       async (_messageId: string, _fileKey: string, _type: string, destPath: string) => {
+        downloadAttempts += 1;
+        if (downloadAttempts <= (options.downloadFailures ?? 0)) {
+          throw new Error('connection reset');
+        }
         const bytes = Buffer.from('zip');
         await writeFile(destPath, bytes);
         return { contentType: 'application/zip', bytesWritten: bytes.length };

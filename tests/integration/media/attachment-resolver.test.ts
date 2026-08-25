@@ -1,10 +1,13 @@
-import { readFile, rm, stat, utimes } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import { afterEach, describe, expect, it } from 'vitest';
-import { MediaCache } from '../../../src/media/cache.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  AttachmentDownloadError,
+  downloadLarkResourceToFile,
+  MediaCache,
+} from '../../../src/media/cache.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -28,6 +31,7 @@ describe('hash media attachment resolver', () => {
         } as never,
       },
     ]);
+    if (!attachment) throw new Error('attachment missing');
 
     const hash = createHash('sha256').update(bytes).digest('hex');
     expect(attachment).toMatchObject({
@@ -40,9 +44,9 @@ describe('hash media attachment resolver', () => {
       originalName: 'private name.png',
       decision: 'accepted',
     });
-    expect(attachment?.absPath).not.toContain('img_secret_key');
-    expect(attachment?.absPath).not.toContain('private');
-    expect(await readFile(attachment!.absPath, 'utf8')).toBe('image-bytes');
+    expect(attachment.absPath).not.toContain('img_secret_key');
+    expect(attachment.absPath).not.toContain('private');
+    expect(await readFile(attachment.absPath, 'utf8')).toBe('image-bytes');
   });
 
   it('enforces cacheMaxBytes without deleting files from the current resolution', async () => {
@@ -63,12 +67,13 @@ describe('hash media attachment resolver', () => {
       ],
       { cacheMaxBytes: bytes.length },
     );
+    if (!attachment) throw new Error('attachment missing');
 
     await expect(stat(oldPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(stat(attachment!.absPath)).resolves.toMatchObject({ size: bytes.length });
+    await expect(stat(attachment.absPath)).resolves.toMatchObject({ size: bytes.length });
   });
 
-  it('removes files with unsupported image MIME', async () => {
+  it('keeps non-raster images as inspectable files', async () => {
     const root = await tempDir();
     const bytes = Buffer.from('unsupported-image');
     const cache = new MediaCache(fakeChannel(bytes, 'image/svg+xml'), root);
@@ -79,12 +84,64 @@ describe('hash media attachment resolver', () => {
         resource: { type: 'image', fileKey: 'img_secret_key' } as never,
       },
     ]);
+    if (!attachment) throw new Error('attachment missing');
 
     expect(attachment).toMatchObject({
-      decision: 'rejected',
-      rejectionReason: 'unsupported-image-mime',
+      kind: 'file',
+      decision: 'accepted',
+      mime: 'image/svg+xml',
     });
-    await expect(stat(attachment!.absPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(attachment.absPath)).resolves.toMatchObject({ size: bytes.length });
+  });
+
+  it('retries partial downloads and only returns a complete validated file', async () => {
+    const root = await tempDir();
+    const path = join(root, 'resource.bin');
+    const download = vi.fn(async (_m: string, _f: string, _t: string, dest: string) => {
+      if (download.mock.calls.length < 3) {
+        await writeFile(dest, '');
+        return { bytesWritten: 0 };
+      }
+      await writeFile(dest, 'complete');
+      return { contentType: 'application/octet-stream', bytesWritten: 8 };
+    });
+
+    await expect(
+      downloadLarkResourceToFile(
+        { downloadResourceToFile: download } as never,
+        {
+          messageId: 'om_retry',
+          resource: { type: 'file', fileKey: 'file_retry' } as never,
+        },
+        path,
+        [0, 0],
+      ),
+    ).resolves.toMatchObject({ bytesWritten: 8 });
+    expect(download).toHaveBeenCalledTimes(3);
+    expect(await readFile(path, 'utf8')).toBe('complete');
+  });
+
+  it('removes partial files when every download attempt fails', async () => {
+    const root = await tempDir();
+    const path = join(root, 'resource.bin');
+    const download = vi.fn(async (_m: string, _f: string, _t: string, dest: string) => {
+      await writeFile(dest, 'partial');
+      throw new Error('connection reset');
+    });
+
+    await expect(
+      downloadLarkResourceToFile(
+        { downloadResourceToFile: download } as never,
+        {
+          messageId: 'om_failed',
+          resource: { type: 'file', fileKey: 'file_failed' } as never,
+        },
+        path,
+        [0, 0],
+      ),
+    ).rejects.toBeInstanceOf(AttachmentDownloadError);
+    expect(download).toHaveBeenCalledTimes(3);
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
 

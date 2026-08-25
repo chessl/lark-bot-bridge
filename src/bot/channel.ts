@@ -821,6 +821,12 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   if (!firstMsg || !lastMsg) return;
 
   const replyTarget = deriveOmpReplyTarget(lastMsg);
+  // A message-carried thread ID is authoritative even when cached Chat
+  // metadata still says group; keep all early failures in the same reply lane.
+  const sendOpts = {
+    replyTo: replyTarget.messageId,
+    ...(replyTarget.replyInThread ? { replyInThread: true } : {}),
+  };
 
   const chatId = firstMsg.chatId;
   const threadId = firstMsg.threadId;
@@ -837,7 +843,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     ...new Set(
       batch
         .map((m) => replyQuoteTargetForMessage(m, mode))
-        .filter((id): id is string => Boolean(id) && !batchIds.has(id!)),
+        .filter((id): id is string => typeof id === 'string' && id.length > 0 && !batchIds.has(id)),
     ),
   ];
   const quotes: QuotedContext[] = [];
@@ -849,22 +855,6 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         messageId: targetId,
         type: q.rawContentType,
         contentChars: q.content.length,
-      });
-    }
-  }
-
-  resourceItems.push(...quotes.flatMap((quote) => quote.resources));
-  const attachments = await media.resolve(resourceItems, controls.cfg.attachments);
-  if (attachments.length > 0) {
-    log.info('media', 'resolved', { count: attachments.length });
-    for (const attachment of attachments) {
-      log.info('attachment', 'decision', {
-        decision: attachment.decision,
-        kind: attachment.kind,
-        hash: attachment.hash,
-        size: attachment.size,
-        sourceMessageId: attachment.sourceMessageId,
-        reason: attachment.rejectionReason,
       });
     }
   }
@@ -890,6 +880,39 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         scope,
         threadId,
         count: topicContext.length,
+      });
+    }
+  }
+
+  resourceItems.push(
+    ...quotes.flatMap((quote) => quote.resources),
+    ...topicContext.flatMap((context) => context.resources),
+  );
+  let attachments: LocalAttachment[];
+  try {
+    attachments = await media.resolve(resourceItems, controls.cfg.attachments);
+  } catch (err) {
+    log.fail('media', err, { scope, count: resourceItems.length });
+    await channel.send(
+      chatId,
+      {
+        markdown:
+          '附件下载未能完整完成，系统已自动重试；本次未启动分析，避免遗漏附件。请稍后重试，或确认原消息中的附件仍可访问。',
+      },
+      sendOpts,
+    );
+    return;
+  }
+  if (attachments.length > 0) {
+    log.info('media', 'resolved', { count: attachments.length });
+    for (const attachment of attachments) {
+      log.info('attachment', 'decision', {
+        decision: attachment.decision,
+        kind: attachment.kind,
+        hash: attachment.hash,
+        size: attachment.size,
+        sourceMessageId: attachment.sourceMessageId,
+        reason: attachment.rejectionReason,
       });
     }
   }
@@ -928,13 +951,6 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     ...(modelSwitched ? { modelSwitchedTo: modelSelection } : {}),
   });
 
-  // A message-carried thread ID is authoritative even when cached Chat
-  // metadata still says group; without the native option, the Reply escapes
-  // to the Chat top level.
-  const sendOpts = {
-    replyTo: replyTarget.messageId,
-    ...(replyTarget.replyInThread ? { replyInThread: true } : {}),
-  };
   log.info('flush', 'reply-target', {
     scope,
     mode,

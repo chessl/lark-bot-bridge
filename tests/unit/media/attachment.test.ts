@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type AttachmentCandidate,
   normalizeAttachments,
   safeExtensionForMime,
-  type AttachmentCandidate,
 } from '../../../src/media/attachment.js';
 
 describe('attachment policy normalization', () => {
@@ -30,7 +30,7 @@ describe('attachment policy normalization', () => {
     ]);
   });
 
-  it('rejects SVG and unknown images while skipping sticker/audio/video by default', () => {
+  it('keeps every resource and routes non-raster images through the file lane', () => {
     const out = normalizeAttachments([
       candidate({ kind: 'image', mime: 'image/svg+xml', hash: 'svg' }),
       candidate({ kind: 'image', mime: 'application/octet-stream', hash: 'unknown' }),
@@ -39,12 +39,12 @@ describe('attachment policy normalization', () => {
       candidate({ kind: 'video', mime: 'video/mp4', hash: 'video' }),
     ]);
 
-    expect(out.map((item) => [item.kind, item.decision, item.rejectionReason])).toEqual([
-      ['image', 'rejected', 'unsupported-image-mime'],
-      ['image', 'rejected', 'unsupported-image-mime'],
-      ['sticker', 'skipped', 'sticker'],
-      ['audio', 'skipped', 'unsupported-kind'],
-      ['video', 'skipped', 'unsupported-kind'],
+    expect(out.map((item) => [item.kind, item.decision])).toEqual([
+      ['file', 'accepted'],
+      ['file', 'accepted'],
+      ['sticker', 'accepted'],
+      ['audio', 'accepted'],
+      ['video', 'accepted'],
     ]);
   });
 

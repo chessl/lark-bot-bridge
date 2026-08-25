@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -24,6 +24,62 @@ export interface ResourceRequest {
   resource: ResourceDescriptor;
 }
 
+const DOWNLOAD_RETRY_DELAYS_MS = [250, 1_000] as const;
+
+export class AttachmentDownloadError extends Error {
+  constructor(attempts: number, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`Attachment download failed after ${attempts} attempts: ${detail}`, { cause });
+    this.name = 'AttachmentDownloadError';
+  }
+}
+
+export async function downloadLarkResourceToFile(
+  channel: LarkChannel,
+  request: ResourceRequest,
+  destPath: string,
+  retryDelaysMs: readonly number[] = DOWNLOAD_RETRY_DELAYS_MS,
+): Promise<{ contentType?: string; bytesWritten: number }> {
+  const attempts = retryDelaysMs.length + 1;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await rm(destPath, { force: true });
+    try {
+      const result = await channel.downloadResourceToFile(
+        request.messageId,
+        request.resource.fileKey,
+        request.resource.type === 'image' ? 'image' : 'file',
+        destPath,
+      );
+      const downloaded = await stat(destPath);
+      if (!downloaded.isFile() || downloaded.size === 0) {
+        throw new Error('Downloaded attachment is empty');
+      }
+      if (downloaded.size !== result.bytesWritten) {
+        throw new Error(
+          `Downloaded attachment size mismatch: wrote ${result.bytesWritten}, found ${downloaded.size}`,
+        );
+      }
+      return result;
+    } catch (error) {
+      lastError = error;
+      await rm(destPath, { force: true });
+      if (attempt + 1 === attempts) break;
+      log.warn('media', 'download-retry', {
+        attempt: attempt + 1,
+        attempts,
+        messageId: request.messageId,
+        fileKey: request.resource.fileKey,
+        err: error instanceof Error ? error.message : String(error),
+      });
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, retryDelaysMs[attempt] ?? 0);
+      await promise;
+    }
+  }
+  throw new AttachmentDownloadError(attempts, lastError);
+}
+
 export class MediaCache {
   private readonly channel: LarkChannel;
   private readonly rootDir: string;
@@ -42,15 +98,9 @@ export class MediaCache {
 
     const candidates: AttachmentCandidate[] = [];
     for (const item of items) {
-      try {
-        const file = await this.resolveOne(item);
-        if (file) candidates.push(file);
-      } catch (err) {
-        log.fail('media', err, { fileKey: item.resource.fileKey });
-      }
+      candidates.push(await this.resolveOne(item));
     }
     const normalized = normalizeAttachments(candidates);
-    await removeRejectedResolvedFiles(normalized);
     if (typeof options.cacheMaxBytes === 'number') {
       await enforceCacheMaxBytes(
         this.rootDir,
@@ -65,59 +115,49 @@ export class MediaCache {
     return normalized;
   }
 
-  private async resolveOne(item: ResourceRequest): Promise<AttachmentCandidate | null> {
+  private async resolveOne(item: ResourceRequest): Promise<AttachmentCandidate> {
     const { messageId, resource: r } = item;
-    if (r.type === 'sticker') {
-      log.info('media', 'skip', { reason: 'sticker', fileKey: r.fileKey });
-      return null;
-    }
     const kind: AttachmentKind = r.type;
-    const tmpPath = join(
-      this.rootDir,
-      `.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    const tmpPath = join(this.rootDir, `.tmp-${process.pid}-${randomUUID()}`);
 
-    // downloadResourceToFile hits im.v1.messageResource.get under the hood —
-    // the endpoint required for resources that arrived in user messages. It
-    // maps image resources to 'image' and everything else (file/audio/video)
-    // to 'file'. Stream straight to disk instead of holding the whole attachment
-    // in the JS heap. The method returns the server content-type so we can pick
-    // an accurate extension, falling back to defaultMime(kind) when absent.
-    const { contentType } = await this.channel.downloadResourceToFile(
-      messageId,
-      r.fileKey,
-      r.type === 'image' ? 'image' : 'file',
-      tmpPath,
-    );
-
-    const tmpStat = await stat(tmpPath);
-    const hash = await hashFile(tmpPath);
-    const mime = contentType ?? defaultMime(kind);
-    const ext = safeExtensionForMime(mime);
-    const absPath = join(this.rootDir, `${hash}.${ext}`);
+    // Feishu's received-message resource endpoint needs both owner IDs and maps
+    // every non-image kind to `file`. Stream to a temporary file, validate the
+    // complete byte count, then publish by content hash.
     try {
-      await stat(absPath);
+      const { contentType, bytesWritten } = await downloadLarkResourceToFile(
+        this.channel,
+        item,
+        tmpPath,
+      );
+      const hash = await hashFile(tmpPath);
+      const mime = contentType ?? defaultMime(kind);
+      const ext = safeExtensionForMime(mime);
+      const absPath = join(this.rootDir, `${hash}.${ext}`);
+      try {
+        await stat(absPath);
+        log.info('media', 'cache-hit', { path: absPath });
+      } catch {
+        await rename(tmpPath, absPath);
+      }
+      const candidate: AttachmentCandidate = {
+        absPath,
+        kind,
+        size: bytesWritten,
+        mime,
+        hash,
+        source: 'lark',
+        sourceMessageId: messageId,
+        sourceFileKey: r.fileKey,
+        ...(r.fileName ? { originalName: r.fileName } : {}),
+      };
+      log.info('media', 'downloaded', {
+        path: candidate.absPath,
+        size: candidate.size,
+      });
+      return candidate;
+    } finally {
       await rm(tmpPath, { force: true });
-      log.info('media', 'cache-hit', { path: absPath });
-    } catch {
-      await rename(tmpPath, absPath);
     }
-    const candidate: AttachmentCandidate = {
-      absPath,
-      kind,
-      size: tmpStat.size,
-      mime,
-      hash,
-      source: 'lark',
-      sourceMessageId: messageId,
-      sourceFileKey: r.fileKey,
-      ...(r.fileName ? { originalName: r.fileName } : {}),
-    };
-    log.info('media', 'downloaded', {
-      path: candidate.absPath,
-      size: candidate.size,
-    });
-    return candidate;
   }
 }
 
@@ -176,14 +216,4 @@ async function enforceCacheMaxBytes(
     await rm(file.path, { force: true });
     total -= file.size;
   }
-}
-
-async function removeRejectedResolvedFiles(
-  attachments: readonly NormalizedAttachment[],
-): Promise<void> {
-  await Promise.all(
-    attachments
-      .filter((attachment) => attachment.decision !== 'accepted')
-      .map((attachment) => rm(attachment.absPath, { force: true })),
-  );
 }
