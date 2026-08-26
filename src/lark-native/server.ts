@@ -266,7 +266,8 @@ export class NativeLarkServer implements NativeToolProvider {
     server.registerTool(
       'lark_list_messages',
       {
-        description: 'List messages from the current chat/thread or an explicit visible container.',
+        description:
+          'List messages from the current chat/thread or an explicit visible container. Thread containers accept either an omt_ thread ID or an om_ message ID, which is resolved automatically.',
         inputSchema: {
           containerId: z.string().min(1).max(128).optional(),
           containerType: z.enum(['chat', 'thread']).optional(),
@@ -278,10 +279,22 @@ export class NativeLarkServer implements NativeToolProvider {
       async ({ containerId, containerType, pageSize, pageToken }) =>
         this.toolResult(async () => {
           const inferredType = containerType ?? (access.scope.threadId ? 'thread' : 'chat');
-          const inferredId =
+          let inferredId =
             containerId ??
             (inferredType === 'thread' ? access.scope.threadId : access.scope.chatId);
           if (!inferredId) throw new Error('Current run is not attached to an IM container');
+          if (inferredType === 'thread' && inferredId.startsWith('om_')) {
+            const [message] = await this.options.channel.fetchRawMessage(inferredId);
+            const threadId = messageThreadId(message);
+            if (!threadId) throw new Error(`Message ${inferredId} is not part of a thread`);
+            inferredId = threadId;
+          }
+          if (inferredType === 'thread' && !inferredId.startsWith('omt_')) {
+            throw new Error('Thread container ID must start with omt_ or om_');
+          }
+          if (inferredType === 'chat' && !inferredId.startsWith('oc_')) {
+            throw new Error('Chat container ID must start with oc_');
+          }
           const response = await this.options.channel.rawClient.im.v1.message.list({
             params: {
               container_id_type: inferredType,
@@ -753,6 +766,13 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
 
 function escapeMarkdown(value: string): string {
   return value.replace(/[`\\]/g, '\\$&');
+}
+
+function messageThreadId(message: unknown): string | undefined {
+  if (!message || typeof message !== 'object' || !('thread_id' in message)) return undefined;
+  return typeof message.thread_id === 'string' && message.thread_id.startsWith('omt_')
+    ? message.thread_id
+    : undefined;
 }
 
 function errorMessage(error: unknown): string {

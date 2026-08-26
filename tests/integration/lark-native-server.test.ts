@@ -20,6 +20,11 @@ describe('NativeLarkServer', () => {
       code: 0,
       data: { items: [{ message_id: 'om_1' }] },
     }));
+    const fetchRawMessage = vi.fn(async (messageId: string) => [
+      messageId === 'om_thread_root'
+        ? { message_id: messageId, thread_id: 'omt_resolved' }
+        : { message_id: messageId },
+    ]);
     const readDocument = vi.fn(async () => ({
       code: 0,
       data: { items: [{ block_id: 'doc_1', block_type: 1 }] },
@@ -42,6 +47,7 @@ describe('NativeLarkServer', () => {
       },
       send,
       downloadResourceToFile,
+      fetchRawMessage,
     } as unknown as LarkChannel;
     const callbackAuth = {
       sign: vi.fn(({ action }: { action: string }) => `signed:${action}`),
@@ -107,6 +113,44 @@ describe('NativeLarkServer', () => {
           page_size: 10,
         },
       });
+      expect(
+        await client.callTool({
+          name: 'lark_list_messages',
+          arguments: {
+            containerType: 'thread',
+            containerId: 'om_thread_root',
+            pageSize: 10,
+          },
+        }),
+      ).toMatchObject({ structuredContent: { items: [{ message_id: 'om_1' }] } });
+      expect(fetchRawMessage).toHaveBeenCalledWith('om_thread_root');
+      expect(listMessages).toHaveBeenLastCalledWith({
+        params: {
+          container_id_type: 'thread',
+          container_id: 'omt_resolved',
+          sort_type: 'ByCreateTimeDesc',
+          page_size: 10,
+        },
+      });
+      expect(
+        await client.callTool({
+          name: 'lark_list_messages',
+          arguments: { containerType: 'thread', containerId: 'om_plain' },
+        }),
+      ).toMatchObject({
+        isError: true,
+        content: [{ text: 'Message om_plain is not part of a thread' }],
+      });
+      expect(
+        await client.callTool({
+          name: 'lark_list_messages',
+          arguments: { containerType: 'chat', containerId: 'om_wrong_type' },
+        }),
+      ).toMatchObject({
+        isError: true,
+        content: [{ text: 'Chat container ID must start with oc_' }],
+      });
+      expect(listMessages).toHaveBeenCalledTimes(2);
       const download = await client.callTool({
         name: 'lark_download_message_resource',
         arguments: {
