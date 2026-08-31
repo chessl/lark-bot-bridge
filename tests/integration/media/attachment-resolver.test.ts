@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AttachmentDownloadError,
@@ -119,6 +120,67 @@ describe('hash media attachment resolver', () => {
     ).resolves.toMatchObject({ bytesWritten: 8 });
     expect(download).toHaveBeenCalledTimes(3);
     expect(await readFile(path, 'utf8')).toBe('complete');
+  });
+
+  it('does not retry deterministic Feishu errors and surfaces streamed API details', async () => {
+    const root = await tempDir();
+    const path = join(root, 'resource.bin');
+    const error = Object.assign(new Error('Request failed with status code 400'), {
+      response: {
+        status: 400,
+        data: Readable.from([
+          JSON.stringify({
+            code: 234037,
+            msg: 'Downloaded file size exceeds limit.',
+          }),
+        ]),
+      },
+    });
+    const download = vi.fn().mockRejectedValue(error);
+
+    await expect(
+      downloadLarkResourceToFile(
+        { downloadResourceToFile: download } as never,
+        {
+          messageId: 'om_too_large',
+          resource: { type: 'file', fileKey: 'file_too_large' } as never,
+        },
+        path,
+        [0, 0],
+      ),
+    ).rejects.toMatchObject({
+      message:
+        'Attachment download failed after 1 attempt: Feishu cannot download message attachments larger than 100 MB (code 234037: Downloaded file size exceeds limit.); compress or split the file, or send a Drive link',
+      reason: 'too-large',
+    });
+    expect(download).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries transient server errors', async () => {
+    const root = await tempDir();
+    const path = join(root, 'resource.bin');
+    const download = vi.fn(async (_m: string, _f: string, _t: string, dest: string) => {
+      if (download.mock.calls.length === 1) {
+        throw Object.assign(new Error('Request failed with status code 503'), {
+          response: { status: 503, data: { code: 999, msg: 'Unavailable' } },
+        });
+      }
+      await writeFile(dest, 'complete');
+      return { bytesWritten: 8 };
+    });
+
+    await expect(
+      downloadLarkResourceToFile(
+        { downloadResourceToFile: download } as never,
+        {
+          messageId: 'om_retry_server',
+          resource: { type: 'file', fileKey: 'file_retry_server' } as never,
+        },
+        path,
+        [0],
+      ),
+    ).resolves.toMatchObject({ bytesWritten: 8 });
+    expect(download).toHaveBeenCalledTimes(2);
   });
 
   it('removes partial files when every download attempt fails', async () => {

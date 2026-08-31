@@ -27,9 +27,18 @@ export interface ResourceRequest {
 const DOWNLOAD_RETRY_DELAYS_MS = [250, 1_000] as const;
 
 export class AttachmentDownloadError extends Error {
-  constructor(attempts: number, cause: unknown) {
+  constructor(
+    attempts: number,
+    cause: unknown,
+    public readonly reason?: AttachmentDownloadFailureReason,
+  ) {
     const detail = cause instanceof Error ? cause.message : String(cause);
-    super(`Attachment download failed after ${attempts} attempts: ${detail}`, { cause });
+    super(
+      `Attachment download failed after ${attempts} attempt${attempts === 1 ? '' : 's'}: ${detail}`,
+      {
+        cause,
+      },
+    );
     this.name = 'AttachmentDownloadError';
   }
 }
@@ -62,15 +71,19 @@ export async function downloadLarkResourceToFile(
       }
       return result;
     } catch (error) {
-      lastError = error;
+      const failure = await describeDownloadFailure(error);
+      lastError = failure.error;
+      const attemptCount = attempt + 1;
       await rm(destPath, { force: true });
-      if (attempt + 1 === attempts) break;
+      if (!failure.retryable || attemptCount === attempts) {
+        throw new AttachmentDownloadError(attemptCount, failure.error, failure.reason);
+      }
       log.warn('media', 'download-retry', {
-        attempt: attempt + 1,
+        attempt: attemptCount,
         attempts,
         messageId: request.messageId,
         fileKey: request.resource.fileKey,
-        err: error instanceof Error ? error.message : String(error),
+        err: failure.error.message,
       });
       const { promise, resolve } = Promise.withResolvers<void>();
       setTimeout(resolve, retryDelaysMs[attempt] ?? 0);
@@ -78,6 +91,120 @@ export async function downloadLarkResourceToFile(
     }
   }
   throw new AttachmentDownloadError(attempts, lastError);
+}
+
+type AttachmentDownloadFailureReason = 'too-large';
+
+interface DownloadFailure {
+  error: Error;
+  retryable: boolean;
+  reason?: AttachmentDownloadFailureReason;
+}
+
+interface FeishuApiError {
+  code?: number;
+  msg?: string;
+}
+
+interface HttpErrorResponse {
+  status: number | undefined;
+  data: unknown;
+}
+
+async function describeDownloadFailure(error: unknown): Promise<DownloadFailure> {
+  const response = errorResponse(error);
+  const status = typeof response?.status === 'number' ? response.status : undefined;
+  const apiError = await readFeishuApiError(response?.data);
+  const reason: AttachmentDownloadFailureReason | undefined =
+    apiError?.code === 234037 ? 'too-large' : undefined;
+  return {
+    error: formatDownloadError(error, apiError),
+    retryable:
+      status === undefined
+        ? apiError === undefined
+        : status === 408 || status === 429 || status >= 500,
+    ...(reason ? { reason } : {}),
+  };
+}
+
+function formatDownloadError(error: unknown, apiError: FeishuApiError | undefined): Error {
+  if (apiError?.code === 234037) {
+    const detail = apiError.msg ? `: ${apiError.msg}` : '';
+    return new Error(
+      `Feishu cannot download message attachments larger than 100 MB (code 234037${detail}); compress or split the file, or send a Drive link`,
+      { cause: error },
+    );
+  }
+  if (apiError) {
+    const code = apiError.code === undefined ? '' : `code ${apiError.code}`;
+    const separator = code && apiError.msg ? ': ' : '';
+    return new Error(`Feishu resource download failed (${code}${separator}${apiError.msg ?? ''})`, {
+      cause: error,
+    });
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+async function readFeishuApiError(data: unknown): Promise<FeishuApiError | undefined> {
+  try {
+    const payload = await responsePayload(data);
+    if (typeof payload !== 'object' || payload === null) return undefined;
+    const code = 'code' in payload && typeof payload.code === 'number' ? payload.code : undefined;
+    const msg = 'msg' in payload && typeof payload.msg === 'string' ? payload.msg : undefined;
+    return code === undefined && msg === undefined ? undefined : { code, msg };
+  } catch {
+    return undefined;
+  }
+}
+
+async function responsePayload(data: unknown): Promise<unknown> {
+  if (typeof data === 'string') return parseJson(data);
+  if (data instanceof Uint8Array) return parseJson(Buffer.from(data).toString('utf8'));
+  if (!isAsyncIterable(data)) return data;
+
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of data) {
+    const buffer =
+      typeof chunk === 'string'
+        ? Buffer.from(chunk)
+        : chunk instanceof Uint8Array
+          ? Buffer.from(chunk)
+          : undefined;
+    if (!buffer) continue;
+    bytes += buffer.length;
+    if (bytes > 64 * 1024) return undefined;
+    chunks.push(buffer);
+  }
+  return parseJson(Buffer.concat(chunks).toString('utf8'));
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function errorResponse(error: unknown): HttpErrorResponse | undefined {
+  if (typeof error !== 'object' || error === null || !('response' in error)) return undefined;
+  const response = error.response;
+  if (typeof response !== 'object' || response === null) return undefined;
+  return {
+    status:
+      'status' in response && typeof response.status === 'number' ? response.status : undefined,
+    data: 'data' in response ? response.data : undefined,
+  };
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Symbol.asyncIterator in value &&
+    typeof value[Symbol.asyncIterator] === 'function'
+  );
 }
 
 export class MediaCache {
