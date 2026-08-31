@@ -30,7 +30,7 @@ import { resolveAppSecret } from '../config/secret-resolver';
 import { log, withTrace } from '../core/logger';
 import { NativeLarkServer } from '../lark-native/server';
 import { toPolicyAttachment, toPromptAttachment } from '../media/attachment';
-import { type LocalAttachment, MediaCache } from '../media/cache';
+import { AttachmentDownloadError, type LocalAttachment, MediaCache } from '../media/cache';
 import type { VcRequestClient } from '../meeting/api';
 import { MeetingManager } from '../meeting/manager';
 import { attachMeetingAgent, summarizeEndedMeeting } from '../meeting/orchestrator';
@@ -59,12 +59,6 @@ import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { lookupMessageThreadId } from './thread-id';
 
 const DEBOUNCE_MS = 600;
-
-const BRIDGE_AGENT_INSTRUCTIONS = [
-  '本次运行已注入 lark_bridge MCP 工具；飞书读写、用户授权和发卡片都直接使用这些工具。',
-  '不要执行 lark-cli，也不要绕过 MCP 工具访问飞书 API 或凭据。',
-  '写操作会由 bridge 在飞书里请求确认；用户明确请求后再调用即可。',
-];
 
 // Lark SDK logs API errors at error level even when the caller catches them.
 // These specific codes are EXPECTED in our flow (wiki-node lookup that
@@ -893,11 +887,14 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     attachments = await media.resolve(resourceItems, controls.cfg.attachments);
   } catch (err) {
     log.fail('media', err, { scope, count: resourceItems.length });
+    const message =
+      err instanceof AttachmentDownloadError && err.reason === 'too-large'
+        ? '附件超过飞书消息资源接口的 100 MB 上限，系统无法读取。请压缩或拆分为单个不超过 100 MB 的文件，或发送可访问的飞书云盘链接。'
+        : '附件下载未能完整完成，系统已自动重试；本次未启动分析，避免遗漏附件。请稍后重试，或确认原消息中的附件仍可访问。';
     await channel.send(
       chatId,
       {
-        markdown:
-          '附件下载未能完整完成，系统已自动重试；本次未启动分析，避免遗漏附件。请稍后重试，或确认原消息中的附件仍可访问。',
+        markdown: message,
       },
       sendOpts,
     );
@@ -1260,10 +1257,9 @@ function buildPrompt(
       messageIds: batch.map((m) => m.messageId),
       source: 'im',
     },
-    instructions:
-      extraInstructions && extraInstructions.length > 0
-        ? [...BRIDGE_AGENT_INSTRUCTIONS, ...extraInstructions]
-        : BRIDGE_AGENT_INSTRUCTIONS,
+    ...(extraInstructions && extraInstructions.length > 0
+      ? { instructions: extraInstructions }
+      : {}),
     userInput: userPart,
     ...(topicContext.length > 0 ? { topicContext: topicContext.map(toPromptTopicMessage) } : {}),
     quotedMessages: quotes.map(toPromptQuote),
