@@ -3,6 +3,7 @@ import type { AgentEvent } from '../../../src/agent/types.js';
 import {
   renderOmpReplyCard,
   renderOmpReplyMarkdown,
+  renderOmpReplyMarkdownPost,
 } from '../../../src/card/omp-reply-renderer.js';
 import { initialState, type RunState, reduce } from '../../../src/card/run-state.js';
 import { log } from '../../../src/core/logger.js';
@@ -10,6 +11,8 @@ import { log } from '../../../src/core/logger.js';
 function stateFrom(events: readonly AgentEvent[]): RunState {
   return events.reduce((state, event) => reduce(state, event), initialState);
 }
+
+const REPLY_MENTION_OPEN_ID = 'ou_reply_user';
 
 describe('terminal OMP Run state', () => {
   it('promotes only the last assistant message on normal completion', () => {
@@ -111,6 +114,67 @@ describe('terminal OMP Run state', () => {
     },
   );
 
+  it.each([
+    {
+      name: 'done',
+      events: [
+        { type: 'final_text', content: 'answer' },
+        { type: 'done', terminationReason: 'normal' },
+      ] satisfies readonly AgentEvent[],
+    },
+    {
+      name: 'empty done',
+      events: [{ type: 'done', terminationReason: 'normal' }] satisfies readonly AgentEvent[],
+    },
+    {
+      name: 'interrupted',
+      events: [{ type: 'done', terminationReason: 'interrupted' }] satisfies readonly AgentEvent[],
+    },
+    {
+      name: 'idle timeout',
+      events: [{ type: 'done', terminationReason: 'timeout' }] satisfies readonly AgentEvent[],
+    },
+    {
+      name: 'error',
+      events: [
+        { type: 'error', message: 'failed', terminationReason: 'failed' },
+      ] satisfies readonly AgentEvent[],
+    },
+  ])('appends one recipient Mention after every $name presentation', ({ events }) => {
+    const state = stateFrom(events);
+    const card = renderOmpReplyCard(state, {
+      streamingMode: false,
+      replyMentionOpenId: REPLY_MENTION_OPEN_ID,
+    });
+    const post = renderOmpReplyMarkdownPost(state, REPLY_MENTION_OPEN_ID);
+
+    expect(card).toMatchObject({
+      body: {
+        elements: [
+          { element_id: 'answer' },
+          {
+            element_id: 'reply-mention',
+            content: `<at id="${REPLY_MENTION_OPEN_ID}"></at>`,
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(card).match(/"element_id":"reply-mention"/g)).toHaveLength(1);
+    expect(post).toMatchObject({
+      zh_cn: {
+        content: [[{ tag: 'md' }], [{ tag: 'at', user_id: REPLY_MENTION_OPEN_ID }]],
+      },
+    });
+  });
+
+  it('never includes the terminal recipient Mention in a running card', () => {
+    const card = renderOmpReplyCard(initialState, {
+      streamingMode: true,
+      replyMentionOpenId: REPLY_MENTION_OPEN_ID,
+    });
+
+    expect(JSON.stringify(card)).not.toContain(REPLY_MENTION_OPEN_ID);
+  });
   it('makes terminal state absorbing and logs ignored terminal and orphan events', () => {
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
     const terminal = stateFrom([

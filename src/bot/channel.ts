@@ -814,7 +814,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const lastMsg = batch[batch.length - 1];
   if (!firstMsg || !lastMsg) return;
 
-  const replyTarget = deriveOmpReplyTarget(lastMsg);
+  const replyTarget = deriveOmpReplyTarget(lastMsg, replyMentionOpenIdOf(lastMsg));
   // A message-carried thread ID is authoritative even when cached Chat
   // metadata still says group; keep all early failures in the same reply lane.
   const sendOpts = {
@@ -1280,6 +1280,14 @@ function senderTypeOf(msg: NormalizedMessage): 'user' | 'bot' | undefined {
   if (senderType === 'user') return 'user';
   if (senderType === 'app' || senderType === 'bot') return 'bot';
   return undefined;
+}
+
+function replyMentionOpenIdOf(msg: NormalizedMessage): string | undefined {
+  return msg.chatType !== 'p2p' &&
+    senderTypeOf(msg) === 'user' &&
+    /^ou_[A-Za-z0-9_-]+$/.test(msg.senderId)
+    ? msg.senderId
+    : undefined;
 }
 
 function senderAnnotation(msg: NormalizedMessage): string {

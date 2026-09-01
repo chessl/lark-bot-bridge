@@ -8,6 +8,7 @@ import { createRunState, type RunState, type ToolEntry } from '../../../src/card
 
 const MAX_CARD_BYTES = 30 * 1024;
 const TRUNCATION_MARKER = '内容过长，已截断';
+const REPLY_MENTION_OPEN_ID = 'ou_budget_user';
 
 function cardElementCount(card: object): number {
   function nested(value: unknown): number {
@@ -100,7 +101,10 @@ describe('OMP Reply CardKit budget', () => {
   });
 
   it('truncates multibyte and astral text without splitting a code point', () => {
-    const card = renderOmpReplyCard(terminalState('界🚀'.repeat(10_000)));
+    const card = renderOmpReplyCard(terminalState('界🚀'.repeat(10_000)), {
+      streamingMode: false,
+      replyMentionOpenId: REPLY_MENTION_OPEN_ID,
+    });
     const answer = elementContent(card, 'answer');
     const beforeMarker = answer?.slice(0, answer.indexOf(TRUNCATION_MARKER));
 
@@ -108,12 +112,13 @@ describe('OMP Reply CardKit budget', () => {
     expect(answer).toContain(TRUNCATION_MARKER);
     expect(answer).not.toContain('�');
     expect(beforeMarker).not.toMatch(/[\uD800-\uDBFF]$/);
+    expect(elementContent(card, 'reply-mention')).toBe(`<at id="${REPLY_MENTION_OPEN_ID}"></at>`);
   });
 
   it('budgets terminal Markdown using the serialized post envelope', () => {
     const state = terminalState('界🚀"\\\n'.repeat(10_000));
     const markdown = renderOmpReplyMarkdown(state);
-    const post = renderOmpReplyMarkdownPost(state);
+    const post = renderOmpReplyMarkdownPost(state, REPLY_MENTION_OPEN_ID);
     const markerIndex = markdown.indexOf(TRUNCATION_MARKER);
 
     expect(Buffer.byteLength(JSON.stringify(post))).toBeLessThanOrEqual(MAX_CARD_BYTES);
@@ -121,6 +126,7 @@ describe('OMP Reply CardKit budget', () => {
     expect(markerIndex).toBeGreaterThan(0);
     expect(markdown).not.toContain('�');
     expect(markdown.slice(0, markerIndex)).not.toMatch(/[\uD800-\uDBFF]$/);
+    expect(JSON.stringify(post)).toContain(`"tag":"at","user_id":"${REPLY_MENTION_OPEN_ID}"`);
   });
 
   it('removes all oldest Reasoning before oldest Tools and retains the metrics unit', () => {

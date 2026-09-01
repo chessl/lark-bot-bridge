@@ -40,6 +40,7 @@ interface FakeLarkChannel {
   operations: string[];
   createdCards: object[];
   updates: Array<{ cardId: string; card: object; sequence: number }>;
+  patches: object[];
   sent: Array<{ chatId: string; content: unknown; options?: unknown }>;
   streams: unknown[];
   botIdentity: { openId: string; name: string };
@@ -53,6 +54,7 @@ interface FakeLarkChannel {
         message: {
           get: Mock<(...args: unknown[]) => Promise<unknown>>;
           reply: Mock<(input: unknown) => Promise<unknown>>;
+          patch: Mock<(input: unknown) => Promise<unknown>>;
         };
         messageReaction: {
           create: Mock<(...args: unknown[]) => Promise<unknown>>;
@@ -1142,6 +1144,112 @@ describe('P2P OMP Reply', () => {
     expect(updates[0]).toContain('输入 7');
     expect(updates[0]).toContain('输出 3');
   });
+
+  it('keeps managed progress unmentioned and appends the recipient to the terminal card', async () => {
+    vi.useFakeTimers();
+    const channel = createFakeLarkChannel();
+    const controller = new OmpReplyController({
+      channel: channel as unknown as LarkChannel,
+      target: {
+        chatId: 'oc_group',
+        messageId: 'om_group',
+        replyMentionOpenId: 'ou_reply_user',
+        replyInThread: false,
+      },
+    });
+    await controller.open(createRunState());
+    await controller.project({
+      ...createRunState(),
+      reasoningEntries: ['working'],
+      reasoningTotal: 1,
+    });
+    await vi.runAllTimersAsync();
+    await controller.finish({
+      ...createRunState(),
+      terminal: 'done',
+      finalText: 'answer',
+    });
+
+    expect(JSON.stringify(channel.createdCards)).not.toContain('ou_reply_user');
+    expect(JSON.stringify(channel.updates.slice(0, -1))).not.toContain('ou_reply_user');
+    const terminalCard = channel.updates.at(-1)?.card;
+    expect(cardElements(terminalCard).at(-1)).toMatchObject({
+      element_id: 'reply-mention',
+      content: '<at id="ou_reply_user"></at>',
+    });
+    expect(JSON.stringify(terminalCard).match(/"element_id":"reply-mention"/g)).toHaveLength(1);
+  });
+
+  it('appends the recipient when a managed reply falls back to an inline card', async () => {
+    let attempt = 0;
+    const channel = createFakeLarkChannel({
+      reply: async () =>
+        ++attempt === 1
+          ? { code: 99991400, msg: 'managed rejected' }
+          : { code: 0, data: { message_id: 'om_inline' } },
+    });
+    const controller = new OmpReplyController({
+      channel: channel as unknown as LarkChannel,
+      target: {
+        chatId: 'oc_group',
+        messageId: 'om_group',
+        replyMentionOpenId: 'ou_reply_user',
+        replyInThread: false,
+      },
+    });
+    await controller.open(createRunState());
+    await controller.finish({
+      ...createRunState(),
+      terminal: 'done',
+      finalText: 'answer',
+    });
+
+    expect(messageContent(channel.rawClient.im.v1.message.reply.mock.calls[1]?.[0])).not.toContain(
+      'ou_reply_user',
+    );
+    expect(channel.patches).toHaveLength(1);
+    expect(cardElements(channel.patches[0]).at(-1)).toMatchObject({
+      element_id: 'reply-mention',
+      content: '<at id="ou_reply_user"></at>',
+    });
+  });
+
+  it('appends the recipient when both card replies fall back to terminal Post', async () => {
+    let attempt = 0;
+    const channel = createFakeLarkChannel({
+      reply: async () =>
+        ++attempt <= 2
+          ? { code: 99991400, msg: 'card rejected' }
+          : { code: 0, data: { message_id: 'om_post' } },
+    });
+    const controller = new OmpReplyController({
+      channel: channel as unknown as LarkChannel,
+      target: {
+        chatId: 'oc_group',
+        messageId: 'om_group',
+        replyMentionOpenId: 'ou_reply_user',
+        replyInThread: false,
+      },
+    });
+    await controller.open(createRunState());
+    await controller.finish({
+      ...createRunState(),
+      terminal: 'done',
+      finalText: 'answer',
+    });
+
+    const postContent = messageContent(
+      channel.rawClient.im.v1.message.reply.mock.calls.at(-1)?.[0],
+    );
+    const post: unknown = JSON.parse(postContent ?? 'null');
+    expect(channel.rawClient.im.v1.message.reply).toHaveBeenCalledTimes(3);
+    expect(post).toMatchObject({
+      zh_cn: {
+        content: [[{ tag: 'md' }], [{ tag: 'at', user_id: 'ou_reply_user' }]],
+      },
+    });
+    expect(JSON.stringify(post).match(/"tag":"at"/g)).toHaveLength(1);
+  });
 });
 
 async function createHarness(
@@ -1261,12 +1369,14 @@ function createFakeLarkChannel(
     reply?: (input: unknown) => Promise<unknown>;
     update?: (input: unknown) => Promise<unknown>;
     close?: (input: unknown) => Promise<unknown>;
+    patch?: (input: unknown) => Promise<unknown>;
   } = {},
 ): FakeLarkChannel {
   const handlers: MessageHandlerMap = {};
   const operations: string[] = [];
   const createdCards: object[] = [];
   const updates: FakeLarkChannel['updates'] = [];
+  const patches: object[] = [];
   const sent: FakeLarkChannel['sent'] = [];
   const streams: unknown[] = [];
   const replyMock = vi.fn(async (input: unknown) => {
@@ -1289,12 +1399,25 @@ function createFakeLarkChannel(
     operations.push(`card:close:${sequence}`);
     return options.close ? options.close(input) : { code: 0 };
   });
+  const patch = vi.fn(async (input: unknown) => {
+    const content = messageContent(input);
+    let card: unknown;
+    try {
+      card = JSON.parse(content ?? 'null');
+    } catch {
+      throw new Error('invalid captured message patch');
+    }
+    if (!card || typeof card !== 'object') throw new Error('invalid captured message patch');
+    patches.push(card);
+    return options.patch ? options.patch(input) : { code: 0 };
+  });
 
   return {
     handlers,
     operations,
     createdCards,
     updates,
+    patches,
     sent,
     streams,
     botIdentity: { openId: 'ou_bot', name: 'Bridge' },
@@ -1312,6 +1435,7 @@ function createFakeLarkChannel(
           message: {
             get: vi.fn(async () => ({ data: { items: [] } })),
             reply: replyMock,
+            patch,
           },
           messageReaction: {
             create: vi.fn(async (input: unknown) => {
@@ -1387,6 +1511,13 @@ function message(
     mentionedBot: false,
     ...(createTime === null ? {} : { createTime }),
   } as unknown as NormalizedMessage;
+}
+
+function messageContent(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || !('data' in input)) return undefined;
+  const data = input.data;
+  if (!data || typeof data !== 'object' || !('content' in data)) return undefined;
+  return typeof data.content === 'string' ? data.content : undefined;
 }
 
 function replyCardId(input: unknown): string | undefined {

@@ -3,16 +3,22 @@ import { z } from 'zod';
 import { log } from '../core/logger';
 import { writeFileAtomic } from '../platform/atomic-write';
 
+const ReplyMentionOpenIdSchema = z
+  .string()
+  .regex(/^ou_[A-Za-z0-9_-]+$/)
+  .optional();
 const ReplyTargetSchema = z.discriminatedUnion('replyInThread', [
   z.object({
     chatId: z.string().min(1),
     messageId: z.string().min(1),
+    replyMentionOpenId: ReplyMentionOpenIdSchema,
     replyInThread: z.literal(false),
   }),
   z.object({
     chatId: z.string().min(1),
     messageId: z.string().min(1),
     threadId: z.string().min(1),
+    replyMentionOpenId: ReplyMentionOpenIdSchema,
     replyInThread: z.literal(true),
   }),
 ]);

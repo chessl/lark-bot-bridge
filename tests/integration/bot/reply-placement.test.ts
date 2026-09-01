@@ -86,9 +86,12 @@ interface PlacementCase {
     threadId?: string;
     rootId?: string;
     parentId?: string;
+    senderId?: string;
+    senderType?: unknown;
   }>;
   expectedMessageId: string;
   replyInThread: boolean;
+  expectedMentionOpenId?: string;
 }
 
 const placementCases: PlacementCase[] = [
@@ -106,9 +109,13 @@ const placementCases: PlacementCase[] = [
     chatId: 'oc_group',
     chatType: 'group',
     chatMode: 'group',
-    messages: [{ messageId: 'om_group_first' }, { messageId: 'om_group_final' }],
+    messages: [
+      { messageId: 'om_group_first', senderId: 'ou_first' },
+      { messageId: 'om_group_final', senderId: 'ou_last' },
+    ],
     expectedMessageId: 'om_group_final',
     replyInThread: false,
+    expectedMentionOpenId: 'ou_last',
   },
   {
     name: 'Topic root',
@@ -124,6 +131,7 @@ const placementCases: PlacementCase[] = [
     ],
     expectedMessageId: 'om_topic_root',
     replyInThread: true,
+    expectedMentionOpenId: 'ou_user',
   },
   {
     name: 'Topic child',
@@ -136,16 +144,19 @@ const placementCases: PlacementCase[] = [
         threadId: 'omt_topic_child',
         rootId: 'om_topic_root',
         parentId: 'om_topic_root',
+        senderId: 'ou_first',
       },
       {
         messageId: 'om_topic_child_final',
         threadId: 'omt_topic_child',
         rootId: 'om_topic_root',
         parentId: 'om_topic_child_first',
+        senderId: 'ou_last',
       },
     ],
     expectedMessageId: 'om_topic_child_final',
     replyInThread: true,
+    expectedMentionOpenId: 'ou_last',
   },
   {
     name: 'explicit reply-in-thread when Chat metadata says group',
@@ -168,6 +179,34 @@ const placementCases: PlacementCase[] = [
     ],
     expectedMessageId: 'om_thread_final',
     replyInThread: true,
+    expectedMentionOpenId: 'ou_user',
+  },
+  {
+    name: 'group message from a bot',
+    chatId: 'oc_group_bot',
+    chatType: 'group',
+    chatMode: 'group',
+    messages: [{ messageId: 'om_group_bot', senderId: 'ou_sender_bot', senderType: 'app' }],
+    expectedMessageId: 'om_group_bot',
+    replyInThread: false,
+  },
+  {
+    name: 'group message with unknown sender type',
+    chatId: 'oc_group_unknown',
+    chatType: 'group',
+    chatMode: 'group',
+    messages: [{ messageId: 'om_group_unknown', senderType: 'unknown' }],
+    expectedMessageId: 'om_group_unknown',
+    replyInThread: false,
+  },
+  {
+    name: 'group message with a non-open-id sender',
+    chatId: 'oc_group_invalid',
+    chatType: 'group',
+    chatMode: 'group',
+    messages: [{ messageId: 'om_group_invalid', senderId: 'user_invalid' }],
+    expectedMessageId: 'om_group_invalid',
+    replyInThread: false,
   },
 ];
 
@@ -205,6 +244,20 @@ describe('OMP Reply placement', () => {
       expect(h.channel.createdCards).toHaveLength(1);
       expect(h.channel.sent).toHaveLength(0);
       expect(h.channel.streams).toHaveLength(0);
+      expect(JSON.stringify(h.channel.createdCards[0])).not.toContain('reply-mention');
+      const terminalCardData = updateCardData(
+        h.channel.rawClient.cardkit.v1.card.update.mock.calls.at(-1)?.[0],
+      );
+      const terminalCard: unknown = JSON.parse(terminalCardData ?? 'null');
+      if (placement.expectedMentionOpenId) {
+        expect(cardElements(terminalCard).at(-1)).toMatchObject({
+          element_id: 'reply-mention',
+          content: `<at id="${placement.expectedMentionOpenId}"></at>`,
+        });
+        expect(JSON.stringify(terminalCard).match(/"element_id":"reply-mention"/g)).toHaveLength(1);
+      } else {
+        expect(JSON.stringify(terminalCard)).not.toContain('reply-mention');
+      }
     },
   );
 });
@@ -359,7 +412,7 @@ function message(
     messageId: input.messageId,
     chatId: placement.chatId,
     chatType: placement.chatType,
-    senderId: 'ou_user',
+    senderId: input.senderId ?? 'ou_user',
     senderName: 'User',
     content: '@Bridge run',
     rawContentType: 'text',
@@ -368,10 +421,35 @@ function message(
     mentionAll: false,
     mentionedBot: placement.chatType === 'group',
     createTime: 1760000001000,
+    raw: {
+      sender: {
+        sender_type: Object.hasOwn(input, 'senderType') ? input.senderType : 'user',
+      },
+    },
     ...(input.threadId ? { threadId: input.threadId } : {}),
     ...(input.rootId ? { rootId: input.rootId } : {}),
     ...(input.parentId ? { parentId: input.parentId, replyToMessageId: input.parentId } : {}),
   } as unknown as NormalizedMessage;
+}
+
+function updateCardData(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || !('data' in input)) return undefined;
+  const data = input.data;
+  if (!data || typeof data !== 'object' || !('card' in data)) return undefined;
+  const card = data.card;
+  if (!card || typeof card !== 'object' || !('data' in card)) return undefined;
+  return typeof card.data === 'string' ? card.data : undefined;
+}
+
+function cardElements(card: unknown): object[] {
+  if (!card || typeof card !== 'object' || !('body' in card)) return [];
+  const body = card.body;
+  if (!body || typeof body !== 'object' || !('elements' in body) || !Array.isArray(body.elements)) {
+    return [];
+  }
+  return body.elements.filter(
+    (element): element is object => element !== null && typeof element === 'object',
+  );
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void> {

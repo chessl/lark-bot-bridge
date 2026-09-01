@@ -19,17 +19,20 @@ export type OmpReplyTarget =
   | Readonly<{
       chatId: string;
       messageId: string;
+      replyMentionOpenId?: string;
       replyInThread: false;
     }>
   | Readonly<{
       chatId: string;
       messageId: string;
       threadId: string;
+      replyMentionOpenId?: string;
       replyInThread: true;
     }>;
 
 export function deriveOmpReplyTarget(
   message: Pick<NormalizedMessage, 'chatId' | 'messageId' | 'threadId'>,
+  replyMentionOpenId?: string,
 ): OmpReplyTarget {
   return Object.freeze(
     message.threadId
@@ -37,11 +40,13 @@ export function deriveOmpReplyTarget(
           chatId: message.chatId,
           messageId: message.messageId,
           threadId: message.threadId,
+          ...(replyMentionOpenId ? { replyMentionOpenId } : {}),
           replyInThread: true,
         }
       : {
           chatId: message.chatId,
           messageId: message.messageId,
+          ...(replyMentionOpenId ? { replyMentionOpenId } : {}),
           replyInThread: false,
         },
   );
@@ -197,14 +202,21 @@ export class OmpReplyController {
     clearTimeout(this.#projectionTimer);
     this.#projectionTimer = undefined;
     this.#latestProjection = undefined;
-    const staticTerminal = makeProjection(renderOmpReplyCard(finalState));
+    const staticTerminal = makeProjection(
+      renderOmpReplyCard(finalState, {
+        streamingMode: false,
+        ...(this.#target.replyMentionOpenId
+          ? { replyMentionOpenId: this.#target.replyMentionOpenId }
+          : {}),
+      }),
+    );
 
     await this.enqueue(async () => {
       if (this.#pending) throw this.pendingError();
 
       if (transport === 'managed') {
         const update = await this.commitManagedProjection(
-          makeProjection(renderManagedCard(finalState)),
+          makeProjection(renderManagedCard(finalState, undefined, this.#target.replyMentionOpenId)),
           true,
         );
         if (update === 'rejected') {
@@ -219,7 +231,7 @@ export class OmpReplyController {
         const markdown = await this.commitReply(
           'markdown',
           'post',
-          JSON.stringify(renderOmpReplyMarkdownPost(finalState)),
+          JSON.stringify(renderOmpReplyMarkdownPost(finalState, this.#target.replyMentionOpenId)),
           true,
         );
         if (markdown === 'rejected') throw this.deliveryFailure('terminal-markdown-rejected');
@@ -678,7 +690,13 @@ async function recoverInterrupted(
   try {
     const interrupted = markInterrupted(emptyRunState);
     const staticProjection = makeProjection(
-      renderOmpReplyCard(interrupted, { streamingMode: false, toolCount: null }),
+      renderOmpReplyCard(interrupted, {
+        streamingMode: false,
+        toolCount: null,
+        ...(entry.target.replyMentionOpenId
+          ? { replyMentionOpenId: entry.target.replyMentionOpenId }
+          : {}),
+      }),
     );
     if (entry.transport === 'managed' && entry.cardId) {
       const sequence = entry.nextSequence;
@@ -693,7 +711,9 @@ async function recoverInterrupted(
           data: {
             card: {
               type: 'card_json',
-              data: JSON.stringify(renderManagedCard(interrupted, null)),
+              data: JSON.stringify(
+                renderManagedCard(interrupted, null, entry.target.replyMentionOpenId),
+              ),
             },
             sequence,
             uuid,
@@ -756,7 +776,15 @@ async function closeRecoveredManaged(
       channel,
       journal,
       known,
-      makeProjection(renderOmpReplyCard(interrupted, { streamingMode: false, toolCount: null })),
+      makeProjection(
+        renderOmpReplyCard(interrupted, {
+          streamingMode: false,
+          toolCount: null,
+          ...(entry.target.replyMentionOpenId
+            ? { replyMentionOpenId: entry.target.replyMentionOpenId }
+            : {}),
+        }),
+      ),
     );
     return;
   }
@@ -775,7 +803,12 @@ async function patchRecoveredMessage(
   }
   const content =
     entry.transport === 'markdown'
-      ? JSON.stringify(renderOmpReplyMarkdownPost(markInterrupted(emptyRunState)))
+      ? JSON.stringify(
+          renderOmpReplyMarkdownPost(
+            markInterrupted(emptyRunState),
+            entry.target.replyMentionOpenId,
+          ),
+        )
       : projection.serialized;
   const pending: DurablePendingOperation = {
     kind: 'patch',
@@ -893,9 +926,14 @@ function isClearRejection(error: unknown): boolean {
   );
 }
 
-function renderManagedCard(state: RunState, toolCount?: number | null): object {
+function renderManagedCard(
+  state: RunState,
+  toolCount?: number | null,
+  replyMentionOpenId?: string,
+): object {
   return renderOmpReplyCard(state, {
     streamingMode: true,
     ...(toolCount === undefined ? {} : { toolCount }),
+    ...(replyMentionOpenId ? { replyMentionOpenId } : {}),
   });
 }

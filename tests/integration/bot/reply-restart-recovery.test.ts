@@ -19,6 +19,7 @@ const NOW = 1_800_000_000_000;
 const TARGET = {
   chatId: 'oc_restart',
   messageId: 'om_trigger',
+  replyMentionOpenId: 'ou_restart_user',
   threadId: 'omt_topic',
   replyInThread: true,
 } as const;
@@ -182,7 +183,45 @@ describe('OMP Reply restart recovery', () => {
     for (const payload of [managedPayload, inlinePayload]) {
       expect(payload).not.toContain('调用工具 0 次');
       expect(payload).not.toContain('工具 0');
+      expect(payload.match(/reply-mention/g)).toHaveLength(1);
+      expect(payload).toContain('ou_restart_user');
     }
+  });
+
+  it('recovers a version 1 entry without a frozen recipient and does not guess one', async () => {
+    const tmp = await temporaryProfile();
+    const path = join(tmp.profile, 'old-entry.json');
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            runId: 'run_old_entry',
+            target: {
+              chatId: TARGET.chatId,
+              messageId: TARGET.messageId,
+              threadId: TARGET.threadId,
+              replyInThread: true,
+            },
+            messageId: 'om_old_entry',
+            transport: 'inline',
+            deliveryState: 'message_known',
+            nextSequence: 1,
+            time: { openedAtMs: NOW - 2_000, messageKnownAtMs: NOW - 1_000 },
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
+    const fake = fakeChannel();
+    const restarted = trackedJournal(path);
+
+    await activateOmpReplyRecovery({ channel: fake.channel, journal: restarted, now: () => NOW });
+
+    expect(fake.patch).toHaveBeenCalledOnce();
+    expect(JSON.stringify(fake.patch.mock.calls[0]?.[0])).not.toContain('reply-mention');
+    expect(restarted.entries()).toEqual([]);
   });
 
   it('recovers reservations in the final-update and close crash windows', async () => {

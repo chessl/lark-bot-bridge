@@ -8,6 +8,7 @@ const TRUNCATION_MARKER = '内容过长，已截断';
 type RenderOptions = Readonly<{
   streamingMode: boolean;
   toolCount?: number | null;
+  replyMentionOpenId?: string;
 }>;
 
 type OmpReplyPresentation = Readonly<{
@@ -115,6 +116,16 @@ function buildOmpReplyCard(
               ]),
             ]
           : []),
+        ...(!running && options?.replyMentionOpenId
+          ? [
+              {
+                tag: 'markdown',
+                element_id: 'reply-mention',
+                content: `<at id="${options.replyMentionOpenId}"></at>`,
+                text_size: 'body',
+              },
+            ]
+          : []),
       ],
     },
   });
@@ -203,12 +214,16 @@ function previousCodePointBoundary(value: string, index: number): number {
 }
 
 export function renderOmpReplyMarkdown(state: RunState): string {
+  return renderOmpReplyMarkdownWithinBudget(state);
+}
+
+function renderOmpReplyMarkdownWithinBudget(state: RunState, replyMentionOpenId?: string): string {
   if (state.terminal === 'running') {
     throw new Error('cannot render a running OMP Reply as terminal Markdown');
   }
   const finalText = ompReplyPresentation(state).finalReply;
   const full = buildOmpReplyMarkdown(state, finalText);
-  if (withinMarkdownBudget(full) || state.terminal !== 'done') return full;
+  if (withinMarkdownBudget(full, replyMentionOpenId) || state.terminal !== 'done') return full;
 
   let lower = 0;
   let upper = finalText.length;
@@ -220,7 +235,7 @@ export function renderOmpReplyMarkdown(state: RunState): string {
       state,
       `${finalText.slice(0, middle)}${TRUNCATION_MARKER}`,
     );
-    if (withinMarkdownBudget(candidate)) {
+    if (withinMarkdownBudget(candidate, replyMentionOpenId)) {
       lower = middle;
       best = candidate;
     } else {
@@ -230,19 +245,27 @@ export function renderOmpReplyMarkdown(state: RunState): string {
   return best;
 }
 
-export function renderOmpReplyMarkdownPost(state: RunState): object {
-  return markdownPost(renderOmpReplyMarkdown(state));
+export function renderOmpReplyMarkdownPost(state: RunState, replyMentionOpenId?: string): object {
+  return markdownPost(
+    renderOmpReplyMarkdownWithinBudget(state, replyMentionOpenId),
+    replyMentionOpenId,
+  );
 }
 
-function withinMarkdownBudget(markdown: string): boolean {
-  return Buffer.byteLength(JSON.stringify(markdownPost(markdown))) <= MAX_CARD_BYTES;
+function withinMarkdownBudget(markdown: string, replyMentionOpenId?: string): boolean {
+  return (
+    Buffer.byteLength(JSON.stringify(markdownPost(markdown, replyMentionOpenId))) <= MAX_CARD_BYTES
+  );
 }
 
-function markdownPost(markdown: string): object {
+function markdownPost(markdown: string, replyMentionOpenId?: string): object {
   return {
     zh_cn: {
       title: '',
-      content: [[{ tag: 'md', text: markdown }]],
+      content: [
+        [{ tag: 'md', text: markdown }],
+        ...(replyMentionOpenId ? [[{ tag: 'at', user_id: replyMentionOpenId }]] : []),
+      ],
     },
   };
 }
