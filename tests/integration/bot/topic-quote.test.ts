@@ -1,0 +1,821 @@
+import { realpath, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { NormalizedMessage } from '@larksuite/channel';
+import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
+import type { AgentEvent } from '../../../src/agent/types.js';
+import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
+import { SessionStore } from '../../../src/session/store.js';
+import { WorkspaceStore } from '../../../src/workspace/store.js';
+import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
+import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
+
+const sdkMock = vi.hoisted(() => ({
+  channel: undefined as FakeLarkChannel | undefined,
+  createLarkChannel: vi.fn(() => {
+    if (!sdkMock.channel) throw new Error('fake channel not configured');
+    return sdkMock.channel;
+  }),
+}));
+
+vi.mock('@larksuite/channel', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@larksuite/channel')>();
+  return {
+    ...actual,
+    createLarkChannel: sdkMock.createLarkChannel,
+  };
+});
+
+import { startChannel } from '../../../src/bot/channel.js';
+
+interface MessageHandlerMap {
+  message?: (msg: NormalizedMessage) => Promise<void> | void;
+}
+
+interface QuotedFile {
+  fileKey: string;
+  fileName: string;
+}
+interface QuotedForwardedFile extends QuotedFile {
+  messageId: string;
+}
+interface FakeLarkChannel {
+  sent: Array<{ chatId: string; content: unknown; options: unknown }>;
+  streams: Array<{ chatId: string; options: unknown }>;
+  botIdentity: { openId: string; name: string };
+  rawClient: {
+    request: ReturnType<typeof vi.fn>;
+    im: {
+      v1: {
+        message: {
+          list: ReturnType<typeof vi.fn>;
+          reply: Mock<(input: unknown) => Promise<unknown>>;
+        };
+        messageReaction: {
+          create: ReturnType<typeof vi.fn>;
+          delete: ReturnType<typeof vi.fn>;
+        };
+      };
+    };
+    cardkit: {
+      v1: { card: { settings: Mock<(input: unknown) => Promise<unknown>> } };
+    };
+  };
+  getAppInfo: ReturnType<typeof vi.fn>;
+  listChats: ReturnType<typeof vi.fn>;
+  fetchRawMessage: ReturnType<typeof vi.fn>;
+  recallMessage: ReturnType<typeof vi.fn>;
+  downloadResourceToFile: ReturnType<typeof vi.fn>;
+  on(handlers: MessageHandlerMap): void;
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  getChatMode(chatId: string): Promise<'group' | 'topic'>;
+  getConnectionStatus(): { state: 'connected'; reconnectAttempts: number };
+  createCard(card: object): Promise<{ cardId: string }>;
+  updateCardById(cardId: string, card: object, sequence: number): Promise<void>;
+  send(chatId: string, content: unknown, options?: unknown): Promise<{ messageId: string }>;
+  stream(chatId: string, input: unknown, options?: unknown): Promise<{ messageId: string }>;
+}
+
+const cleanups: Array<() => Promise<void>> = [];
+
+afterEach(async () => {
+  vi.useRealTimers();
+  sdkMock.channel = undefined;
+  sdkMock.createLarkChannel.mockClear();
+  await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
+});
+
+describe('topic message quote handling', () => {
+  it('does not quote the topic root when a user directly mentions the bot inside the topic', async () => {
+    const h = await createHarness();
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_direct_at',
+        rootId: 'om_topic_root',
+        parentId: 'om_topic_root',
+        threadId: 'omt_topic',
+        content: '@Bridge 继续说一下',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.agent.runOptions).toHaveLength(1);
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('"threadId":"omt_topic"');
+    expect(prompt).not.toContain('<quoted_messages>');
+    expect(prompt).not.toContain('topic root content');
+    expect(h.channel.fetchRawMessage).not.toHaveBeenCalled();
+  });
+
+  it('treats messages with threadId as topic messages even when chat mode cache says group', async () => {
+    // Message shape is stronger than stale Chat metadata for both scope and delivery.
+    const h = await createHarness({
+      chatMode: 'group',
+      agentEvents: [
+        { type: 'text', delta: '好的' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_converted_topic',
+        rootId: 'om_topic_root',
+        parentId: 'om_topic_root',
+        threadId: 'omt_converted_topic',
+        content: '@Bridge 继续说一下',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('"threadId":"omt_converted_topic"');
+    expect(prompt).not.toContain('<quoted_messages>');
+    expect(h.channel.fetchRawMessage).not.toHaveBeenCalled();
+    await waitFor(() => h.channel.rawClient.im.v1.message.reply.mock.calls.length === 1);
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { message_id: 'om_converted_topic' },
+        data: expect.objectContaining({ reply_in_thread: true }),
+      }),
+    );
+  });
+
+  it('backfills a missing threadId in topic groups so the reply threads into the topic', async () => {
+    // Feishu drops thread_id on a chunk of topic-group events (notably the
+    // message that opens a topic). getChatMode still reports 'topic', so we
+    // recover the thread_id from the raw message instead of letting the reply
+    // escape into a brand-new topic.
+    const h = await createHarness({
+      chatMode: 'topic',
+      rawThreadIds: { om_topic_start: 'omt_backfilled' },
+      agentEvents: [
+        { type: 'text', delta: '好的' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_topic_start',
+        rootId: 'om_topic_start',
+        parentId: 'om_topic_start',
+        // no threadId on the event
+        content: '@Bridge 开个新话题',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.channel.fetchRawMessage).toHaveBeenCalledWith('om_topic_start');
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('"threadId":"omt_backfilled"');
+
+    await waitFor(() => h.channel.rawClient.im.v1.message.reply.mock.calls.length === 1);
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { message_id: 'om_topic_start' },
+        data: expect.objectContaining({ reply_in_thread: true }),
+      }),
+    );
+  });
+
+  it('does not thread the reply when a topic-group event has no recoverable threadId', async () => {
+    // Backfill lookup returns nothing → degrade gracefully to chat-level
+    // routing rather than crashing or blocking the run.
+    const h = await createHarness({
+      chatMode: 'topic',
+      agentEvents: [
+        { type: 'text', delta: '好的' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+    });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_no_thread',
+        rootId: 'om_no_thread',
+        parentId: 'om_no_thread',
+        content: '@Bridge 无线程',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.channel.fetchRawMessage).toHaveBeenCalledWith('om_no_thread');
+    await waitFor(() => h.channel.rawClient.im.v1.message.reply.mock.calls.length === 1);
+    expect(h.channel.rawClient.im.v1.message.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { message_id: 'om_no_thread' },
+        data: expect.objectContaining({ reply_in_thread: false }),
+      }),
+    );
+  });
+
+  it('pulls in the topic upstream messages when first engaged in a topic', async () => {
+    // The topic root holds the real question and never @-mentioned the bot; the
+    // bot only gets pulled in by a later "@Bridge 看下这个" reply. On a fresh
+    // topic session we fetch the thread so the agent isn't blind to the root.
+    const h = await createHarness({
+      chatMode: 'topic',
+      threadMessages: [
+        {
+          message_id: 'om_topic_root',
+          msg_type: 'text',
+          body: { content: JSON.stringify({ text: 'the real upstream question' }) },
+          sender: { id: 'ou_asker', sender_type: 'user' },
+          create_time: '1760000000000',
+          thread_id: 'omt_topic',
+        },
+        {
+          // the triggering message itself — must be excluded, not echoed back
+          message_id: 'om_at_in_topic',
+          msg_type: 'text',
+          body: { content: JSON.stringify({ text: '@Bridge 看下这个' }) },
+          sender: { id: 'ou_user', sender_type: 'user' },
+          create_time: '1760000001000',
+          thread_id: 'omt_topic',
+        },
+      ],
+    });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_at_in_topic',
+        rootId: 'om_topic_root',
+        parentId: 'om_topic_root',
+        threadId: 'omt_topic',
+        content: '@Bridge 看下这个',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.channel.rawClient.im.v1.message.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({
+          container_id_type: 'thread',
+          container_id: 'omt_topic',
+        }),
+      }),
+    );
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('<topic_context>');
+    expect(prompt).toContain('the real upstream question');
+    // The triggering message is in the thread list too — it must be excluded so
+    // it isn't duplicated inside topic_context.
+    const topicBlock = prompt.slice(
+      prompt.indexOf('<topic_context>'),
+      prompt.indexOf('</topic_context>'),
+    );
+    expect(topicBlock).not.toContain('om_at_in_topic');
+  });
+
+  it('downloads attachments found only in initial topic history', async () => {
+    const h = await createHarness({
+      threadMessages: [
+        {
+          message_id: 'om_topic_file',
+          msg_type: 'file',
+          body: { content: JSON.stringify({ file_key: 'file_topic', file_name: 'topic.zip' }) },
+          sender: { id: 'ou_asker', sender_type: 'user' },
+          create_time: '1760000000000',
+          thread_id: 'omt_topic',
+        },
+        {
+          message_id: 'om_at_in_topic',
+          msg_type: 'text',
+          body: { content: JSON.stringify({ text: '@Bridge 分析前文附件' }) },
+          sender: { id: 'ou_user', sender_type: 'user' },
+          create_time: '1760000001000',
+          thread_id: 'omt_topic',
+        },
+      ],
+    });
+
+    await startTestBridge(h);
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_at_in_topic',
+        rootId: 'om_topic_file',
+        parentId: 'om_topic_file',
+        threadId: 'omt_topic',
+        content: '@Bridge 分析前文附件',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.channel.downloadResourceToFile).toHaveBeenCalledWith(
+      'om_topic_file',
+      'file_topic',
+      'file',
+      expect.any(String),
+    );
+    expect(h.agent.runOptions[0]?.prompt).toContain('"sourceMessageId":"om_topic_file"');
+  });
+
+  it('skips a group message that does not mention the bot (requireMention default)', async () => {
+    const h = await createHarness({ chatMode: 'group' });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_no_at',
+        rootId: 'om_no_at',
+        parentId: 'om_no_at',
+        content: '@同事 这里的帖子哪些是我们做的',
+        mentionedBot: false,
+      }),
+    );
+    // no run should start; give the pipeline a moment to (not) act
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(h.agent.runOptions).toHaveLength(0);
+    expect(h.channel.streams).toHaveLength(0);
+    expect(h.channel.recallMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps regular group reply quotes as quoted context', async () => {
+    const h = await createHarness({
+      chatMode: 'group',
+      quotedMessages: {
+        om_quote_target: 'regular quoted content',
+      },
+    });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_group_reply',
+        rootId: 'om_quote_target',
+        parentId: 'om_quote_target',
+        content: '@Bridge 看这条',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('<quoted_messages>');
+    expect(prompt).toContain('regular quoted content');
+    expect(h.channel.fetchRawMessage).toHaveBeenCalledWith(
+      'om_quote_target',
+      expect.objectContaining({ cardContentType: 'user_card_content' }),
+    );
+  });
+
+  it('downloads a reply-quoted file and exposes its local path to the agent', async () => {
+    const h = await createHarness({
+      chatMode: 'group',
+      quotedFiles: {
+        om_zip: { fileKey: 'file_zip', fileName: 'logs.zip' },
+      },
+    });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_zip_reply',
+        rootId: 'om_zip',
+        parentId: 'om_zip',
+        content: '@Bridge 分析附件',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.channel.downloadResourceToFile).toHaveBeenCalledWith(
+      'om_zip',
+      'file_zip',
+      'file',
+      expect.any(String),
+    );
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('"sourceMessageId":"om_zip"');
+    expect(prompt).toMatch(/"path":"[^"]+\.zip"/);
+    expect(prompt).toContain('"decision":"accepted"');
+  });
+
+  it('does not start an incomplete run after attachment retries are exhausted', async () => {
+    const h = await createHarness({
+      chatMode: 'group',
+      quotedFiles: {
+        om_zip: { fileKey: 'file_zip', fileName: 'logs.zip' },
+      },
+      downloadFailures: 3,
+    });
+
+    await startTestBridge(h);
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_zip_reply',
+        rootId: 'om_zip',
+        parentId: 'om_zip',
+        content: '@Bridge 分析附件',
+      }),
+    );
+    await waitFor(() => h.channel.sent.length === 1, 3_000);
+
+    expect(h.channel.downloadResourceToFile).toHaveBeenCalledTimes(3);
+    expect(h.agent.runOptions).toHaveLength(0);
+    expect(h.channel.sent[0]?.content).toMatchObject({
+      markdown: expect.stringContaining('本次未启动分析'),
+    });
+  });
+
+  it('downloads a file inside a reply-quoted merge_forward using its parent message id', async () => {
+    const h = await createHarness({
+      chatMode: 'group',
+      quotedForwardedFiles: {
+        om_forward: {
+          messageId: 'om_forward_file',
+          fileKey: 'file_forward',
+          fileName: 'forwarded.zip',
+        },
+      },
+    });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_forward_reply',
+        rootId: 'om_forward',
+        parentId: 'om_forward',
+        content: '@Bridge 分析合并转发里的附件',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.channel.downloadResourceToFile).toHaveBeenCalledWith(
+      'om_forward',
+      'file_forward',
+      'file',
+      expect.any(String),
+    );
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('"sourceMessageId":"om_forward"');
+    expect(prompt).toMatch(/"path":"[^"]+\.zip"/);
+    expect(prompt).toContain('"decision":"accepted"');
+  });
+
+  it('keeps non-root reply quotes in topic chats', async () => {
+    const h = await createHarness({
+      quotedMessages: {
+        om_topic_parent: 'topic parent content',
+      },
+    });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_topic_reply',
+        rootId: 'om_topic_root',
+        parentId: 'om_topic_parent',
+        threadId: 'omt_topic',
+        content: '@Bridge 看父消息',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    const prompt = h.agent.runOptions[0]?.prompt ?? '';
+    expect(prompt).toContain('<quoted_messages>');
+    expect(prompt).toContain('topic parent content');
+    expect(h.channel.fetchRawMessage).toHaveBeenCalledWith(
+      'om_topic_parent',
+      expect.objectContaining({ cardContentType: 'user_card_content' }),
+    );
+  });
+});
+
+describe('merge_forward fetch failure', () => {
+  it('skips the run and hints the user when the SDK could not fetch a merge_forward', async () => {
+    // @larksuite/channel >= 0.4.1 normalizes an un-fetchable merge_forward to
+    // the fetch_failed sentinel. Feeding it to the agent would look like an
+    // empty forward, so intake must reply a recoverable hint and start no run.
+    const h = await createHarness({ chatMode: 'group' });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_forward_failed',
+        rootId: 'om_forward_failed',
+        parentId: 'om_forward_failed',
+        content: '<forwarded_messages status="fetch_failed"/>',
+        rawContentType: 'merge_forward',
+      }),
+    );
+    await waitFor(() => h.channel.sent.length === 1);
+
+    expect(h.agent.runOptions).toHaveLength(0);
+    expect(h.channel.streams).toHaveLength(0);
+    const hint = h.channel.sent.at(-1);
+    expect(hint?.options).toMatchObject({ replyTo: 'om_forward_failed' });
+    expect((hint?.content as { text?: string } | undefined)?.text).toContain('重新转发');
+  });
+
+  it('still runs when a merge_forward was genuinely empty (not a fetch failure)', async () => {
+    const h = await createHarness({ chatMode: 'group' });
+
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message({
+        messageId: 'om_forward_empty',
+        rootId: 'om_forward_empty',
+        parentId: 'om_forward_empty',
+        content: '<forwarded_messages/>',
+        rawContentType: 'merge_forward',
+      }),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.agent.runOptions).toHaveLength(1);
+    expect(h.channel.sent).toHaveLength(0);
+  });
+});
+
+async function createHarness(
+  options: {
+    chatMode?: 'group' | 'topic';
+    quotedMessages?: Record<string, string>;
+    quotedFiles?: Record<string, QuotedFile>;
+    quotedForwardedFiles?: Record<string, QuotedForwardedFile>;
+    rawThreadIds?: Record<string, string>;
+    threadMessages?: Array<Record<string, unknown>>;
+    agentEvents?: AgentEvent[];
+    downloadFailures?: number;
+  } = {},
+): Promise<{
+  tmp: TmpProfile;
+  channel: FakeLarkChannel & { handlers: MessageHandlerMap };
+  agent: FakeAgentAdapter;
+  sessions: SessionStore;
+  workspaces: WorkspaceStore;
+  profileConfig: ReturnType<typeof createDefaultProfileConfig>;
+  controls: ReturnType<typeof createControls>;
+}> {
+  const tmp = await createTmpProfile('topic-quote-');
+  const workspace = await realpath(tmp.workspace);
+  const baseProfileConfig = createDefaultProfileConfig({
+    app: {
+      id: 'cli_test',
+      secret: 'secret',
+      tenant: 'feishu',
+    },
+    access: {
+      allowedChats: ['oc_topic_chat'],
+      allowedUsers: ['ou_user'],
+    },
+  });
+  const profileConfig = {
+    ...baseProfileConfig,
+    workspaces: {
+      ...baseProfileConfig.workspaces,
+      default: workspace,
+    },
+  };
+  const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
+  const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
+  const agent = new FakeAgentAdapter({
+    events: options.agentEvents ?? [{ type: 'done', terminationReason: 'normal' }],
+  });
+  const channel = createFakeLarkChannel(options);
+  sdkMock.channel = channel;
+  const controls = createControls(profileConfig);
+  cleanups.push(async () => {
+    await Promise.all([sessions.flush(), workspaces.flush()]);
+    await tmp.cleanup();
+  });
+  return {
+    tmp,
+    channel,
+    agent,
+    sessions,
+    workspaces,
+    profileConfig,
+    controls,
+  };
+}
+
+async function startTestBridge(h: {
+  profileConfig: ReturnType<typeof createDefaultProfileConfig>;
+  agent: FakeAgentAdapter;
+  sessions: SessionStore;
+  workspaces: WorkspaceStore;
+  tmp: TmpProfile;
+  controls: ReturnType<typeof createControls>;
+}): Promise<void> {
+  const bridge = await startChannel({
+    cfg: h.profileConfig,
+    agent: h.agent,
+    sessions: h.sessions,
+    workspaces: h.workspaces,
+    controls: h.controls,
+    appPaths: {
+      rootDir: h.tmp.root,
+      secretsFile: join(h.tmp.profile, 'secrets.enc'),
+      keystoreSaltFile: join(h.tmp.profile, '.keystore.salt'),
+      mediaDir: join(h.tmp.profile, 'media'),
+      callbackNoncesFile: join(h.tmp.profile, 'callback-nonces.json'),
+      activeDeliveriesFile: join(h.tmp.profile, 'active-deliveries.json'),
+    },
+  });
+  cleanups.push(() => bridge.disconnect());
+}
+
+function createFakeLarkChannel(
+  options: {
+    chatMode?: 'group' | 'topic';
+    quotedMessages?: Record<string, string>;
+    quotedFiles?: Record<string, QuotedFile>;
+    quotedForwardedFiles?: Record<string, QuotedForwardedFile>;
+    rawThreadIds?: Record<string, string>;
+    threadMessages?: Array<Record<string, unknown>>;
+    downloadFailures?: number;
+  } = {},
+): FakeLarkChannel & { handlers: MessageHandlerMap } {
+  const handlers: MessageHandlerMap = {};
+  const sent: Array<{ chatId: string; content: unknown; options: unknown }> = [];
+  const streams: Array<{ chatId: string; options: unknown }> = [];
+  const chatMode = options.chatMode ?? 'topic';
+  const quotedMessages = options.quotedMessages ?? {
+    om_topic_root: 'topic root content',
+  };
+  const quotedFiles = options.quotedFiles ?? {};
+  const quotedForwardedFiles = options.quotedForwardedFiles ?? {};
+  const rawThreadIds = options.rawThreadIds ?? {};
+  const threadMessages = options.threadMessages ?? [];
+  let downloadAttempts = 0;
+  return {
+    handlers,
+    sent,
+    streams,
+    botIdentity: { openId: 'ou_bot', name: 'Bridge' },
+    rawClient: {
+      request: vi.fn(async () => ({ data: { items: [] } })),
+      im: {
+        v1: {
+          message: {
+            list: vi.fn(async () => ({ data: { items: threadMessages, has_more: false } })),
+            reply: vi.fn(async () => ({ data: { message_id: 'om_reply' } })),
+          },
+          messageReaction: {
+            create: vi.fn(async () => ({ data: { reaction_id: 'reaction_1' } })),
+            delete: vi.fn(async () => ({})),
+          },
+        },
+      },
+      cardkit: {
+        v1: { card: { settings: vi.fn(async () => ({ code: 0 })) } },
+      },
+    },
+    getAppInfo: vi.fn(async () => ({ ownerId: 'ou_owner' })),
+    listChats: vi.fn(async () => []),
+    fetchRawMessage: vi.fn(async (messageId: string) => {
+      const forwardedFile = quotedForwardedFiles[messageId];
+      if (forwardedFile) {
+        return [
+          {
+            message_id: messageId,
+            msg_type: 'merge_forward',
+            body: { content: '{}' },
+            create_time: '1760000000000',
+            sender: { id: 'ou_quote_sender' },
+          },
+          {
+            message_id: forwardedFile.messageId,
+            upper_message_id: messageId,
+            msg_type: 'file',
+            body: {
+              content: JSON.stringify({
+                file_key: forwardedFile.fileKey,
+                file_name: forwardedFile.fileName,
+              }),
+            },
+            create_time: '1760000000001',
+            sender: { id: 'ou_quote_sender' },
+          },
+        ];
+      }
+      const file = quotedFiles[messageId];
+      return [
+        {
+          message_id: messageId,
+          msg_type: file ? 'file' : 'text',
+          body: {
+            content: file
+              ? JSON.stringify({ file_key: file.fileKey, file_name: file.fileName })
+              : JSON.stringify({ text: quotedMessages[messageId] ?? 'quoted content' }),
+          },
+          create_time: '1760000000000',
+          sender: { id: 'ou_quote_sender' },
+          ...(rawThreadIds[messageId] ? { thread_id: rawThreadIds[messageId] } : {}),
+        },
+      ];
+    }),
+    downloadResourceToFile: vi.fn(
+      async (_messageId: string, _fileKey: string, _type: string, destPath: string) => {
+        downloadAttempts += 1;
+        if (downloadAttempts <= (options.downloadFailures ?? 0)) {
+          throw new Error('connection reset');
+        }
+        const bytes = Buffer.from('zip');
+        await writeFile(destPath, bytes);
+        return { contentType: 'application/zip', bytesWritten: bytes.length };
+      },
+    ),
+    on(nextHandlers) {
+      Object.assign(handlers, nextHandlers);
+    },
+    async connect() {},
+    async disconnect() {},
+    async getChatMode() {
+      return chatMode;
+    },
+    getConnectionStatus() {
+      return { state: 'connected', reconnectAttempts: 0 };
+    },
+    async createCard() {
+      return { cardId: 'card_topic' };
+    },
+    async updateCardById() {},
+    async send(chatId, content, options) {
+      sent.push({ chatId, content, options });
+      return { messageId: `om_sent_${sent.length}` };
+    },
+    async stream(chatId, _input, options) {
+      streams.push({ chatId, options });
+      return { messageId: `om_stream_${streams.length}` };
+    },
+    recallMessage: vi.fn(async () => {}),
+  };
+}
+
+function createControls(profileConfig: ReturnType<typeof createDefaultProfileConfig>) {
+  return {
+    profile: 'test',
+    ownerRefreshState: 'unknown' as const,
+    async refreshOwner() {},
+    async restart() {},
+    async exit() {},
+    configPath: '/tmp/config.json',
+    cfg: profileConfig,
+    processId: 'proc_test',
+  };
+}
+
+function message(input: {
+  messageId: string;
+  rootId: string;
+  parentId: string;
+  threadId?: string;
+  content: string;
+  rawContentType?: string;
+  mentionedBot?: boolean;
+  mentions?: Array<{ key: string; openId: string; name: string; isBot: boolean }>;
+}): NormalizedMessage {
+  const mentionedBot = input.mentionedBot ?? true;
+  return {
+    messageId: input.messageId,
+    chatId: 'oc_topic_chat',
+    chatType: 'group',
+    senderId: 'ou_user',
+    senderName: 'User',
+    content: input.content,
+    rawContentType: input.rawContentType ?? 'text',
+    resources: [],
+    mentions:
+      input.mentions ??
+      (mentionedBot
+        ? [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }]
+        : [{ key: '@_user_1', openId: 'ou_human', name: '同事', isBot: false }]),
+    mentionAll: false,
+    mentionedBot,
+    rootId: input.rootId,
+    parentId: input.parentId,
+    ...(input.threadId ? { threadId: input.threadId } : {}),
+    replyToMessageId: input.parentId,
+    createTime: 1760000001000,
+  } as unknown as NormalizedMessage;
+}
+
+async function waitFor(predicate: () => boolean, timeoutMs = 1500): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('timed out waiting for async work');
+}

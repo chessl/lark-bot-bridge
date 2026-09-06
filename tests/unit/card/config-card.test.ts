@@ -1,0 +1,28 @@
+import { describe, expect, it } from 'vitest';
+import { type ConfigFormOpts, configFormCard } from '../../../src/card/config-card';
+
+const base: ConfigFormOpts = {
+  mode: 'personal',
+  model: 'default',
+  maxConcurrentRuns: 1,
+  runIdleTimeoutMinutes: 0,
+  requireMentionInGroup: false,
+  allowedUsers: [],
+  allowedChats: [],
+  admins: [],
+  knownChats: [],
+};
+
+describe('configFormCard console URL', () => {
+  it('shows the web console URL when one is running', () => {
+    const url = 'http://127.0.0.1:53219/?token=abc123';
+    const card = configFormCard({ ...base, consoleUrl: url });
+    expect(JSON.stringify(card)).toContain(url);
+    expect(JSON.stringify(card)).toContain('Web 控制台');
+  });
+
+  it('omits the console section when no console is running', () => {
+    const card = configFormCard(base);
+    expect(JSON.stringify(card)).not.toContain('Web 控制台');
+  });
+});

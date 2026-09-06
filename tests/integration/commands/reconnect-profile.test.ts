@@ -1,0 +1,150 @@
+import { join } from 'node:path';
+import type { NormalizedMessage } from '@larksuite/channel';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AgentRun } from '../../../src/agent/types';
+import { ActiveRuns } from '../../../src/bot/active-runs';
+import { type CommandContext, type Controls, tryHandleCommand } from '../../../src/commands/index';
+import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
+import { SessionStore } from '../../../src/session/store';
+import { WorkspaceStore } from '../../../src/workspace/store';
+import { FakeAgentAdapter } from '../../helpers/fake-agent';
+import { createFakeChannel } from '../../helpers/fake-channel';
+import { createTestScopedRuns } from '../../helpers/scoped-runs';
+import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
+
+const cleanups: Array<() => Promise<void>> = [];
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
+});
+
+describe('/reconnect profile lifecycle', () => {
+  it('stops current profile runs before reconnect by default', async () => {
+    const h = await createHarness();
+    const run = await h.startRun();
+
+    await expect(h.command('/reconnect')).resolves.toBe(true);
+
+    expect(run.stopCalls).toBe(1);
+    expect(run.waitForExitCalls).toBe(1);
+    expect(h.restart).toHaveBeenCalledWith({ wait: false });
+  });
+
+  it('waits for current runs when --wait is requested', async () => {
+    const h = await createHarness();
+    const run = await h.startRun();
+
+    await expect(h.command('/reconnect --wait')).resolves.toBe(true);
+
+    expect(run.stopCalls).toBe(0);
+    expect(run.waitForExitCalls).toBe(1);
+    expect(h.restart).toHaveBeenCalledWith({ wait: true });
+  });
+});
+
+async function createHarness(): Promise<{
+  tmp: TmpProfile;
+  restart: ReturnType<typeof vi.fn>;
+  startRun(): Promise<ManualRun>;
+  command(content: string): Promise<boolean>;
+}> {
+  const tmp = await createTmpProfile('reconnect-profile-');
+  cleanups.push(tmp.cleanup);
+  const channel = createFakeChannel();
+  const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
+  const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
+  const activeRuns = new ActiveRuns();
+  const agent = new FakeAgentAdapter();
+  const profileConfig = createDefaultProfileConfig({
+    app: { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' },
+    access: { admins: ['ou-admin'] },
+  });
+  profileConfig.workspaces.default = tmp.workspace;
+  const restart = vi.fn(async () => {});
+  const controls = {
+    profile: 'claude',
+    ownerRefreshState: 'ok',
+    async refreshOwner() {},
+    restart,
+    exit: vi.fn(async () => {}),
+    configPath: join(tmp.profile, 'config.json'),
+    cfg: profileConfig,
+    processId: 'proc-1',
+  } satisfies Controls;
+  const manualAgent = new ManualAgent();
+  const scopedRuns = createTestScopedRuns({
+    agent: manualAgent,
+    activeRuns,
+    workspaces,
+    profileConfig: () => profileConfig,
+  });
+
+  return {
+    tmp,
+    restart,
+    startRun: async () => {
+      const started = await scopedRuns.start({
+        scopeId: 'chat-1',
+        scope: { source: 'im', chatId: 'chat-1', actorId: 'ou-admin' },
+        prompt: 'running',
+        attachments: [],
+        access: { ok: true, reason: 'allowed-admin' },
+      });
+      if (!started.ok) throw new Error('expected active run');
+      return manualAgent.run;
+    },
+    command: (content: string) =>
+      tryHandleCommand({
+        channel: channel as unknown as CommandContext['channel'],
+        msg: message(content),
+        scope: 'chat-1',
+        chatMode: 'p2p',
+        sessions,
+        workspaces,
+        agent,
+        scopedRuns,
+        controls,
+      }),
+  };
+}
+
+class ManualAgent extends FakeAgentAdapter {
+  readonly run = new ManualRun('run-1');
+
+  override async start(): Promise<AgentRun> {
+    return this.run;
+  }
+}
+
+class ManualRun implements AgentRun {
+  readonly events: AsyncIterable<never> = {
+    async *[Symbol.asyncIterator]() {},
+  };
+  stopCalls = 0;
+  waitForExitCalls = 0;
+
+  constructor(readonly runId: string) {}
+
+  async stop(): Promise<void> {
+    this.stopCalls++;
+  }
+
+  async waitForExit(): Promise<boolean> {
+    this.waitForExitCalls++;
+    return true;
+  }
+}
+
+function message(content: string): NormalizedMessage {
+  return {
+    messageId: `om-${content.replace(/\W+/g, '-').slice(0, 20)}`,
+    chatId: 'chat-1',
+    chatType: 'p2p',
+    senderId: 'ou-admin',
+    senderName: 'Admin',
+    content,
+    resources: [],
+    mentionedBot: false,
+  } as unknown as NormalizedMessage;
+}

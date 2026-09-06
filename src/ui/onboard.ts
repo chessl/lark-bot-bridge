@@ -1,0 +1,147 @@
+import { resolveExecutablePath } from '../cli/executable';
+import { createBootstrapProfileConfig } from '../cli/profile-bootstrap';
+import { type AppPaths, resolveAppPaths } from '../config/app-paths';
+import { setSecret } from '../config/keystore';
+import type { ProfileConfig } from '../config/profile-schema';
+import {
+  createRootConfig,
+  loadRootConfig,
+  saveRootConfig,
+  withConfigFileLock,
+} from '../config/profile-store';
+import { keystoreAppCredentials, secretKeyForApp, type TenantBrand } from '../config/schema';
+import { validateAppCredentials } from '../utils/feishu-auth';
+import { HttpError } from './http';
+
+export interface OnboardState {
+  hasConfig: boolean;
+  activeProfile?: string;
+  profiles: string[];
+  ompAvailable: boolean;
+}
+
+/** Snapshot for the wizard's first render: existing profiles + OMP availability. */
+export async function onboardState(rootDir?: string): Promise<OnboardState> {
+  const appPaths = resolveAppPaths({ rootDir });
+  const root = await loadRootConfig(appPaths.configFile);
+  const ompAvailable = await resolveExecutablePath(process.env.LARK_CHANNEL_OMP_BIN ?? 'omp').then(
+    () => true,
+    () => false,
+  );
+  return {
+    hasConfig: Boolean(root),
+    activeProfile: root?.activeProfile || undefined,
+    profiles: root ? Object.keys(root.profiles) : [],
+    ompAvailable,
+  };
+}
+
+function asRecord(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new HttpError(400, 'expected a JSON object body');
+  }
+  return body as Record<string, unknown>;
+}
+
+function readTenant(v: unknown): TenantBrand {
+  return v === 'lark' ? 'lark' : 'feishu';
+}
+
+/** Validate app credentials (POST body: {appId, appSecret, tenant}). */
+export async function onboardValidate(body: unknown) {
+  const fv = asRecord(body);
+  const appId = String(fv.appId ?? '').trim();
+  const appSecret = String(fv.appSecret ?? '').trim();
+  const tenant = readTenant(fv.tenant);
+  if (!appId || !appSecret) throw new HttpError(400, 'appId 和 appSecret 必填');
+  const result = await validateAppCredentials(appId, appSecret, tenant);
+  if (!result.ok) throw new HttpError(400, `凭据校验失败：${result.reason ?? '未知原因'}`);
+  return { ok: true, botName: result.botName, botOpenId: result.botOpenId };
+}
+
+export interface CreateProfileInput {
+  profile: string;
+  appId: string;
+  appSecret: string;
+  tenant: TenantBrand;
+  workspace?: string;
+}
+
+/** Create a profile from validated app credentials, storing its secret in the keystore. */
+export async function onboardCreate(body: unknown, rootDir?: string) {
+  const fv = asRecord(body);
+  const input: CreateProfileInput = {
+    profile: String(fv.profile ?? '').trim() || 'omp',
+    appId: String(fv.appId ?? '').trim(),
+    appSecret: String(fv.appSecret ?? '').trim(),
+    tenant: readTenant(fv.tenant),
+    ...(typeof fv.workspace === 'string' && fv.workspace.trim()
+      ? { workspace: fv.workspace.trim() }
+      : {}),
+  };
+  if (!input.appId || !input.appSecret) throw new HttpError(400, 'appId 和 appSecret 必填');
+
+  // Re-validate server-side so a client can't skip the check.
+  const check = await validateAppCredentials(input.appId, input.appSecret, input.tenant);
+  if (!check.ok) throw new HttpError(400, `凭据校验失败：${check.reason ?? '未知原因'}`);
+
+  const { profile } = await writeNewProfile(input, rootDir);
+  return { ok: true, profile, botName: check.botName };
+}
+
+/** Persist a new profile from already validated app credentials. */
+export async function writeNewProfile(
+  input: CreateProfileInput,
+  rootDir?: string,
+): Promise<{ profile: string }> {
+  // resolveAppPaths normalizes the profile name; use the canonical form. A bad
+  // name (path separators, whitespace, control chars) throws — surface it as a
+  // 400 with the real reason instead of a generic 500 "internal error".
+  let appPaths: AppPaths;
+  try {
+    appPaths = resolveAppPaths({ rootDir, profile: input.profile });
+  } catch (err) {
+    throw new HttpError(
+      400,
+      `profile 名称无效：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const profile = appPaths.profile;
+
+  // Never clobber an existing profile — this is a *new*-profile path. Fast-fail
+  // before storing the secret; re-checked inside the lock against races.
+  const pre = await loadRootConfig(appPaths.configFile);
+  if (pre?.profiles[profile]) {
+    throw new HttpError(409, `profile 已存在：${profile}，请换个名字`);
+  }
+
+  await setSecret(secretKeyForApp(input.appId), input.appSecret, appPaths);
+  const app = keystoreAppCredentials(input.appId, input.tenant);
+
+  let profileConfig: ProfileConfig;
+  try {
+    profileConfig = await createBootstrapProfileConfig({
+      app,
+      ...(input.workspace ? { workspace: input.workspace } : {}),
+      defaultWorkspace: appPaths.defaultWorkspaceDir,
+    });
+  } catch (err) {
+    throw new HttpError(400, err instanceof Error ? err.message : String(err));
+  }
+
+  await withConfigFileLock(appPaths.configFile, async () => {
+    const root = await loadRootConfig(appPaths.configFile);
+    if (!root) {
+      await saveRootConfig(createRootConfig(profile, profileConfig), appPaths.configFile);
+      return;
+    }
+    if (root.profiles[profile]) {
+      throw new HttpError(409, `profile 已存在：${profile}，请换个名字`);
+    }
+    root.activeProfile = profile;
+    root.profiles[profile] = profileConfig;
+    await saveRootConfig(root, appPaths.configFile);
+  });
+
+  return { profile };
+}

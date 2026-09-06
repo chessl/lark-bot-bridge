@@ -1,0 +1,241 @@
+import { existsSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { defaultAppPaths, resolveAppPaths } from '../../config/app-paths';
+import type { RootConfig } from '../../config/profile-schema';
+import {
+  formatRootConfig,
+  loadRootConfig,
+  removeProfile,
+  runtimeProfileConfig,
+  saveRootConfig,
+  withConfigFileLock,
+} from '../../config/profile-store';
+import { resolveAppSecret } from '../../config/secret-resolver';
+import { writeFileAtomic } from '../../platform/atomic-write';
+import { acquireProfileRuntimeLock, checkRuntimeLock } from '../../runtime/locks';
+import { type DiscoveredProfile, listAllProfiles } from '../../runtime/profile-discovery';
+import { resolveProfileRuntime } from '../../runtime/profile-runtime';
+import { readRegistry } from '../../runtime/registry';
+
+export interface ProfileCommandOptions {
+  rootDir?: string;
+}
+
+export interface ProfileCreateOptions extends ProfileCommandOptions {
+  workspace?: string;
+  appId?: string;
+  appSecret?: string;
+  tenant?: string;
+}
+
+export interface ProfileRemoveOptions extends ProfileCommandOptions {
+  purge?: boolean;
+  yes?: boolean;
+  now?: () => Date;
+}
+
+export interface ProfileExportOptions extends ProfileCommandOptions {
+  output?: string;
+  force?: boolean;
+  includeSecrets?: boolean;
+  yes?: boolean;
+}
+
+export async function runProfileList(opts: ProfileCommandOptions = {}): Promise<void> {
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
+  let profiles: DiscoveredProfile[];
+  try {
+    profiles = await listAllProfiles(rootDir);
+  } catch (err) {
+    if (!(err instanceof Error) || !err.message.startsWith('root config not found:')) throw err;
+    console.log('暂无 profile。');
+    return;
+  }
+
+  const registryFile = resolveAppPaths({ rootDir }).userRegistryFile;
+  const running = readRegistry(registryFile);
+  const rows = profiles.map((profile) => {
+    const holders = running
+      .filter((entry) => entry.profileName === profile.name)
+      .map((entry) => `pid=${entry.pid}`);
+    return {
+      active: profile.active ? '*' : '',
+      profile: profile.name,
+      status: holders.length > 0 ? holders.join(', ') : '-',
+    };
+  });
+  const widths = {
+    active: Math.max('ACTIVE'.length, ...rows.map((row) => row.active.length)),
+    profile: Math.max('PROFILE'.length, ...rows.map((row) => row.profile.length)),
+  };
+  console.log(
+    formatProfileListRow(
+      {
+        active: 'ACTIVE',
+        profile: 'PROFILE',
+        status: 'STATUS',
+      },
+      widths,
+    ),
+  );
+  for (const row of rows) {
+    console.log(formatProfileListRow(row, widths));
+  }
+}
+
+function formatProfileListRow(
+  row: { active: string; profile: string; status: string },
+  widths: { active: number; profile: number },
+): string {
+  return [row.active.padEnd(widths.active), row.profile.padEnd(widths.profile), row.status].join(
+    '  ',
+  );
+}
+
+export async function runProfileCreate(
+  name: string,
+  opts: ProfileCreateOptions = {},
+): Promise<void> {
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
+  const configFile = resolveAppPaths({ rootDir }).configFile;
+  await withConfigFileLock(configFile, async () => {
+    if ((await loadRootConfig(configFile))?.profiles[name]) {
+      throw new Error(`profile already exists: ${name}`);
+    }
+
+    await resolveProfileRuntime({
+      config: configFile,
+      profile: name,
+      workspace: opts.workspace,
+      appId: opts.appId,
+      appSecret: opts.appSecret,
+      tenant: opts.tenant,
+      allowBootstrap: true,
+    });
+  });
+  console.log(`已创建 profile: ${name}`);
+}
+
+export async function runProfileUse(name: string, opts: ProfileCommandOptions = {}): Promise<void> {
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
+  const configFile = resolveAppPaths({ rootDir }).configFile;
+  await withConfigFileLock(configFile, async () => {
+    const root = await loadRootConfig(configFile);
+    if (!root?.profiles[name]) throw new Error(`profile not found: ${name}`);
+    root.activeProfile = name;
+    await saveRootConfig(root, configFile);
+  });
+  console.log(`已切换到 profile: ${name}`);
+}
+
+export async function runProfileRemove(
+  name: string,
+  opts: ProfileRemoveOptions = {},
+): Promise<void> {
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
+  if (opts.purge && !opts.yes) {
+    throw new Error('profile remove --purge requires --yes');
+  }
+  const configFile = resolveAppPaths({ rootDir }).configFile;
+  await withConfigFileLock(configFile, async () => {
+    const root = await loadRootConfig(configFile);
+    if (!root) throw new Error('config not initialized');
+    const profile = root.profiles[name];
+    if (!profile) throw new Error(`profile not found: ${name}`);
+    if (root.activeProfile && !root.profiles[root.activeProfile]) {
+      throw new Error(
+        `active profile not found: ${root.activeProfile}; run profile use <name> to repair`,
+      );
+    }
+    const profilePaths = resolveAppPaths({ rootDir, profile: name });
+    const profileLock = await checkRuntimeLock(profilePaths.profileLockFile);
+    if (profileLock.locked) {
+      const holder = profileLock.meta ? ` pid=${profileLock.meta.pid}` : '';
+      throw new Error(`profile is locked/running: ${name}${holder}`);
+    }
+    const lock = await acquireProfileRuntimeLock(profilePaths);
+    try {
+      const result = await removeProfile(root, name, rootDir, {
+        purge: opts.purge,
+        now: opts.now,
+      });
+      try {
+        if (Object.keys(result.root.profiles).length === 0) {
+          await rm(configFile, { force: true });
+        } else {
+          await saveRootConfig(result.root, configFile);
+        }
+      } catch (err) {
+        if (result.restore) {
+          try {
+            await result.restore();
+            await saveRootConfig(root, configFile);
+          } catch (restoreErr) {
+            throw new Error(
+              `profile remove failed after moving ${name}; state is at ${result.archivedTo}. ` +
+                `restore failed: ${String((restoreErr as Error).message ?? restoreErr)}. ` +
+                `root config error: ${String((err as Error).message ?? err)}`,
+            );
+          }
+        }
+        throw err;
+      }
+      if (result.purged) {
+        await result.cleanup?.();
+        console.log(`已永久删除 profile: ${name}`);
+        return;
+      }
+      console.log(`已归档 profile: ${name} -> ${result.archivedTo}`);
+    } finally {
+      await lock.release().catch(() => {});
+    }
+  });
+}
+
+export async function runProfileExport(
+  name: string,
+  opts: ProfileExportOptions = {},
+): Promise<void> {
+  if (opts.includeSecrets && !opts.yes) {
+    throw new Error('profile export --include-secrets requires --yes');
+  }
+  const rootDir = opts.rootDir ?? defaultAppPaths.rootDir;
+  const configFile = resolveAppPaths({ rootDir }).configFile;
+  const root = await loadRootConfig(configFile);
+  if (!root) throw new Error('config not initialized');
+  const selected = root.profiles[name];
+  if (!selected) throw new Error(`profile not found: ${name}`);
+
+  const profile = cloneJson(selected);
+  if (opts.includeSecrets) {
+    profile.app.secret = await resolveAppSecret(
+      runtimeProfileConfig(root, name),
+      resolveAppPaths({ rootDir, profile: name }),
+    );
+  }
+  const exported: RootConfig = {
+    schemaVersion: 2,
+    activeProfile: name,
+    profiles: {
+      [name]: profile,
+    },
+  };
+  if (!opts.includeSecrets) {
+    profile.app.secret = '[REDACTED]';
+  }
+  const body = formatRootConfig(exported);
+
+  if (!opts.output) {
+    console.log(body.trimEnd());
+    return;
+  }
+  if (existsSync(opts.output) && !opts.force) {
+    throw new Error('output already exists; use --force');
+  }
+  await writeFileAtomic(opts.output, body, { mode: 0o600 });
+  console.log(`已导出 profile: ${name} -> ${opts.output}`);
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}

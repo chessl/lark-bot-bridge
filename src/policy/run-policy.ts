@@ -1,0 +1,121 @@
+import type { ProfileConfig } from '../config/profile-schema';
+import type { AccessDecision } from './access';
+import { accessPolicyDigest, policyFingerprint, resourceScopeDigest } from './fingerprint';
+
+export interface ScopeContext {
+  source: 'im' | 'card' | 'comment' | 'meeting';
+  chatId?: string;
+  chatType?: 'p2p' | 'group';
+  messageId?: string;
+  threadId?: string;
+  actorId: string;
+  commentScopeId?: string;
+  resourceBindings?: ResourceBinding[];
+}
+
+export interface ResourceBinding {
+  kind: 'doc' | 'folder';
+  id: string;
+  verified: boolean;
+}
+
+export interface AgentAttachment {
+  kind: string;
+  requiredness: 'required' | 'optional';
+  decision: 'accepted' | 'rejected' | 'skipped';
+  rejectionReason?: string;
+  originalName?: string;
+  size?: number;
+  hash?: string;
+  path?: string;
+}
+
+export interface RunPolicyInput {
+  scope: ScopeContext;
+  attachments: AgentAttachment[];
+  prompt: string;
+  requestedCwd: string;
+  cwdRealpath: string;
+  access: AccessDecision;
+  profileConfig: ProfileConfig;
+  now: number;
+  ttlMs?: number;
+}
+
+export interface RunPolicyAllow {
+  ok: true;
+  prompt: string;
+  requestedCwd: string;
+  cwdRealpath: string;
+  accessMode: 'full';
+  access: AccessDecision;
+  attachments: AgentAttachment[];
+  policyFingerprint: string;
+  expiresAt: number;
+}
+
+export interface RunPolicyReject {
+  ok: false;
+  rejectReason: {
+    code: 'access-denied' | 'folder-allowlist-unverified' | 'required-attachment-rejected';
+    userVisible: string;
+  };
+}
+
+export type RunPolicyResult = RunPolicyAllow | RunPolicyReject;
+
+const DEFAULT_TTL_MS = 5 * 60 * 1000;
+
+export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
+  if (!input.access.ok) return reject('access-denied', '当前用户无权发起运行。');
+
+  if (
+    input.scope.resourceBindings?.some((binding) => binding.kind === 'folder' && !binding.verified)
+  ) {
+    return reject('folder-allowlist-unverified', '暂不支持 folder allowlist，已拒绝运行。');
+  }
+
+  if (
+    input.attachments.some(
+      (attachment) => attachment.requiredness === 'required' && attachment.decision !== 'accepted',
+    )
+  ) {
+    return reject('required-attachment-rejected', '必需附件未通过校验，已拒绝运行。');
+  }
+
+  const resourceDigest = resourceScopeDigest({
+    source: input.scope.source,
+    chatId: input.scope.chatId,
+    chatType: input.scope.chatType,
+    threadId: input.scope.threadId,
+    commentScopeId: input.scope.commentScopeId,
+    resourceBindings: input.scope.resourceBindings?.map((binding) => binding.id),
+  });
+  const accessDigest =
+    input.scope.source === 'comment' && input.access.reason === 'comment-mention'
+      ? 'comment-mention'
+      : accessPolicyDigest(input.profileConfig.access);
+
+  return {
+    ok: true,
+    prompt: input.prompt,
+    requestedCwd: input.requestedCwd,
+    cwdRealpath: input.cwdRealpath,
+    accessMode: 'full',
+    access: input.access,
+    attachments: input.attachments,
+    expiresAt: input.now + (input.ttlMs ?? DEFAULT_TTL_MS),
+    policyFingerprint: policyFingerprint({
+      cwdRealpath: input.cwdRealpath,
+      accessPolicyDigest: accessDigest,
+      resourceScopeDigest: resourceDigest,
+    }),
+  };
+}
+
+function reject(
+  code: RunPolicyReject['rejectReason']['code'],
+  userVisible: string,
+): RunPolicyReject {
+  return { ok: false, rejectReason: { code, userVisible } };
+}

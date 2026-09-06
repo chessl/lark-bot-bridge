@@ -1,0 +1,97 @@
+{
+  "name": "lark-bot-bridge",
+  "version": "1.0.0",
+  "description": "Bridge Feishu/Lark messenger with local Oh My Pi",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chessl/lark-bot-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chessl/lark-bot-bridge/issues"
+  },
+  "homepage": "https://github.com/chessl/lark-bot-bridge#readme",
+  "bin": {
+    "lark-bot-bridge": "bin/lark-bot-bridge.mjs"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "tsup --watch",
+    "run": "pnpm build && node bin/lark-bot-bridge.mjs run",
+    "start": "pnpm build && node bin/lark-bot-bridge.mjs start",
+    "build:web": "vite build web",
+    "build": "pnpm build:web && tsup",
+    "typecheck": "tsc --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "check": "biome check --changed --since=main --no-errors-on-unmatched",
+    "format": "biome format --write --staged --no-errors-on-unmatched",
+    "pretest": "pnpm build:web",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit --passWithNoTests",
+    "test:integration": "vitest run tests/integration --passWithNoTests",
+    "test:process": "vitest run tests/process --passWithNoTests",
+    "ci:local": "git diff --check && pnpm check && pnpm test && pnpm typecheck && pnpm build",
+    "ci:platform": "pnpm check && pnpm test && pnpm typecheck && pnpm build",
+    "prepare": "pnpm build",
+    "prepublishOnly": "pnpm check && pnpm typecheck && pnpm build"
+  },
+  "dependencies": {
+    "@larksuite/channel": "^0.5.0",
+    "@larksuiteoapi/node-sdk": "1.73.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "commander": "^15.0.0",
+    "proper-lockfile": "^4.1.2",
+    "qrcode-terminal": "^0.12.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.9",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-tabs": "^1.1.21",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.2.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "@types/qrcode-terminal": "^0.12.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "sonner": "^2.0.8",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.3.3",
+    "tsup": "^8.5.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vite-plugin-singlefile": "^2.3.3",
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "keywords": [
+    "feishu",
+    "lark",
+    "omp",
+    "oh-my-pi",
+    "cli",
+    "channel",
+    "bridge"
+  ],
+  "license": "MIT"
+}
